@@ -3,8 +3,8 @@
 use bevy::{pbr::CascadeShadowConfigBuilder, prelude::*};
 use std::f32::consts::PI;
 
-// An example asset that contains a mesh and animation.
-const ASSET_PATH: &str = "models/animated/Fox.glb";
+// An example asset that contains a skinned fox mesh and an animation.
+const GLTF_PATH: &str = "models/animated/Fox.glb";
 
 fn main() {
     App::new()
@@ -36,11 +36,11 @@ fn setup_mesh_and_animation(
     let (graph, index) = AnimationGraph::from_clip(
         // We want the "run" animation from our example asset, which has an
         // index of two.
-        asset_server.load(GltfAssetLabel::Animation(2).from_asset(ASSET_PATH)),
+        asset_server.load(GltfAssetLabel::Animation(2).from_asset(GLTF_PATH)),
     );
 
-    // Keep our animation graph in a Resource so that it can be inserted into
-    // the correct entity once the scene loads.
+    // Keep our animation graph in a Resource so that it can be added to the
+    // correct entity once the scene loads.
     let graph_handle = graphs.add(graph);
     commands.insert_resource(Animations {
         graph_handle,
@@ -50,7 +50,7 @@ fn setup_mesh_and_animation(
     // Tell the engine to start loading the asset and spawn it as a scene when
     // ready.
     commands.spawn(SceneRoot(
-        asset_server.load(GltfAssetLabel::Scene(0).from_asset(ASSET_PATH)),
+        asset_server.load(GltfAssetLabel::Scene(0).from_asset(GLTF_PATH)),
     ));
 }
 
