@@ -3,7 +3,7 @@
 use bevy::{pbr::CascadeShadowConfigBuilder, prelude::*};
 use std::f32::consts::PI;
 
-// An example asset that contains a skinned fox mesh and an animation.
+// An example asset that contains a skinned mesh and an animation.
 const GLTF_PATH: &str = "models/animated/Fox.glb";
 
 fn main() {
