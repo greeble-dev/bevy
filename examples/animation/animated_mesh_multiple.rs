@@ -1,11 +1,8 @@
-//! Plays an animation on a skinned glTF model of a fox.
+//! Spawns a variety of skinned glTF meshes playing different animations.
 
 use std::f32::consts::PI;
 
-use bevy::{pbr::CascadeShadowConfigBuilder, prelude::*};
-
-// An example asset that contains a mesh and animation.
-const GLTF_PATH: &str = "models/animated/Fox.glb";
+use bevy::{pbr::CascadeShadowConfigBuilder, prelude::*, scene::SceneInstanceReady};
 
 fn main() {
     App::new()
@@ -15,65 +12,110 @@ fn main() {
             ..default()
         })
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, setup_mesh_and_animation)
+        .add_systems(Startup, setup_meshes_and_animations)
         .add_systems(Startup, setup_camera_and_environment)
-        .add_systems(Update, play_animation_once_loaded)
         .run();
 }
 
-#[derive(Resource)]
-struct Animations {
+#[derive(Component)]
+struct AnimationToPlay {
     graph_handle: Handle<AnimationGraph>,
     index: AnimationNodeIndex,
 }
 
 // Create an animation graph and start loading the mesh and animation.
-fn setup_mesh_and_animation(
+fn spawn_one_mesh_with_animation(
+    commands: &mut Commands,
+    mesh_handle: &Handle<Scene>,
+    animation_handle: &Handle<AnimationClip>,
+    transform: Transform,
+    graphs: &mut ResMut<Assets<AnimationGraph>>,
+) {
+    // Build an animation graph containing a single animation.
+    let (graph, index) = AnimationGraph::from_clip(animation_handle.clone());
+    let graph_handle = graphs.add(graph);
+
+    // Tell the engine to start loading our mesh and animation, and then spawn
+    // them as a scene when ready.
+    commands
+        .spawn((
+            transform,
+            SceneRoot(mesh_handle.clone()),
+            AnimationToPlay {
+                graph_handle,
+                index,
+            },
+        ))
+        .observe(play_animation_once_loaded);
+}
+
+fn setup_meshes_and_animations(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
 ) {
-    // Build an animation graph containing a single animation.
-    let (graph, index) = AnimationGraph::from_clip(
-        // We want the "run" animation from our example asset, which has an
-        // index of two.
-        asset_server.load(GltfAssetLabel::Animation(2).from_asset(GLTF_PATH)),
+    let simple_path = "models/SimpleSkin/SimpleSkin.gltf";
+    let simple_mesh = asset_server.load(GltfAssetLabel::Scene(0).from_asset(simple_path));
+    let simple_animation = asset_server.load(GltfAssetLabel::Animation(0).from_asset(simple_path));
+
+    spawn_one_mesh_with_animation(
+        &mut commands,
+        &simple_mesh,
+        &simple_animation,
+        Transform::from_xyz(-140.0, 0.0, 0.0).with_scale(Vec3::splat(30.0)),
+        &mut graphs,
     );
 
-    // Keep our animation graph in a Resource so that it can be added to the
-    // correct entity once the scene loads.
-    let graph_handle = graphs.add(graph);
-    commands.insert_resource(Animations {
-        graph_handle,
-        index,
-    });
+    let fox_path = "models/animated/Fox.glb";
+    let fox_mesh = asset_server.load(GltfAssetLabel::Scene(0).from_asset(fox_path));
+    let fox_survey_animation = asset_server.load(GltfAssetLabel::Animation(0).from_asset(fox_path));
+    let fox_walk_animation = asset_server.load(GltfAssetLabel::Animation(1).from_asset(fox_path));
+    let fox_run_animation = asset_server.load(GltfAssetLabel::Animation(2).from_asset(fox_path));
 
-    // Tell the engine to start loading our mesh and animation, and then spawn
-    // them as a scene when ready.
-    commands.spawn(SceneRoot(
-        asset_server.load(GltfAssetLabel::Scene(0).from_asset(GLTF_PATH)),
-    ));
+    spawn_one_mesh_with_animation(
+        &mut commands,
+        &fox_mesh,
+        &fox_survey_animation,
+        Transform::from_xyz(-40.0, 0.0, 0.0),
+        &mut graphs,
+    );
+
+    spawn_one_mesh_with_animation(
+        &mut commands,
+        &fox_mesh,
+        &fox_walk_animation,
+        Transform::from_xyz(40.0, 0.0, 0.0),
+        &mut graphs,
+    );
+
+    spawn_one_mesh_with_animation(
+        &mut commands,
+        &fox_mesh,
+        &fox_run_animation,
+        Transform::from_xyz(120.0, 0.0, 0.0),
+        &mut graphs,
+    );
 }
 
 // Detect that the scene is loaded and spawned, then play the animation.
 fn play_animation_once_loaded(
+    trigger: Trigger<SceneInstanceReady>,
+    children: Query<&Children>,
+    animation_to_play: Query<&AnimationToPlay>,
     mut commands: Commands,
-    animations: Res<Animations>,
-    mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
+    mut players: Query<&mut AnimationPlayer>,
 ) {
-    for (entity, mut player) in &mut players {
-        // Start the animation player and tell it to repeat forever.
-        //
-        // If you want to try stopping and switching animations, see the
-        // `animated_mesh_control.rs` example.
-        player.play(animations.index).repeat();
+    let entity = children.get(trigger.target()).unwrap()[0];
+    let player_entity = children.get(entity).unwrap()[0];
+    let animation = animation_to_play.get(trigger.target()).unwrap();
 
-        // Insert the animation graph with our selected animation. This
-        // connects the animation player to the mesh.
-        commands
-            .entity(entity)
-            .insert(AnimationGraphHandle(animations.graph_handle.clone()));
-    }
+    let mut player = players.get_mut(player_entity).unwrap();
+
+    player.play(animation.index).repeat();
+
+    commands
+        .entity(player_entity)
+        .insert(AnimationGraphHandle(animation.graph_handle.clone()));
 }
 
 // Spawn a camera and a simple environment with a ground plane and light.
@@ -85,7 +127,7 @@ fn setup_camera_and_environment(
     // Camera
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(100.0, 100.0, 150.0).looking_at(Vec3::new(0.0, 20.0, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, 150.0, 250.0).looking_at(Vec3::new(0.0, 40.0, 0.0), Vec3::Y),
     ));
 
     // Plane
@@ -96,14 +138,14 @@ fn setup_camera_and_environment(
 
     // Light
     commands.spawn((
-        Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, 1.0, -PI / 4.)),
+        Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, PI * -0.25, PI * -0.25)),
         DirectionalLight {
             shadows_enabled: true,
             ..default()
         },
         CascadeShadowConfigBuilder {
-            first_cascade_far_bound: 200.0,
-            maximum_distance: 400.0,
+            first_cascade_far_bound: 400.0,
+            maximum_distance: 800.0,
             ..default()
         }
         .build(),
