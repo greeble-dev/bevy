@@ -1322,6 +1322,17 @@ category = "Animation"
 wasm = true
 
 [[example]]
+name = "animated_mesh_multiple"
+path = "examples/animation/animated_mesh_multiple.rs"
+doc-scrape-examples = true
+
+[package.metadata.example.animated_mesh_multiple]
+name = "Animated Mesh Multiple"
+description = "Spawns a variety of skinned glTF meshes playing different animations"
+category = "Animation"
+wasm = true
+
+[[example]]
 name = "animated_mesh_events"
 path = "examples/animation/animated_mesh_events.rs"
 doc-scrape-examples = true
