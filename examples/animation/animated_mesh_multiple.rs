@@ -105,17 +105,17 @@ fn play_animation_once_loaded(
     mut commands: Commands,
     mut players: Query<&mut AnimationPlayer>,
 ) {
-    let entity = children.get(trigger.target()).unwrap()[0];
-    let player_entity = children.get(entity).unwrap()[0];
-    let animation = animation_to_play.get(trigger.target()).unwrap();
+    if let Ok(animation) = animation_to_play.get(trigger.target()) {
+        for child in children.iter_descendants(trigger.target()) {
+            if let Ok(mut player) = players.get_mut(child) {
+                player.play(animation.index).repeat();
 
-    let mut player = players.get_mut(player_entity).unwrap();
-
-    player.play(animation.index).repeat();
-
-    commands
-        .entity(player_entity)
-        .insert(AnimationGraphHandle(animation.graph_handle.clone()));
+                commands
+                    .entity(child)
+                    .insert(AnimationGraphHandle(animation.graph_handle.clone()));
+            }
+        }
+    }
 }
 
 // Spawn a camera and a simple environment with a ground plane and light.
