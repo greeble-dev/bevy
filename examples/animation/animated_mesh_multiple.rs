@@ -1,8 +1,7 @@
 //! Spawns a variety of skinned glTF meshes playing different animations.
 
-use std::f32::consts::PI;
-
 use bevy::{pbr::CascadeShadowConfigBuilder, prelude::*, scene::SceneInstanceReady};
+use std::f32::consts::PI;
 
 fn main() {
     App::new()
@@ -17,35 +16,40 @@ fn main() {
         .run();
 }
 
+// A component that records what animation we chose to play on a mesh instance.
+// This is added to the mesh instance's entity when we start loading the assets,
+// and then once they're loaded and spawned we use it to play the animation.
 #[derive(Component)]
-struct AnimationToPlay {
+struct ChosenAnimation {
     graph_handle: Handle<AnimationGraph>,
     index: AnimationNodeIndex,
 }
 
-// Create an animation graph and start loading the mesh and animation.
-fn spawn_one_mesh_with_animation(
+// Given a mesh and animation asset, spawn an entity that will load and spawn a
+// an instance of that mesh along with an animation player.
+fn spawn_mesh_with_animation(
     commands: &mut Commands,
     mesh_handle: &Handle<Scene>,
     animation_handle: &Handle<AnimationClip>,
     transform: Transform,
     graphs: &mut ResMut<Assets<AnimationGraph>>,
 ) {
-    // Build an animation graph containing a single animation.
+    // Build an animation graph with our chosen animation.
     let (graph, index) = AnimationGraph::from_clip(animation_handle.clone());
     let graph_handle = graphs.add(graph);
 
-    // Tell the engine to start loading our mesh and animation, and then spawn
-    // them as a scene when ready.
+    // Make a component with the data we need to play the chosen animation.
+    let chosen_animation = ChosenAnimation {
+        graph_handle,
+        index,
+    };
+
+    // Make a component that will load and spawn an instance of our mesh.
+    let mesh_scene = SceneRoot(mesh_handle.clone());
+
+    // Spawn an entity with our components and connect it to play_animation_once_loaded.
     commands
-        .spawn((
-            transform,
-            SceneRoot(mesh_handle.clone()),
-            AnimationToPlay {
-                graph_handle,
-                index,
-            },
-        ))
+        .spawn((mesh_scene, chosen_animation, transform))
         .observe(play_animation_once_loaded);
 }
 
@@ -54,25 +58,28 @@ fn setup_meshes_and_animations(
     asset_server: Res<AssetServer>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
 ) {
+    // Firstly, spawn a simple mesh with a single animation.
     let simple_path = "models/SimpleSkin/SimpleSkin.gltf";
     let simple_mesh = asset_server.load(GltfAssetLabel::Scene(0).from_asset(simple_path));
     let simple_animation = asset_server.load(GltfAssetLabel::Animation(0).from_asset(simple_path));
 
-    spawn_one_mesh_with_animation(
+    spawn_mesh_with_animation(
         &mut commands,
         &simple_mesh,
         &simple_animation,
+        // The simple mesh is bit small, so scale it up using the transform.
         Transform::from_xyz(-140.0, 0.0, 0.0).with_scale(Vec3::splat(30.0)),
         &mut graphs,
     );
 
+    // Secondly, spawn three instances of a fox mesh, each playing a different animation.
     let fox_path = "models/animated/Fox.glb";
     let fox_mesh = asset_server.load(GltfAssetLabel::Scene(0).from_asset(fox_path));
     let fox_survey_animation = asset_server.load(GltfAssetLabel::Animation(0).from_asset(fox_path));
     let fox_walk_animation = asset_server.load(GltfAssetLabel::Animation(1).from_asset(fox_path));
     let fox_run_animation = asset_server.load(GltfAssetLabel::Animation(2).from_asset(fox_path));
 
-    spawn_one_mesh_with_animation(
+    spawn_mesh_with_animation(
         &mut commands,
         &fox_mesh,
         &fox_survey_animation,
@@ -80,7 +87,7 @@ fn setup_meshes_and_animations(
         &mut graphs,
     );
 
-    spawn_one_mesh_with_animation(
+    spawn_mesh_with_animation(
         &mut commands,
         &fox_mesh,
         &fox_walk_animation,
@@ -88,7 +95,7 @@ fn setup_meshes_and_animations(
         &mut graphs,
     );
 
-    spawn_one_mesh_with_animation(
+    spawn_mesh_with_animation(
         &mut commands,
         &fox_mesh,
         &fox_run_animation,
@@ -97,22 +104,26 @@ fn setup_meshes_and_animations(
     );
 }
 
-// Detect that the scene is loaded and spawned, then play the animation.
+// Triggered when a mesh instance has loaded and spawned. Plays our chosen animation.
 fn play_animation_once_loaded(
     trigger: Trigger<SceneInstanceReady>,
-    children: Query<&Children>,
-    animation_to_play: Query<&AnimationToPlay>,
     mut commands: Commands,
+    children: Query<&Children>,
+    chosen_animations: Query<&ChosenAnimation>,
     mut players: Query<&mut AnimationPlayer>,
 ) {
-    if let Ok(animation) = animation_to_play.get(trigger.target()) {
+    // Find the ChosenAnimation component that we added in spawn_mesh_with_animation.
+    if let Ok(chosen_animation) = chosen_animations.get(trigger.target()) {
+        // Find all the animation players that were spawned.
         for child in children.iter_descendants(trigger.target()) {
             if let Ok(mut player) = players.get_mut(child) {
-                player.play(animation.index).repeat();
+                // Tell the player to start the animation and keep repeating it.
+                player.play(chosen_animation.index).repeat();
 
+                // Add the animation graph. This connects the player to the mesh.
                 commands
                     .entity(child)
-                    .insert(AnimationGraphHandle(animation.graph_handle.clone()));
+                    .insert(AnimationGraphHandle(chosen_animation.graph_handle.clone()));
             }
         }
     }
