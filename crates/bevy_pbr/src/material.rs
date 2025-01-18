@@ -832,6 +832,13 @@ pub fn queue_material_meshes<M: Material>(
                 }
             }
 
+            if mesh_instance
+                .flags
+                .contains(RenderMeshInstanceFlags::HAS_CURRENT_SKIN)
+            {
+                mesh_key |= MeshPipelineKey::HAS_CURRENT_SKIN;
+            }
+
             let pipeline_id = pipelines.specialize(
                 &pipeline_cache,
                 &material_pipeline,

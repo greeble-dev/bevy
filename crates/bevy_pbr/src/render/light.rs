@@ -1682,6 +1682,13 @@ pub fn queue_shadows<M: Material>(
                 let mut mesh_key =
                     light_key | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits());
 
+                if mesh_instance
+                    .flags
+                    .contains(RenderMeshInstanceFlags::HAS_CURRENT_SKIN)
+                {
+                    mesh_key |= MeshPipelineKey::HAS_CURRENT_SKIN;
+                }
+
                 // Even though we don't use the lightmap in the shadow map, the
                 // `SetMeshBindGroup` render command will bind the data for it. So
                 // we need to include the appropriate flag in the mesh pipeline key

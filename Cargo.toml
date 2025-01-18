@@ -1420,6 +1420,17 @@ description = "Skinned mesh example with mesh and joints data loaded from a glTF
 category = "Animation"
 wasm = true
 
+[[example]]
+name = "skinned_mesh_without_skinning"
+path = "examples/animation/skinned_mesh_without_skinning.rs"
+doc-scrape-examples = true
+
+[package.metadata.example.skinned_mesh_without_skinning]
+name = "Skinned Mesh Without Skinning"
+description = "TODO"
+category = "Animation"
+wasm = true
+
 # Application
 [[example]]
 name = "custom_loop"

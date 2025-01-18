@@ -515,6 +515,7 @@ bitflags::bitflags! {
         /// The mesh had morph targets last frame and so they should be taken
         /// into account for motion vector computation.
         const HAS_PREVIOUS_MORPH      = 1 << 4;
+        const HAS_CURRENT_SKIN       = 1 << 5;
     }
 }
 
@@ -1377,6 +1378,10 @@ fn set_mesh_motion_vector_flags(
         render_mesh_instances
             .insert_mesh_instance_flags(entity, RenderMeshInstanceFlags::HAS_PREVIOUS_SKIN);
     }
+    for &entity in skin_indices.current.keys() {
+        render_mesh_instances
+            .insert_mesh_instance_flags(entity, RenderMeshInstanceFlags::HAS_CURRENT_SKIN);
+    }
     for &entity in morph_indices.prev.keys() {
         render_mesh_instances
             .insert_mesh_instance_flags(entity, RenderMeshInstanceFlags::HAS_PREVIOUS_MORPH);
@@ -1798,7 +1803,8 @@ bitflags::bitflags! {
         const HAS_PREVIOUS_SKIN                 = 1 << 18;
         const HAS_PREVIOUS_MORPH                = 1 << 19;
         const OIT_ENABLED                       = 1 << 20;
-        const LAST_FLAG                         = Self::OIT_ENABLED.bits();
+        const HAS_CURRENT_SKIN                  = 1 << 21;
+        const LAST_FLAG                         = Self::HAS_CURRENT_SKIN.bits();
 
         // Bitfields
         const MSAA_RESERVED_BITS                = Self::MSAA_MASK_BITS << Self::MSAA_SHIFT_BITS;
@@ -1934,6 +1940,7 @@ pub fn setup_morph_and_skinning_defs(
     skins_use_uniform_buffers: bool,
 ) -> BindGroupLayout {
     let is_morphed = key.intersects(MeshPipelineKey::MORPH_TARGETS);
+    let is_skinned = key.intersects(MeshPipelineKey::HAS_CURRENT_SKIN);
     let is_lightmapped = key.intersects(MeshPipelineKey::LIGHTMAPPED);
     let motion_vector_prepass = key.intersects(MeshPipelineKey::MOTION_VECTOR_PREPASS);
 
@@ -1948,7 +1955,7 @@ pub fn setup_morph_and_skinning_defs(
     };
 
     match (
-        is_skinned(layout),
+        is_skinned,
         is_morphed,
         is_lightmapped,
         motion_vector_prepass,
