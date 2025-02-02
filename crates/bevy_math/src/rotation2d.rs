@@ -713,4 +713,44 @@ mod tests {
         assert_eq!(rot1.slerp(rot2, 0.5).as_degrees(), 90.0);
         assert_eq!(ops::abs(rot1.slerp(rot2, 1.0).as_degrees()), 180.0);
     }
+
+    fn bad() -> Rot2 {
+        let mut l = 0.0;
+        let mut r = 1.0;
+
+        loop {
+            let m = (l + r) * 0.5;
+
+            if (m == l) | (m == r) {
+                return Rot2 { cos: 1.0, sin: l }.normalize()
+            }
+
+            let t = Rot2 { cos: 1.0, sin: m }.normalize();
+
+            if t.cos == 1.0 {
+                l = m
+            } else {
+                r = m
+            }
+
+            std::println!("{l} {r} {m} {}", t.cos);
+        }
+    }
+
+    #[test]
+    fn rot2_denormalize() {
+        let b = bad();
+
+        let mut r = Rot2::IDENTITY;
+
+        std::println!("{r:?} {b:?}");
+
+        for i in 0..10000 {
+            r = r * b;
+
+            std::println!("iteration: {i} {r:?} length: {} is_normalized: {}", r.length(), r.is_normalized());
+
+            assert!(r.is_normalized());
+        }
+    }
 }
