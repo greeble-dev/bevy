@@ -1000,6 +1000,26 @@ mod tests {
             "Denormalization doesn't work, test is faulty"
         );
         assert!(dir_b.is_normalized(), "Renormalisation did not work.");
+
+        for dir in [
+            Dir3(Vec3::new(1.0e-8, 1.0e-8, 1.0e-8)),
+            Dir3(Vec3::new(1.0e-8, 0.0, 0.0)),
+            Dir3(Vec3::new(f32::sqrt(2.0), 0.0, 0.0)),
+            Dir3(Vec3::new(2.0, 0.0, 0.0)),
+            Dir3(Vec3::new(2.5, 0.0, 0.0)),
+            Dir3(Vec3::new(1.0e8, 0.0, 0.0)),
+            Dir3(Vec3::new(1.0e8, 1.0e8, 1.0e8)),
+        ] {
+            assert!(!dir.is_normalized(), "{dir:?} should not be normalized");
+
+            let mut rn = dir;
+
+            for _ in 0..50 {
+                rn = rn.fast_renormalize();
+            }
+
+            assert!(rn.is_normalized(), "{rn:?} should be normalized");
+        }
     }
 
     #[test]
