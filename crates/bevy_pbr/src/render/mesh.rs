@@ -677,12 +677,14 @@ bitflags::bitflags! {
         /// The mesh had a transform last frame and so is eligible for motion
         /// vector computation.
         const HAS_PREVIOUS_TRANSFORM  = 1 << 2;
+        /// The mesh has valid skinning transforms (`SkinIndices::current`).
+        const HAS_CURRENT_SKIN        = 1 << 3;
         /// The mesh had a skin last frame and so that skin should be taken into
         /// account for motion vector computation.
-        const HAS_PREVIOUS_SKIN       = 1 << 3;
+        const HAS_PREVIOUS_SKIN       = 1 << 4;
         /// The mesh had morph targets last frame and so they should be taken
         /// into account for motion vector computation.
-        const HAS_PREVIOUS_MORPH      = 1 << 4;
+        const HAS_PREVIOUS_MORPH      = 1 << 5;
     }
 }
 
@@ -1557,6 +1559,10 @@ fn set_mesh_motion_vector_flags(
     skin_indices: Res<SkinIndices>,
     morph_indices: Res<MorphIndices>,
 ) {
+    for &entity in skin_indices.current.keys() {
+        render_mesh_instances
+            .insert_mesh_instance_flags(entity, RenderMeshInstanceFlags::HAS_CURRENT_SKIN);
+    }
     for &entity in skin_indices.prev.keys() {
         render_mesh_instances
             .insert_mesh_instance_flags(entity, RenderMeshInstanceFlags::HAS_PREVIOUS_SKIN);
@@ -1990,10 +1996,11 @@ bitflags::bitflags! {
         const IRRADIANCE_VOLUME                 = 1 << 15;
         const VISIBILITY_RANGE_DITHER           = 1 << 16;
         const SCREEN_SPACE_REFLECTIONS          = 1 << 17;
-        const HAS_PREVIOUS_SKIN                 = 1 << 18;
-        const HAS_PREVIOUS_MORPH                = 1 << 19;
-        const OIT_ENABLED                       = 1 << 20;
-        const DISTANCE_FOG                      = 1 << 21;
+        const HAS_CURRENT_SKIN                  = 1 << 18;
+        const HAS_PREVIOUS_SKIN                 = 1 << 19;
+        const HAS_PREVIOUS_MORPH                = 1 << 20;
+        const OIT_ENABLED                       = 1 << 21;
+        const DISTANCE_FOG                      = 1 << 22;
         const LAST_FLAG                         = Self::DISTANCE_FOG.bits();
 
         // Bitfields
@@ -2116,13 +2123,8 @@ const_assert_eq!(
     0
 );
 
-fn is_skinned(layout: &MeshVertexBufferLayoutRef) -> bool {
-    layout.0.contains(Mesh::ATTRIBUTE_JOINT_INDEX)
-        && layout.0.contains(Mesh::ATTRIBUTE_JOINT_WEIGHT)
-}
 pub fn setup_morph_and_skinning_defs(
     mesh_layouts: &MeshLayouts,
-    layout: &MeshVertexBufferLayoutRef,
     offset: u32,
     key: &MeshPipelineKey,
     shader_defs: &mut Vec<ShaderDefVal>,
@@ -2130,6 +2132,7 @@ pub fn setup_morph_and_skinning_defs(
     skins_use_uniform_buffers: bool,
 ) -> BindGroupLayout {
     let is_morphed = key.intersects(MeshPipelineKey::MORPH_TARGETS);
+    let is_skinned = key.intersects(MeshPipelineKey::HAS_CURRENT_SKIN);
     let is_lightmapped = key.intersects(MeshPipelineKey::LIGHTMAPPED);
     let motion_vector_prepass = key.intersects(MeshPipelineKey::MOTION_VECTOR_PREPASS);
 
@@ -2144,7 +2147,7 @@ pub fn setup_morph_and_skinning_defs(
     };
 
     match (
-        is_skinned(layout),
+        is_skinned,
         is_morphed,
         is_lightmapped,
         motion_vector_prepass,
@@ -2249,7 +2252,6 @@ impl SpecializedMeshPipeline for MeshPipeline {
 
         bind_group_layout.push(setup_morph_and_skinning_defs(
             &self.mesh_layouts,
-            layout,
             6,
             &key,
             &mut shader_defs,
@@ -2600,6 +2602,11 @@ impl MeshBindGroupPair {
     }
 }
 
+fn supports_skinning(layout: &MeshVertexBufferLayoutRef) -> bool {
+    layout.0.contains(Mesh::ATTRIBUTE_JOINT_INDEX)
+        && layout.0.contains(Mesh::ATTRIBUTE_JOINT_WEIGHT)
+}
+
 pub fn prepare_mesh_bind_group(
     meshes: Res<RenderAssets<RenderMesh>>,
     mut groups: ResMut<MeshBindGroups>,
@@ -2652,7 +2659,7 @@ pub fn prepare_mesh_bind_group(
         let prev_weights = weights_uniform.prev_buffer.buffer().unwrap_or(weights);
         for (id, gpu_mesh) in meshes.iter() {
             if let Some(targets) = gpu_mesh.morph_targets.as_ref() {
-                let bind_group_pair = match skin.filter(|_| is_skinned(&gpu_mesh.layout)) {
+                let bind_group_pair = match skin.filter(|_| supports_skinning(&gpu_mesh.layout)) {
                     Some(skin) => {
                         let prev_skin = skins_uniform.prev_buffer.buffer().unwrap_or(skin);
                         MeshBindGroupPair {

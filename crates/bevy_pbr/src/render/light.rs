@@ -1787,6 +1787,13 @@ pub fn specialize_shadows<M: Material>(
                     mesh_key |= MeshPipelineKey::LIGHTMAPPED;
                 }
 
+                if mesh_instance
+                    .flags
+                    .contains(RenderMeshInstanceFlags::HAS_CURRENT_SKIN)
+                {
+                    mesh_key |= MeshPipelineKey::HAS_CURRENT_SKIN;
+                }
+
                 mesh_key |= match material.properties.alpha_mode {
                     AlphaMode::Mask(_)
                     | AlphaMode::Blend

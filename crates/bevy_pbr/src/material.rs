@@ -866,6 +866,13 @@ pub fn specialize_material_meshes<M: Material>(
                 mesh_key |= MeshPipelineKey::VISIBILITY_RANGE_DITHER;
             }
 
+            if mesh_instance
+                .flags
+                .contains(RenderMeshInstanceFlags::HAS_CURRENT_SKIN)
+            {
+                mesh_key |= MeshPipelineKey::HAS_CURRENT_SKIN;
+            }
+
             if view_key.contains(MeshPipelineKey::MOTION_VECTOR_PREPASS) {
                 // If the previous frame have skins or morph targets, note that.
                 if mesh_instance

@@ -572,7 +572,6 @@ where
 
         let bind_group = setup_morph_and_skinning_defs(
             &self.mesh_layouts,
-            layout,
             5,
             &key.mesh_key,
             &mut shader_defs,
@@ -1006,6 +1005,13 @@ pub fn specialize_prepass_material_meshes<M>(
 
             if render_visibility_ranges.entity_has_crossfading_visibility_ranges(*visible_entity) {
                 mesh_key |= MeshPipelineKey::VISIBILITY_RANGE_DITHER;
+            }
+
+            if mesh_instance
+                .flags
+                .contains(RenderMeshInstanceFlags::HAS_CURRENT_SKIN)
+            {
+                mesh_key |= MeshPipelineKey::HAS_CURRENT_SKIN;
             }
 
             // If the previous frame has skins or morph targets, note that.
