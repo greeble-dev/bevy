@@ -4,6 +4,7 @@
 //! mesh should be animating. The middle and right meshes should be static.
 
 use bevy::{
+    core_pipeline::prepass::DepthPrepass,
     math::ops,
     prelude::*,
     render::{
@@ -35,6 +36,8 @@ fn setup(
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 0.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        // Make sure we exercise the renderer's prepass path.
+        DepthPrepass,
     ));
 
     // Add a directional light to make sure we exercise the renderer's lighting path.
