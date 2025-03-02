@@ -437,6 +437,10 @@ impl<T: Event> ApplicationHandler<T> for WinitAppRunnerState<T> {
                 {
                     // Have the startup behavior run in about_to_wait, which prevents issues with
                     // invisible window creation. https://github.com/bevyengine/bevy/issues/18027
+                    println!(
+                        "WindowEvent::RedrawRequested self.startup_forced_updates = {}",
+                        self.startup_forced_updates
+                    );
                     if self.startup_forced_updates == 0 {
                         self.redraw_requested = true;
                         self.redraw_requested(_event_loop);
@@ -491,6 +495,11 @@ impl<T: Event> ApplicationHandler<T> for WinitAppRunnerState<T> {
         {
             let winit_windows = self.world().non_send_resource::<WinitWindows>();
             let headless = winit_windows.windows.is_empty();
+            println!(
+                "about_to_wait self.startup_forced_updates = {}, headless = {headless}",
+                self.startup_forced_updates
+            );
+
             if self.startup_forced_updates > 0 || headless {
                 self.redraw_requested(event_loop);
             }
