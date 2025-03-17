@@ -1074,6 +1074,17 @@ category = "3D Rendering"
 wasm = true
 
 [[example]]
+name = "gltf_override_sampler"
+path = "examples/3d/gltf_override_sampler.rs"
+doc-scrape-examples = true
+
+[package.metadata.example.gltf_override_sampler]
+name = "glTF Override Sampler"
+description = "Loads and renders a glTF file, but overrides the file's texture samplers."
+category = "3D Rendering"
+wasm = true
+
+[[example]]
 name = "load_gltf"
 path = "examples/3d/load_gltf.rs"
 doc-scrape-examples = true
