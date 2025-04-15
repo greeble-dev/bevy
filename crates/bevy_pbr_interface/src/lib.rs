@@ -7,7 +7,9 @@
 )]
 
 mod material;
+mod parallax;
 mod pbr_material;
 
 pub use material::*;
+pub use parallax::*;
 pub use pbr_material::*;

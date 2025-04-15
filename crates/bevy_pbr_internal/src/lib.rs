@@ -37,7 +37,6 @@ mod lightmap;
 mod material;
 mod material_bind_groups;
 mod mesh_material;
-mod parallax;
 mod pbr_material;
 mod prepass;
 mod render;
@@ -59,7 +58,6 @@ pub use lightmap::*;
 pub use material::*;
 pub use material_bind_groups::*;
 pub use mesh_material::*;
-pub use parallax::*;
 pub use pbr_material::*;
 pub use prepass::*;
 pub use render::*;
@@ -78,7 +76,6 @@ pub mod prelude {
         light_probe::{environment_map::EnvironmentMapLight, LightProbe},
         material::MaterialPlugin,
         mesh_material::MeshMaterial3d,
-        parallax::ParallaxMappingMethod,
         pbr_material::StandardMaterial,
         ssao::ScreenSpaceAmbientOcclusionPlugin,
     };

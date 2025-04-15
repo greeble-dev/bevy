@@ -2,7 +2,8 @@ use bevy_asset::Asset;
 use bevy_color::{Alpha, ColorToComponents};
 use bevy_math::{Affine2, Affine3, Mat2, Mat3, Vec2, Vec3, Vec4};
 use bevy_pbr_interface::{
-    Material, OpaqueRendererMethod, UvChannel, DEFAULT_PBR_DEFERRED_LIGHTING_PASS_ID,
+    Material, OpaqueRendererMethod, ParallaxMappingMethod, UvChannel,
+    DEFAULT_PBR_DEFERRED_LIGHTING_PASS_ID,
 };
 use bevy_reflect::{std_traits::ReflectDefault, Reflect, TypePath};
 use bevy_render::{

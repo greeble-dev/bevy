@@ -26,12 +26,11 @@ pub mod prelude {
     pub use bevy_pbr_internal::{
         environment_map::EnvironmentMapLight, light_consts, AmbientLight, Atmosphere,
         CascadeShadowConfigBuilder, DirectionalLight, DistanceFog, FogFalloff, LightProbe,
-        MaterialPlugin, MeshMaterial3d, ParallaxMappingMethod, PointLight, SpotLight,
-        StandardMaterial,
+        MaterialPlugin, MeshMaterial3d, PointLight, SpotLight, StandardMaterial,
     };
 
     #[doc(hidden)]
-    pub use bevy_pbr_interface::Material;
+    pub use bevy_pbr_interface::{Material, ParallaxMappingMethod};
 }
 
 /// Experimental features that are not yet finished. Please report any issues you encounter!
