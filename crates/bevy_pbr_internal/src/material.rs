@@ -125,7 +125,7 @@ use tracing::error;
 /// @group(2) @binding(1) var color_texture: texture_2d<f32>;
 /// @group(2) @binding(2) var color_sampler: sampler;
 /// ```
-pub trait MaterialInternal: AsBindGroup + Clone + Sized + TypePath + Send + Sync + 'static {
+pub trait Material: AsBindGroup + Clone + Sized + TypePath + Send + Sync + 'static {
     type SourceAsset: Asset + Clone;
 
     fn from_source_asset(source_asset: Self::SourceAsset) -> Self;
@@ -255,7 +255,7 @@ pub trait MaterialInternal: AsBindGroup + Clone + Sized + TypePath + Send + Sync
 
 /// Adds the necessary ECS resources and render logic to enable rendering entities using the given [`Material`]
 /// asset type.
-pub struct MaterialPlugin<M: MaterialInternal> {
+pub struct MaterialPlugin<M: Material> {
     /// Controls if the prepass is enabled for the Material.
     /// For more information about what a prepass is, see the [`bevy_core_pipeline::prepass`] docs.
     ///
@@ -269,7 +269,7 @@ pub struct MaterialPlugin<M: MaterialInternal> {
     pub _marker: PhantomData<M>,
 }
 
-impl<M: MaterialInternal> Default for MaterialPlugin<M> {
+impl<M: Material> Default for MaterialPlugin<M> {
     fn default() -> Self {
         Self {
             prepass_enabled: true,
@@ -280,7 +280,7 @@ impl<M: MaterialInternal> Default for MaterialPlugin<M> {
     }
 }
 
-impl<M: MaterialInternal> Plugin for MaterialPlugin<M>
+impl<M: Material> Plugin for MaterialPlugin<M>
 where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
@@ -421,14 +421,14 @@ pub(crate) static DUMMY_MESH_MATERIAL: AssetId<StandardMaterial> =
     AssetId::<StandardMaterial>::invalid();
 
 /// A key uniquely identifying a specialized [`MaterialPipeline`].
-pub struct MaterialPipelineKey<M: MaterialInternal> {
+pub struct MaterialPipelineKey<M: Material> {
     pub mesh_key: MeshPipelineKey,
     pub bind_group_data: M::Data,
 }
 
-impl<M: MaterialInternal> Eq for MaterialPipelineKey<M> where M::Data: PartialEq {}
+impl<M: Material> Eq for MaterialPipelineKey<M> where M::Data: PartialEq {}
 
-impl<M: MaterialInternal> PartialEq for MaterialPipelineKey<M>
+impl<M: Material> PartialEq for MaterialPipelineKey<M>
 where
     M::Data: PartialEq,
 {
@@ -437,7 +437,7 @@ where
     }
 }
 
-impl<M: MaterialInternal> Clone for MaterialPipelineKey<M>
+impl<M: Material> Clone for MaterialPipelineKey<M>
 where
     M::Data: Clone,
 {
@@ -449,7 +449,7 @@ where
     }
 }
 
-impl<M: MaterialInternal> Hash for MaterialPipelineKey<M>
+impl<M: Material> Hash for MaterialPipelineKey<M>
 where
     M::Data: Hash,
 {
@@ -459,9 +459,9 @@ where
     }
 }
 
-/// Render pipeline data for a given [`MaterialInternal`].
+/// Render pipeline data for a given [`Material`].
 #[derive(Resource)]
-pub struct MaterialPipeline<M: MaterialInternal> {
+pub struct MaterialPipeline<M: Material> {
     pub mesh_pipeline: MeshPipeline,
     pub material_layout: BindGroupLayout,
     pub vertex_shader: Option<Handle<Shader>>,
@@ -472,7 +472,7 @@ pub struct MaterialPipeline<M: MaterialInternal> {
     pub marker: PhantomData<M>,
 }
 
-impl<M: MaterialInternal> Clone for MaterialPipeline<M> {
+impl<M: Material> Clone for MaterialPipeline<M> {
     fn clone(&self) -> Self {
         Self {
             mesh_pipeline: self.mesh_pipeline.clone(),
@@ -485,7 +485,7 @@ impl<M: MaterialInternal> Clone for MaterialPipeline<M> {
     }
 }
 
-impl<M: MaterialInternal> SpecializedMeshPipeline for MaterialPipeline<M>
+impl<M: Material> SpecializedMeshPipeline for MaterialPipeline<M>
 where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
@@ -521,7 +521,7 @@ where
     }
 }
 
-impl<M: MaterialInternal> FromWorld for MaterialPipeline<M> {
+impl<M: Material> FromWorld for MaterialPipeline<M> {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.resource::<AssetServer>();
         let render_device = world.resource::<RenderDevice>();
@@ -554,10 +554,8 @@ type DrawMaterial<M> = (
 );
 
 /// Sets the bind group for a given [`Material`] at the configured `I` index.
-pub struct SetMaterialBindGroup<M: MaterialInternal, const I: usize>(PhantomData<M>);
-impl<P: PhaseItem, M: MaterialInternal, const I: usize> RenderCommand<P>
-    for SetMaterialBindGroup<M, I>
-{
+pub struct SetMaterialBindGroup<M: Material, const I: usize>(PhantomData<M>);
+impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterialBindGroup<M, I> {
     type Param = (
         SRes<RenderAssets<PreparedMaterial<M>>>,
         SRes<RenderMaterialInstances>,
@@ -719,7 +717,7 @@ fn mark_meshes_as_changed_if_their_materials_changed<M>(
         )>,
     >,
 ) where
-    M: MaterialInternal,
+    M: Material,
 {
     for mut mesh in &mut changed_meshes_query {
         mesh.set_changed();
@@ -728,7 +726,7 @@ fn mark_meshes_as_changed_if_their_materials_changed<M>(
 
 /// Fills the [`RenderMaterialInstances`] resources from the meshes in the
 /// scene.
-fn extract_mesh_materials<M: MaterialInternal>(
+fn extract_mesh_materials<M: Material>(
     mut material_instances: ResMut<RenderMaterialInstances>,
     changed_meshes_query: Extract<
         Query<
@@ -777,7 +775,7 @@ fn early_sweep_material_instances<M>(
     mut material_instances: ResMut<RenderMaterialInstances>,
     mut removed_materials_query: Extract<RemovedComponents<MeshMaterial3d<M::SourceAsset>>>,
 ) where
-    M: MaterialInternal,
+    M: Material,
 {
     let last_change_tick = material_instances.current_change_tick;
 
@@ -835,7 +833,7 @@ pub fn extract_entities_needs_specialization<M>(
     views: Query<&ExtractedView>,
     ticks: SystemChangeTick,
 ) where
-    M: MaterialInternal,
+    M: Material,
 {
     // Clean up any despawned entities, we do this first in case the removed material was re-added
     // the same frame, thus will appear both in the removed components list and have been added to
@@ -954,7 +952,7 @@ pub fn check_entities_needing_specialization<M>(
     mut par_local: Local<Parallel<Vec<Entity>>>,
     mut entities_needing_specialization: ResMut<EntitiesNeedingSpecialization<M>>,
 ) where
-    M: MaterialInternal,
+    M: Material,
 {
     entities_needing_specialization.clear();
 
@@ -965,7 +963,7 @@ pub fn check_entities_needing_specialization<M>(
     par_local.drain_into(&mut entities_needing_specialization);
 }
 
-pub fn specialize_material_meshes<M: MaterialInternal>(
+pub fn specialize_material_meshes<M: Material>(
     render_meshes: Res<RenderAssets<RenderMesh>>,
     render_materials: Res<RenderAssets<PreparedMaterial<M>>>,
     render_mesh_instances: Res<RenderMeshInstances>,
@@ -1123,7 +1121,7 @@ pub fn specialize_material_meshes<M: MaterialInternal>(
 
 /// For each view, iterates over all the meshes visible from that view and adds
 /// them to [`BinnedRenderPhase`]s or [`SortedRenderPhase`]s as appropriate.
-pub fn queue_material_meshes<M: MaterialInternal>(
+pub fn queue_material_meshes<M: Material>(
     render_materials: Res<RenderAssets<PreparedMaterial<M>>>,
     render_mesh_instances: Res<RenderMeshInstances>,
     render_material_instances: Res<RenderMaterialInstances>,
@@ -1350,13 +1348,13 @@ pub enum RenderPhaseType {
 pub struct RenderMaterialBindings(HashMap<UntypedAssetId, MaterialBindingId>);
 
 /// Data prepared for a [`MaterialInstance`] instance.
-pub struct PreparedMaterial<M: MaterialInternal> {
+pub struct PreparedMaterial<M: Material> {
     pub binding: MaterialBindingId,
     pub properties: MaterialProperties,
     pub phantom: PhantomData<M>,
 }
 
-impl<M: MaterialInternal> RenderAsset for PreparedMaterial<M> {
+impl<M: Material> RenderAsset for PreparedMaterial<M> {
     type SourceAsset = M::SourceAsset;
 
     type Param = (
@@ -1587,7 +1585,7 @@ pub fn prepare_material_bind_groups<M>(
     fallback_image: Res<FallbackImage>,
     fallback_resources: Res<FallbackBindlessResources>,
 ) where
-    M: MaterialInternal,
+    M: Material,
 {
     allocator.prepare_bind_groups(&render_device, &fallback_resources, &fallback_image);
 }
@@ -1602,7 +1600,7 @@ pub fn write_material_bind_group_buffers<M>(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
 ) where
-    M: MaterialInternal,
+    M: Material,
 {
     allocator.write_buffers(&render_device, &render_queue);
 }

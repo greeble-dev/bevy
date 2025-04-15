@@ -1142,7 +1142,7 @@ impl From<&StandardMaterialInternal> for StandardMaterialKey {
     }
 }
 
-impl MaterialInternal for StandardMaterialInternal {
+impl Material for StandardMaterialInternal {
     type SourceAsset = StandardMaterial;
 
     fn from_source_asset(source_asset: Self::SourceAsset) -> Self {

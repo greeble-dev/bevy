@@ -15,9 +15,7 @@ use bevy_render::{
     renderer::RenderDevice,
 };
 
-use crate::{
-    MaterialInternal, MaterialPipeline, MaterialPipelineKey, MeshPipeline, MeshPipelineKey,
-};
+use crate::{Material, MaterialPipeline, MaterialPipelineKey, MeshPipeline, MeshPipelineKey};
 
 pub struct MaterialExtensionPipeline {
     pub mesh_pipeline: MeshPipeline,
@@ -157,12 +155,12 @@ where
 impl_type_path!((in bevy_pbr::extended_material) ExtendedMaterial<B: Asset + Clone, E: MaterialExtension>);
 
 #[derive(Clone, Debug, TypePath)]
-pub struct ExtendedMaterialInternal<B: MaterialInternal, E: MaterialExtension> {
+pub struct ExtendedMaterialInternal<B: Material, E: MaterialExtension> {
     pub base: B,
     pub extension: E,
 }
 
-impl<B: MaterialInternal, E: MaterialExtension> AsBindGroup for ExtendedMaterialInternal<B, E> {
+impl<B: Material, E: MaterialExtension> AsBindGroup for ExtendedMaterialInternal<B, E> {
     type Data = (<B as AsBindGroup>::Data, <E as AsBindGroup>::Data);
     type Param = (<B as AsBindGroup>::Param, <E as AsBindGroup>::Param);
 
@@ -294,9 +292,7 @@ impl<B: MaterialInternal, E: MaterialExtension> AsBindGroup for ExtendedMaterial
     }
 }
 
-impl<B: MaterialInternal, E: MaterialExtension> MaterialInternal
-    for ExtendedMaterialInternal<B, E>
-{
+impl<B: Material, E: MaterialExtension> Material for ExtendedMaterialInternal<B, E> {
     type SourceAsset = ExtendedMaterial<B::SourceAsset, E>;
 
     fn from_source_asset(source_asset: Self::SourceAsset) -> Self {

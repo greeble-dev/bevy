@@ -1,6 +1,6 @@
 use crate::{
     ExtendedMaterial, ExtendedMaterialInternal, MaterialExtension, MaterialExtensionKey,
-    MaterialExtensionPipeline, MaterialInternal, MaterialPlugin, StandardMaterialInternal,
+    MaterialExtensionPipeline, Material, MaterialPlugin, StandardMaterialInternal,
 };
 use bevy_app::{App, Plugin};
 use bevy_asset::{load_internal_asset, weak_handle, Asset, Assets, Handle};
@@ -89,7 +89,7 @@ pub type ForwardDecalMaterial<B: Asset> = ExtendedMaterial<B, ForwardDecalMateri
 ///
 /// [`StandardMaterialInternal`] comes with out of the box support for forward decals.
 #[expect(type_alias_bounds, reason = "Type alias generics not yet stable")]
-pub type ForwardDecalMaterialInternal<B: MaterialInternal> =
+pub type ForwardDecalMaterialInternal<B: Material> =
     ExtendedMaterialInternal<B, ForwardDecalMaterialExt>;
 
 /// Material extension for a [`ForwardDecal`].

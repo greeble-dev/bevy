@@ -272,7 +272,7 @@ pub fn extract_meshlet_mesh_entities(
 
 /// For each entity in the scene, record what material ID its material was assigned in the `prepare_material_meshlet_meshes` systems,
 /// and note that the material is used by at least one entity in the scene.
-pub fn queue_material_meshlet_meshes<M: MaterialInternal>(
+pub fn queue_material_meshlet_meshes<M: Material>(
     mut instance_manager: ResMut<InstanceManager>,
     render_material_instances: Res<RenderMaterialInstances>,
 ) {

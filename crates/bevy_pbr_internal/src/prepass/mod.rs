@@ -4,7 +4,7 @@ use crate::{
     alpha_mode_pipeline_key, binding_arrays_are_usable, buffer_layout,
     collect_meshes_for_gpu_building, material_bind_groups::MaterialBindGroupAllocator,
     queue_material_meshes, set_mesh_motion_vector_flags, setup_morph_and_skinning_defs, skin,
-    DrawMesh, EntitySpecializationTicks, MaterialInternal, MaterialPipeline, MaterialPipelineKey,
+    DrawMesh, EntitySpecializationTicks, Material, MaterialPipeline, MaterialPipelineKey,
     MeshLayouts, MeshPipeline, MeshPipelineKey, PreparedMaterial, RenderLightmaps,
     RenderMaterialInstances, RenderMeshInstanceFlags, RenderMeshInstances, RenderPhaseType,
     SetMaterialBindGroup, SetMeshBindGroup, ShadowView, StandardMaterialInternal,
@@ -79,15 +79,15 @@ pub const PREPASS_IO_SHADER_HANDLE: Handle<Shader> =
 /// Sets up everything required to use the prepass pipeline.
 ///
 /// This does not add the actual prepasses, see [`PrepassPlugin`] for that.
-pub struct PrepassPipelinePlugin<M: MaterialInternal>(PhantomData<M>);
+pub struct PrepassPipelinePlugin<M: Material>(PhantomData<M>);
 
-impl<M: MaterialInternal> Default for PrepassPipelinePlugin<M> {
+impl<M: Material> Default for PrepassPipelinePlugin<M> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<M: MaterialInternal> Plugin for PrepassPipelinePlugin<M>
+impl<M: Material> Plugin for PrepassPipelinePlugin<M>
 where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
@@ -146,13 +146,13 @@ where
 /// Sets up the prepasses for a [`Material`].
 ///
 /// This depends on the [`PrepassPipelinePlugin`].
-pub struct PrepassPlugin<M: MaterialInternal> {
+pub struct PrepassPlugin<M: Material> {
     /// Debugging flags that can optionally be set when constructing the renderer.
     pub debug_flags: RenderDebugFlags,
     pub phantom: PhantomData<M>,
 }
 
-impl<M: MaterialInternal> PrepassPlugin<M> {
+impl<M: Material> PrepassPlugin<M> {
     /// Creates a new [`PrepassPlugin`] with the given debug flags.
     pub fn new(debug_flags: RenderDebugFlags) -> Self {
         PrepassPlugin {
@@ -162,7 +162,7 @@ impl<M: MaterialInternal> PrepassPlugin<M> {
     }
 }
 
-impl<M: MaterialInternal> Plugin for PrepassPlugin<M>
+impl<M: Material> Plugin for PrepassPlugin<M>
 where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
@@ -290,7 +290,7 @@ pub fn update_mesh_previous_global_transforms(
 }
 
 #[derive(Resource)]
-pub struct PrepassPipeline<M: MaterialInternal> {
+pub struct PrepassPipeline<M: Material> {
     pub internal: PrepassPipelineInternal,
     pub material_pipeline: MaterialPipeline<M>,
 }
@@ -318,7 +318,7 @@ pub struct PrepassPipelineInternal {
     pub binding_arrays_are_usable: bool,
 }
 
-impl<M: MaterialInternal> FromWorld for PrepassPipeline<M> {
+impl<M: Material> FromWorld for PrepassPipeline<M> {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
         let render_adapter = world.resource::<RenderAdapter>();
@@ -416,7 +416,7 @@ impl<M: MaterialInternal> FromWorld for PrepassPipeline<M> {
     }
 }
 
-impl<M: MaterialInternal> SpecializedMeshPipeline for PrepassPipeline<M>
+impl<M: Material> SpecializedMeshPipeline for PrepassPipeline<M>
 where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
@@ -751,7 +751,7 @@ pub struct PrepassViewBindGroup {
     pub no_motion_vectors: Option<BindGroup>,
 }
 
-pub fn prepare_prepass_view_bind_group<M: MaterialInternal>(
+pub fn prepare_prepass_view_bind_group<M: Material>(
     render_device: Res<RenderDevice>,
     prepass_pipeline: Res<PrepassPipeline<M>>,
     view_uniforms: Res<ViewUniforms>,
@@ -914,7 +914,7 @@ pub fn specialize_prepass_material_meshes<M>(
         Res<EntitySpecializationTicks<M>>,
     ),
 ) where
-    M: MaterialInternal,
+    M: Material,
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     for (extracted_view, visible_entities, msaa, motion_vector_prepass, deferred_prepass) in &views
@@ -1064,7 +1064,7 @@ pub fn specialize_prepass_material_meshes<M>(
     }
 }
 
-pub fn queue_prepass_material_meshes<M: MaterialInternal>(
+pub fn queue_prepass_material_meshes<M: Material>(
     render_mesh_instances: Res<RenderMeshInstances>,
     render_materials: Res<RenderAssets<PreparedMaterial<M>>>,
     render_material_instances: Res<RenderMaterialInstances>,

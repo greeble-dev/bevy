@@ -1625,7 +1625,7 @@ fn despawn_entities(commands: &mut Commands, entities: Vec<Entity>) {
 
 // These will be extracted in the material extraction, which will also clear the needs_specialization
 // collection.
-pub fn check_light_entities_needing_specialization<M: MaterialInternal>(
+pub fn check_light_entities_needing_specialization<M: Material>(
     needs_specialization: Query<
         Entity,
         (
@@ -1723,7 +1723,7 @@ pub fn check_views_lights_need_specialization(
     }
 }
 
-pub fn specialize_shadows<M: MaterialInternal>(
+pub fn specialize_shadows<M: Material>(
     prepass_pipeline: Res<PrepassPipeline<M>>,
     (
         render_meshes,
@@ -1915,7 +1915,7 @@ pub fn specialize_shadows<M: MaterialInternal>(
 /// For each shadow cascade, iterates over all the meshes "visible" from it and
 /// adds them to [`BinnedRenderPhase`]s or [`SortedRenderPhase`]s as
 /// appropriate.
-pub fn queue_shadows<M: MaterialInternal>(
+pub fn queue_shadows<M: Material>(
     shadow_draw_functions: Res<DrawFunctions<Shadow>>,
     render_mesh_instances: Res<RenderMeshInstances>,
     render_materials: Res<RenderAssets<PreparedMaterial<M>>>,
