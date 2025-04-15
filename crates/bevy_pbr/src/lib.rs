@@ -10,13 +10,14 @@ pub use bevy_pbr_internal::{
     decal, irradiance_volume, light_consts, queue_material_meshes, wireframe, Atmosphere,
     AtmosphereSettings, CascadeShadowConfigBuilder, CubemapVisibleEntities,
     DefaultOpaqueRendererMethod, DirectionalLight, DirectionalLightShadowMap, DrawMesh,
-    ExtendedMaterial, ExtractedPointLight, FogVolume, GlobalClusterableObjectMeta, Lightmap,
-    MaterialExtension, MaterialPipeline, MaterialPipelineKey, MeshInputUniform, MeshMaterial3d,
-    MeshPipeline, MeshPipelineKey, MeshPipelineViewLayoutKey, MeshUniform, NotShadowCaster,
-    NotShadowReceiver, PbrPlugin, PointLight, PointLightShadowMap, RenderMeshInstances,
-    ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceReflections,
-    SetMeshBindGroup, SetMeshViewBindGroup, ShadowFilteringMethod, SpotLight,
-    TransmittedShadowReceiver, VisibleMeshEntities, VolumetricFog, VolumetricLight, MAX_JOINTS,
+    ExtendedMaterial, ExtendedMaterialInternal, ExtractedPointLight, FogVolume,
+    GlobalClusterableObjectMeta, Lightmap, MaterialExtension, MaterialPipeline,
+    MaterialPipelineKey, MeshInputUniform, MeshMaterial3d, MeshPipeline, MeshPipelineKey,
+    MeshPipelineViewLayoutKey, MeshUniform, NotShadowCaster, NotShadowReceiver, PbrPlugin,
+    PointLight, PointLightShadowMap, RenderMeshInstances, ScreenSpaceAmbientOcclusion,
+    ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceReflections, SetMeshBindGroup,
+    SetMeshViewBindGroup, ShadowFilteringMethod, SpotLight, TransmittedShadowReceiver,
+    VisibleMeshEntities, VolumetricFog, VolumetricLight, MAX_JOINTS,
 };
 
 pub use bevy_pbr_interface::{OpaqueRendererMethod, StandardMaterial, UvChannel};
@@ -26,7 +27,7 @@ pub mod prelude {
     pub use bevy_pbr_internal::{
         environment_map::EnvironmentMapLight, light_consts, AmbientLight, Atmosphere,
         CascadeShadowConfigBuilder, DirectionalLight, DistanceFog, FogFalloff, LightProbe,
-        MaterialPlugin, MeshMaterial3d, PointLight, SpotLight,
+        MaterialPlugin, MeshMaterial3d, PointLight, SpotLight, StandardMaterialInternal,
     };
 
     #[doc(hidden)]
