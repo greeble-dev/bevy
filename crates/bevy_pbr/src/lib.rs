@@ -29,3 +29,13 @@ pub mod prelude {
         StandardMaterial,
     };
 }
+
+/// Experimental features that are not yet finished. Please report any issues you encounter!
+///
+/// Expect bugs, missing features, compatibility issues, low performance, and/or future breaking changes.
+#[cfg(feature = "meshlet")]
+pub mod experimental {
+    /// Render high-poly 3d meshes using an efficient GPU-driven method.
+    /// See [`MeshletPlugin`](meshlet::MeshletPlugin) and [`MeshletMesh`](meshlet::MeshletMesh) for details.
+    pub use bevy_pbr_internal::experimental::meshlet;
+}
