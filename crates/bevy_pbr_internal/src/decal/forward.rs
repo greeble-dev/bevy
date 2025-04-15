@@ -1,11 +1,12 @@
 use crate::{
-    ExtendedMaterialInternal, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
-    MaterialInternal, MaterialPlugin, StandardMaterialInternal,
+    ExtendedMaterial, ExtendedMaterialInternal, MaterialExtension, MaterialExtensionKey,
+    MaterialExtensionPipeline, MaterialInternal, MaterialPlugin, StandardMaterialInternal,
 };
 use bevy_app::{App, Plugin};
 use bevy_asset::{load_internal_asset, weak_handle, Asset, Assets, Handle};
 use bevy_ecs::component::Component;
 use bevy_math::{prelude::Rectangle, Quat, Vec2, Vec3};
+use bevy_pbr_interface::Material;
 use bevy_reflect::{Reflect, TypePath};
 use bevy_render::render_asset::RenderAssets;
 use bevy_render::render_resource::{AsBindGroupShaderType, ShaderType};
@@ -50,7 +51,7 @@ impl Plugin for ForwardDecalPlugin {
         );
 
         app.add_plugins(
-            MaterialPlugin::<ForwardDecalMaterial<StandardMaterialInternal>> {
+            MaterialPlugin::<ForwardDecalMaterialInternal<StandardMaterialInternal>> {
                 prepass_enabled: false,
                 shadows_enabled: false,
                 debug_flags: RenderDebugFlags::default(),
@@ -81,7 +82,15 @@ pub struct ForwardDecal;
 ///
 /// [`StandardMaterial`] comes with out of the box support for forward decals.
 #[expect(type_alias_bounds, reason = "Type alias generics not yet stable")]
-pub type ForwardDecalMaterial<B: MaterialInternal> =
+pub type ForwardDecalMaterial<B: Material> = ExtendedMaterial<B, ForwardDecalMaterialExt>;
+
+/// Type alias for an extended material with a [`ForwardDecalMaterialExt`] extension.
+///
+/// Make sure to register the [`MaterialPlugin`] for this material in your app setup.
+///
+/// [`StandardMaterialInternal`] comes with out of the box support for forward decals.
+#[expect(type_alias_bounds, reason = "Type alias generics not yet stable")]
+pub type ForwardDecalMaterialInternal<B: MaterialInternal> =
     ExtendedMaterialInternal<B, ForwardDecalMaterialExt>;
 
 /// Material extension for a [`ForwardDecal`].
