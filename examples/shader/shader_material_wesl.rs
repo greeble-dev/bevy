@@ -115,6 +115,12 @@ impl From<&CustomMaterial> for CustomMaterialKey {
 }
 
 impl Material for CustomMaterial {
+    type SourceAsset = Self;
+
+    fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
+        source_asset.clone()
+    }
+
     fn fragment_shader() -> ShaderRef {
         FRAGMENT_SHADER_ASSET_PATH.into()
     }
