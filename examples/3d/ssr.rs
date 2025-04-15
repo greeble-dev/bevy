@@ -13,7 +13,8 @@ use bevy::{
     input::mouse::MouseWheel,
     math::{vec3, vec4},
     pbr::{
-        DefaultOpaqueRendererMethod, ExtendedMaterial, MaterialExtension, ScreenSpaceReflections,
+        DefaultOpaqueRendererMethod, ExtendedMaterial, ExtendedMaterialInternal, MaterialExtension,
+        ScreenSpaceReflections,
     },
     prelude::*,
     render::render_resource::{AsBindGroup, ShaderRef, ShaderType},
@@ -105,7 +106,9 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(MaterialPlugin::<ExtendedMaterial<StandardMaterial, Water>>::default())
+        .add_plugins(MaterialPlugin::<
+            ExtendedMaterialInternal<StandardMaterialInternal, Water>,
+        >::default())
         .add_systems(Startup, setup)
         .add_systems(Update, rotate_model)
         .add_systems(Update, move_camera)

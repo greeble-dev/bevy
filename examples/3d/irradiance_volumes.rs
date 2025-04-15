@@ -18,7 +18,8 @@ use bevy::{
     core_pipeline::Skybox,
     math::{uvec3, vec3},
     pbr::{
-        irradiance_volume::IrradianceVolume, ExtendedMaterial, MaterialExtension, NotShadowCaster,
+        irradiance_volume::IrradianceVolume, ExtendedMaterial, ExtendedMaterialInternal,
+        MaterialExtension, NotShadowCaster,
     },
     prelude::*,
     render::render_resource::{AsBindGroup, ShaderRef, ShaderType},
@@ -129,6 +130,8 @@ struct VoxelCube;
 struct VoxelCubeParent;
 
 type VoxelVisualizationMaterial = ExtendedMaterial<StandardMaterial, VoxelVisualizationExtension>;
+type VoxelVisualizationMaterialInternal =
+    ExtendedMaterialInternal<StandardMaterialInternal, VoxelVisualizationExtension>;
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 struct VoxelVisualizationExtension {
@@ -154,7 +157,7 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(MaterialPlugin::<VoxelVisualizationMaterial>::default())
+        .add_plugins(MaterialPlugin::<VoxelVisualizationMaterialInternal>::default())
         .init_resource::<AppStatus>()
         .init_resource::<ExampleAssets>()
         .insert_resource(AmbientLight {
