@@ -2,7 +2,6 @@ use alloc::borrow::Cow;
 
 use bevy_asset::{Asset, Handle};
 use bevy_ecs::system::SystemParamItem;
-use bevy_pbr_interface::Material;
 use bevy_platform::{collections::HashSet, hash::FixedHasher};
 use bevy_reflect::{impl_type_path, Reflect, TypePath};
 use bevy_render::{
@@ -135,14 +134,14 @@ pub trait MaterialExtension: Asset + AsBindGroup + Clone + Sized {
 #[derive(Asset, Clone, Debug, Reflect)]
 #[reflect(type_path = false)]
 #[reflect(Clone)]
-pub struct ExtendedMaterial<B: Material, E: MaterialExtension> {
+pub struct ExtendedMaterial<B: Asset + Clone, E: MaterialExtension> {
     pub base: B,
     pub extension: E,
 }
 
 impl<B, E> Default for ExtendedMaterial<B, E>
 where
-    B: Material + Default,
+    B: Asset + Default + Clone,
     E: MaterialExtension + Default,
 {
     fn default() -> Self {
@@ -155,9 +154,7 @@ where
 
 // We don't use the `TypePath` derive here due to a bug where `#[reflect(type_path = false)]`
 // causes the `TypePath` derive to not generate an implementation.
-impl_type_path!((in bevy_pbr::extended_material) ExtendedMaterial<B: Material, E: MaterialExtension>);
-
-impl<B: Material, E: MaterialExtension> Material for ExtendedMaterial<B, E> {}
+impl_type_path!((in bevy_pbr::extended_material) ExtendedMaterial<B: Asset + Clone, E: MaterialExtension>);
 
 #[derive(Clone, Debug, TypePath)]
 pub struct ExtendedMaterialInternal<B: MaterialInternal, E: MaterialExtension> {

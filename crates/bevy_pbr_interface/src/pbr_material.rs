@@ -5,7 +5,7 @@ use bevy_math::{Affine2, Affine3, Mat2, Mat3, Vec2, Vec3};
 use bevy_reflect::{std_traits::ReflectDefault, Reflect};
 use bevy_render::{alpha::AlphaMode, render_resource::Face};
 
-use crate::{parallax::ParallaxMappingMethod, Material, OpaqueRendererMethod};
+use crate::{parallax::ParallaxMappingMethod, OpaqueRendererMethod};
 
 /// An enum to define which UV attribute to use for a texture.
 ///
@@ -899,5 +899,3 @@ impl From<Handle<Image>> for StandardMaterial {
         }
     }
 }
-
-impl Material for StandardMaterial {}

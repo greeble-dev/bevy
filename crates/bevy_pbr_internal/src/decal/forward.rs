@@ -6,7 +6,6 @@ use bevy_app::{App, Plugin};
 use bevy_asset::{load_internal_asset, weak_handle, Asset, Assets, Handle};
 use bevy_ecs::component::Component;
 use bevy_math::{prelude::Rectangle, Quat, Vec2, Vec3};
-use bevy_pbr_interface::Material;
 use bevy_reflect::{Reflect, TypePath};
 use bevy_render::render_asset::RenderAssets;
 use bevy_render::render_resource::{AsBindGroupShaderType, ShaderType};
@@ -82,7 +81,7 @@ pub struct ForwardDecal;
 ///
 /// [`StandardMaterial`] comes with out of the box support for forward decals.
 #[expect(type_alias_bounds, reason = "Type alias generics not yet stable")]
-pub type ForwardDecalMaterial<B: Material> = ExtendedMaterial<B, ForwardDecalMaterialExt>;
+pub type ForwardDecalMaterial<B: Asset> = ExtendedMaterial<B, ForwardDecalMaterialExt>;
 
 /// Type alias for an extended material with a [`ForwardDecalMaterialExt`] extension.
 ///

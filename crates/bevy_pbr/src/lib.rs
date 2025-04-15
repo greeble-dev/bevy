@@ -32,7 +32,7 @@ pub mod prelude {
     };
 
     #[doc(hidden)]
-    pub use bevy_pbr_interface::{Material, ParallaxMappingMethod, StandardMaterial};
+    pub use bevy_pbr_interface::{ParallaxMappingMethod, StandardMaterial};
 }
 
 /// Experimental features that are not yet finished. Please report any issues you encounter!

@@ -1,7 +1,4 @@
-use bevy_asset::Asset;
 use bevy_reflect::{std_traits::ReflectDefault, Reflect};
-
-pub trait Material: Asset + Clone + Sized {}
 
 /// Render method used for opaque materials.
 ///
