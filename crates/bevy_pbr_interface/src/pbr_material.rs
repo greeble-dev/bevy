@@ -13,3 +13,5 @@ pub enum UvChannel {
     Uv0,
     Uv1,
 }
+
+pub const DEFAULT_PBR_DEFERRED_LIGHTING_PASS_ID: u8 = 1;
