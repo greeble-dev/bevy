@@ -27,7 +27,8 @@ pub mod prelude {
     pub use bevy_pbr_internal::{
         environment_map::EnvironmentMapLight, light_consts, AmbientLight, Atmosphere,
         CascadeShadowConfigBuilder, DirectionalLight, DistanceFog, FogFalloff, LightProbe,
-        MaterialPlugin, MeshMaterial3d, PointLight, SpotLight, StandardMaterialInternal,
+        MaterialInternal, MaterialPlugin, MeshMaterial3d, PointLight, SpotLight,
+        StandardMaterialInternal,
     };
 
     #[doc(hidden)]
