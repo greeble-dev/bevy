@@ -17,7 +17,7 @@ trace = [
   "bevy_anti_aliasing?/trace",
   "bevy_ecs/trace",
   "bevy_log/trace",
-  "bevy_pbr?/trace",
+  "bevy_pbr_internal?/trace",
   "bevy_render?/trace",
   "bevy_winit?/trace",
 ]
@@ -81,7 +81,7 @@ symphonia-wav = ["bevy_audio/symphonia-wav"]
 # Shader formats
 shader_format_glsl = [
   "bevy_render/shader_format_glsl",
-  "bevy_pbr?/shader_format_glsl",
+  "bevy_pbr_internal?/shader_format_glsl",
 ]
 shader_format_spirv = ["bevy_render/shader_format_spirv"]
 shader_format_wesl = ["bevy_render/shader_format_wesl"]
@@ -120,28 +120,28 @@ android-game-activity = ["bevy_winit/android-game-activity"]
 
 # Transmission textures in `StandardMaterial`:
 pbr_transmission_textures = [
-  "bevy_pbr?/pbr_transmission_textures",
+  "bevy_pbr_internal?/pbr_transmission_textures",
   "bevy_gltf?/pbr_transmission_textures",
 ]
 
 # Multi-layer material textures in `StandardMaterial`:
 pbr_multi_layer_material_textures = [
-  "bevy_pbr?/pbr_multi_layer_material_textures",
+  "bevy_pbr_internal?/pbr_multi_layer_material_textures",
   "bevy_gltf?/pbr_multi_layer_material_textures",
 ]
 
 # Anisotropy texture in `StandardMaterial`:
 pbr_anisotropy_texture = [
-  "bevy_pbr?/pbr_anisotropy_texture",
+  "bevy_pbr_internal?/pbr_anisotropy_texture",
   "bevy_gltf?/pbr_anisotropy_texture",
 ]
 
 # Percentage-closer soft shadows
-experimental_pbr_pcss = ["bevy_pbr?/experimental_pbr_pcss"]
+experimental_pbr_pcss = ["bevy_pbr_internal?/experimental_pbr_pcss"]
 
 # Specular textures in `StandardMaterial`:
 pbr_specular_textures = [
-  "bevy_pbr?/pbr_specular_textures",
+  "bevy_pbr_internal?/pbr_specular_textures",
   "bevy_gltf?/pbr_specular_textures",
 ]
 
@@ -149,7 +149,7 @@ pbr_specular_textures = [
 webgl = [
   "bevy_core_pipeline?/webgl",
   "bevy_anti_aliasing?/webgl",
-  "bevy_pbr?/webgl",
+  "bevy_pbr_internal?/webgl",
   "bevy_render?/webgl",
   "bevy_gizmos?/webgl",
   "bevy_sprite?/webgl",
@@ -158,7 +158,7 @@ webgl = [
 webgpu = [
   "bevy_core_pipeline?/webgpu",
   "bevy_anti_aliasing?/webgpu",
-  "bevy_pbr?/webgpu",
+  "bevy_pbr_internal?/webgpu",
   "bevy_render?/webgpu",
   "bevy_gizmos?/webgpu",
   "bevy_sprite?/webgpu",
@@ -171,7 +171,12 @@ bevy_ci_testing = ["bevy_dev_tools/bevy_ci_testing", "bevy_render?/ci_limits"]
 animation = ["bevy_animation", "bevy_gltf?/bevy_animation"]
 
 bevy_sprite = ["dep:bevy_sprite", "bevy_gizmos?/bevy_sprite", "bevy_image"]
-bevy_pbr = ["dep:bevy_pbr", "bevy_gizmos?/bevy_pbr", "bevy_image"]
+bevy_pbr = [
+  "dep:bevy_pbr",
+  "dep:bevy_pbr_internal",
+  "bevy_gizmos?/bevy_pbr",
+  "bevy_image",
+]
 bevy_window = ["dep:bevy_window", "dep:bevy_a11y"]
 bevy_core_pipeline = ["dep:bevy_core_pipeline", "bevy_image"]
 bevy_anti_aliasing = ["dep:bevy_anti_aliasing", "bevy_image"]
@@ -225,10 +230,10 @@ bevy_debug_stepping = [
 ]
 
 # Enables the meshlet renderer for dense high-poly scenes (experimental)
-meshlet = ["bevy_pbr?/meshlet"]
+meshlet = ["bevy_pbr_internal?/meshlet"]
 
 # Enables processing meshes into meshlet meshes for bevy_pbr
-meshlet_processor = ["bevy_pbr?/meshlet_processor"]
+meshlet_processor = ["bevy_pbr_internal?/meshlet_processor"]
 
 # Provides a collection of developer tools
 bevy_dev_tools = ["dep:bevy_dev_tools"]
@@ -410,6 +415,7 @@ bevy_input_focus = { path = "../bevy_input_focus", optional = true, version = "0
   "bevy_reflect",
 ] }
 bevy_pbr = { path = "../bevy_pbr", optional = true, version = "0.16.0-dev" }
+bevy_pbr_internal = { path = "../bevy_pbr_internal", optional = true, version = "0.16.0-dev" }
 bevy_picking = { path = "../bevy_picking", optional = true, version = "0.16.0-dev" }
 bevy_remote = { path = "../bevy_remote", optional = true, version = "0.16.0-dev" }
 bevy_render = { path = "../bevy_render", optional = true, version = "0.16.0-dev" }
