@@ -19,7 +19,7 @@ pub use bevy_pbr_internal::{
     TransmittedShadowReceiver, VisibleMeshEntities, VolumetricFog, VolumetricLight, MAX_JOINTS,
 };
 
-pub use bevy_pbr_interface::{StandardMaterial, UvChannel};
+pub use bevy_pbr_interface::{OpaqueRendererMethod, StandardMaterial, UvChannel};
 
 pub mod prelude {
     #[doc(hidden)]
