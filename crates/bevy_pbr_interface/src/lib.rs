@@ -5,3 +5,7 @@
     html_logo_url = "https://bevyengine.org/assets/icon.png",
     html_favicon_url = "https://bevyengine.org/assets/icon.png"
 )]
+
+mod pbr_material;
+
+pub use pbr_material::*;

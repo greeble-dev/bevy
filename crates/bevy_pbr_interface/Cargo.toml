@@ -17,6 +17,8 @@ experimental_pbr_pcss = []
 
 [dependencies]
 # bevy
+bevy_reflect = { path = "../bevy_reflect", version = "0.16.0-dev" }
+
 # other
 
 [lints]

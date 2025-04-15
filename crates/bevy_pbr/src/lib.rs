@@ -16,9 +16,11 @@ pub use bevy_pbr_internal::{
     NotShadowReceiver, OpaqueRendererMethod, PbrPlugin, PointLight, PointLightShadowMap,
     RenderMeshInstances, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
     ScreenSpaceReflections, SetMeshBindGroup, SetMeshViewBindGroup, ShadowFilteringMethod,
-    SpotLight, StandardMaterial, TransmittedShadowReceiver, UvChannel, VisibleMeshEntities,
-    VolumetricFog, VolumetricLight, MAX_JOINTS,
+    SpotLight, StandardMaterial, TransmittedShadowReceiver, VisibleMeshEntities, VolumetricFog,
+    VolumetricLight, MAX_JOINTS,
 };
+
+pub use bevy_pbr_interface::UvChannel;
 
 pub mod prelude {
     #[doc(hidden)]
