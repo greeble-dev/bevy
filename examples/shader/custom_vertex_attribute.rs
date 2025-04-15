@@ -66,6 +66,12 @@ struct CustomMaterial {
 }
 
 impl Material for CustomMaterial {
+    type SourceAsset = Self;
+
+    fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
+        source_asset.clone()
+    }
+
     fn vertex_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
     }
