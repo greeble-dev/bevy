@@ -6,6 +6,8 @@
     html_favicon_url = "https://bevyengine.org/assets/icon.png"
 )]
 
+mod material;
 mod pbr_material;
 
+pub use material::*;
 pub use pbr_material::*;

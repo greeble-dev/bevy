@@ -76,7 +76,7 @@ pub mod prelude {
         fog::{DistanceFog, FogFalloff},
         light::{light_consts, AmbientLight, DirectionalLight, PointLight, SpotLight},
         light_probe::{environment_map::EnvironmentMapLight, LightProbe},
-        material::{Material, MaterialPlugin},
+        material::MaterialPlugin,
         mesh_material::MeshMaterial3d,
         parallax::ParallaxMappingMethod,
         pbr_material::StandardMaterial,

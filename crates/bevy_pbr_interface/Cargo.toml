@@ -17,6 +17,7 @@ experimental_pbr_pcss = []
 
 [dependencies]
 # bevy
+bevy_asset = { path = "../bevy_asset", version = "0.16.0-dev" }
 bevy_reflect = { path = "../bevy_reflect", version = "0.16.0-dev" }
 
 # other

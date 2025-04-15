@@ -2,6 +2,7 @@ use alloc::borrow::Cow;
 
 use bevy_asset::{Asset, Handle};
 use bevy_ecs::system::SystemParamItem;
+use bevy_pbr_interface::Material;
 use bevy_platform::{collections::HashSet, hash::FixedHasher};
 use bevy_reflect::{impl_type_path, Reflect, TypePath};
 use bevy_render::{
@@ -16,8 +17,7 @@ use bevy_render::{
 };
 
 use crate::{
-    Material, MaterialInternal, MaterialPipeline, MaterialPipelineKey, MeshPipeline,
-    MeshPipelineKey,
+    MaterialInternal, MaterialPipeline, MaterialPipelineKey, MeshPipeline, MeshPipelineKey,
 };
 
 pub struct MaterialExtensionPipeline {

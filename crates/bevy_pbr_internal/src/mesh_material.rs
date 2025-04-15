@@ -1,7 +1,7 @@
-use crate::Material;
 use bevy_asset::{AsAssetId, AssetId, Handle};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{component::Component, reflect::ReflectComponent};
+use bevy_pbr_interface::Material;
 use bevy_reflect::{std_traits::ReflectDefault, Reflect};
 use derive_more::derive::From;
 

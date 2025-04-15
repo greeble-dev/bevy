@@ -8,7 +8,7 @@ use crate::meshlet::{
 };
 use crate::*;
 use bevy_asset::prelude::AssetChanged;
-use bevy_asset::{Asset, AssetEvents, AssetId, AssetServer, UntypedAssetId};
+use bevy_asset::{AssetEvents, AssetId, AssetServer, UntypedAssetId};
 use bevy_core_pipeline::deferred::{AlphaMask3dDeferred, Opaque3dDeferred};
 use bevy_core_pipeline::prepass::{AlphaMask3dPrepass, Opaque3dPrepass};
 use bevy_core_pipeline::{
@@ -29,6 +29,7 @@ use bevy_ecs::{
         SystemParamItem,
     },
 };
+use bevy_pbr_interface::Material;
 use bevy_platform::collections::hash_map::Entry;
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_platform::hash::FixedHasher;
@@ -124,8 +125,6 @@ use tracing::error;
 /// @group(2) @binding(1) var color_texture: texture_2d<f32>;
 /// @group(2) @binding(2) var color_sampler: sampler;
 /// ```
-pub trait Material: Asset + Clone + Sized {}
-
 pub trait MaterialInternal: AsBindGroup + Clone + Sized + TypePath + Send + Sync + 'static {
     type SourceAsset: Material;
 
