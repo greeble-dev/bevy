@@ -13,6 +13,7 @@ use bevy_core_pipeline::{
     tonemapping::{DebandDither, Tonemapping},
 };
 use bevy_derive::{Deref, DerefMut};
+use bevy_pbr_interface::OpaqueRendererMethod;
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_render::{
     camera::TemporalJitter,
