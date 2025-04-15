@@ -29,7 +29,7 @@ pub struct MeshletViewMaterialsMainOpaquePass(pub Vec<(u32, CachedRenderPipeline
 
 /// Prepare [`Material`] pipelines for [`super::MeshletMesh`] entities for use in [`super::MeshletMainOpaquePass3dNode`],
 /// and register the material with [`InstanceManager`].
-pub fn prepare_material_meshlet_meshes_main_opaque_pass<M: Material>(
+pub fn prepare_material_meshlet_meshes_main_opaque_pass<M: MaterialInternal>(
     resource_manager: ResMut<ResourceManager>,
     mut instance_manager: ResMut<InstanceManager>,
     mut cache: Local<HashMap<MeshPipelineKey, CachedRenderPipelineId>>,
@@ -151,7 +151,7 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass<M: Material>(
         for material_id in render_material_instances
             .instances
             .values()
-            .flat_map(|instance| instance.asset_id.try_typed::<M>().ok())
+            .flat_map(|instance| instance.asset_id.try_typed::<M::SourceAsset>().ok())
             .collect::<HashSet<_>>()
         {
             let Some(material) = render_materials.get(material_id) else {
@@ -254,7 +254,7 @@ pub struct MeshletViewMaterialsDeferredGBufferPrepass(
 
 /// Prepare [`Material`] pipelines for [`super::MeshletMesh`] entities for use in [`super::MeshletPrepassNode`],
 /// and [`super::MeshletDeferredGBufferPrepassNode`] and register the material with [`InstanceManager`].
-pub fn prepare_material_meshlet_meshes_prepass<M: Material>(
+pub fn prepare_material_meshlet_meshes_prepass<M: MaterialInternal>(
     resource_manager: ResMut<ResourceManager>,
     mut instance_manager: ResMut<InstanceManager>,
     mut cache: Local<HashMap<MeshPipelineKey, CachedRenderPipelineId>>,
@@ -301,7 +301,7 @@ pub fn prepare_material_meshlet_meshes_prepass<M: Material>(
         for material_id in render_material_instances
             .instances
             .values()
-            .flat_map(|instance| instance.asset_id.try_typed::<M>().ok())
+            .flat_map(|instance| instance.asset_id.try_typed::<M::SourceAsset>().ok())
             .collect::<HashSet<_>>()
         {
             let Some(material) = render_materials.get(material_id) else {

@@ -1,6 +1,6 @@
 use crate::{
-    ExtendedMaterial, Material, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
-    MaterialPlugin, StandardMaterial,
+    ExtendedMaterialInternal, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
+    MaterialInternal, MaterialPlugin, StandardMaterialInternal,
 };
 use bevy_app::{App, Plugin};
 use bevy_asset::{load_internal_asset, weak_handle, Asset, Assets, Handle};
@@ -49,12 +49,14 @@ impl Plugin for ForwardDecalPlugin {
                 .unwrap(),
         );
 
-        app.add_plugins(MaterialPlugin::<ForwardDecalMaterial<StandardMaterial>> {
-            prepass_enabled: false,
-            shadows_enabled: false,
-            debug_flags: RenderDebugFlags::default(),
-            ..Default::default()
-        });
+        app.add_plugins(
+            MaterialPlugin::<ForwardDecalMaterial<StandardMaterialInternal>> {
+                prepass_enabled: false,
+                shadows_enabled: false,
+                debug_flags: RenderDebugFlags::default(),
+                ..Default::default()
+            },
+        );
     }
 }
 
@@ -79,7 +81,8 @@ pub struct ForwardDecal;
 ///
 /// [`StandardMaterial`] comes with out of the box support for forward decals.
 #[expect(type_alias_bounds, reason = "Type alias generics not yet stable")]
-pub type ForwardDecalMaterial<B: Material> = ExtendedMaterial<B, ForwardDecalMaterialExt>;
+pub type ForwardDecalMaterial<B: MaterialInternal> =
+    ExtendedMaterialInternal<B, ForwardDecalMaterialExt>;
 
 /// Material extension for a [`ForwardDecal`].
 ///

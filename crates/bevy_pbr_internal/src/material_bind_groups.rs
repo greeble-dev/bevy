@@ -30,7 +30,7 @@ use bevy_utils::default;
 use bytemuck::Pod;
 use tracing::{error, trace};
 
-use crate::Material;
+use crate::MaterialInternal;
 
 /// A resource that places materials into bind groups and tracks their
 /// resources.
@@ -41,7 +41,7 @@ use crate::Material;
 #[derive(Resource)]
 pub enum MaterialBindGroupAllocator<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// The allocator used when the material is bindless.
     Bindless(Box<MaterialBindGroupBindlessAllocator<M>>),
@@ -53,7 +53,7 @@ where
 /// their resources.
 pub struct MaterialBindGroupBindlessAllocator<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// The slabs, each of which contains a bind group.
     slabs: Vec<MaterialBindlessSlab<M>>,
@@ -81,7 +81,7 @@ where
 /// A single bind group and the bookkeeping necessary to allocate into it.
 pub struct MaterialBindlessSlab<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// The current bind group, if it's up to date.
     ///
@@ -132,7 +132,7 @@ where
 /// `#[bindless(index_table(binding(B)))]` attribute in `AsBindGroup`.
 struct MaterialBindlessIndexTable<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// The buffer containing the mappings.
     buffer: RetainedRawBufferVec<u32>,
@@ -191,7 +191,7 @@ where
 /// The allocator that stores bind groups for non-bindless materials.
 pub struct MaterialBindGroupNonBindlessAllocator<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// A mapping from [`MaterialBindGroupIndex`] to the bind group allocated in
     /// each slot.
@@ -210,7 +210,7 @@ where
 /// currently managing.
 enum MaterialNonBindlessAllocatedBindGroup<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// An unprepared bind group.
     ///
@@ -353,14 +353,14 @@ trait GetBindingResourceId {
 /// The public interface to a slab, which represents a single bind group.
 pub struct MaterialSlab<'a, M>(MaterialSlabImpl<'a, M>)
 where
-    M: Material;
+    M: MaterialInternal;
 
 /// The actual implementation of a material slab.
 ///
 /// This has bindless and non-bindless variants.
 enum MaterialSlabImpl<'a, M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// The implementation of the slab interface we use when the slab
     /// is bindless.
@@ -374,7 +374,7 @@ where
 /// manages.
 enum MaterialNonBindlessSlab<'a, M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// A slab that has a bind group.
     Prepared(&'a PreparedBindGroup<M::Data>),
@@ -482,7 +482,7 @@ impl GetBindingResourceId for TextureView {
 
 impl<M> MaterialBindGroupAllocator<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// Creates a new [`MaterialBindGroupAllocator`] managing the data for a
     /// single material.
@@ -615,7 +615,7 @@ where
 
 impl<M> MaterialBindlessIndexTable<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// Creates a new [`MaterialBindlessIndexTable`] for a single slab.
     fn new(
@@ -749,7 +749,7 @@ where
 
 impl<M> MaterialBindGroupBindlessAllocator<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// Creates a new [`MaterialBindGroupBindlessAllocator`] managing the data
     /// for a single bindless material.
@@ -880,7 +880,7 @@ where
 
 impl<M> FromWorld for MaterialBindGroupAllocator<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>();
@@ -890,7 +890,7 @@ where
 
 impl<M> MaterialBindlessSlab<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// Attempts to allocate the given unprepared bind group in this slab.
     ///
@@ -1686,7 +1686,7 @@ where
 /// into account.
 pub fn material_uses_bindless_resources<M>(render_device: &RenderDevice) -> bool
 where
-    M: Material,
+    M: MaterialInternal,
 {
     M::bindless_slot_count().is_some_and(|bindless_slot_count| {
         M::bindless_supported(render_device) && bindless_slot_count.resolve() > 1
@@ -1695,7 +1695,7 @@ where
 
 impl<M> MaterialBindlessSlab<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// Creates a new [`MaterialBindlessSlab`] for a material with the given
     /// bindless descriptor.
@@ -1828,7 +1828,7 @@ impl FromWorld for FallbackBindlessResources {
 
 impl<M> MaterialBindGroupNonBindlessAllocator<M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// Creates a new [`MaterialBindGroupNonBindlessAllocator`] managing the
     /// bind groups for a single non-bindless material.
@@ -1996,7 +1996,7 @@ where
 
 impl<'a, M> MaterialSlab<'a, M>
 where
-    M: Material,
+    M: MaterialInternal,
 {
     /// Returns the extra data associated with this material.
     ///

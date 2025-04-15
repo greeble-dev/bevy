@@ -3,7 +3,7 @@ use alloc::borrow::Cow;
 use bevy_asset::{Asset, Handle};
 use bevy_ecs::system::SystemParamItem;
 use bevy_platform::{collections::HashSet, hash::FixedHasher};
-use bevy_reflect::{impl_type_path, Reflect};
+use bevy_reflect::{impl_type_path, Reflect, TypePath};
 use bevy_render::{
     alpha::AlphaMode,
     mesh::MeshVertexBufferLayoutRef,
@@ -15,7 +15,10 @@ use bevy_render::{
     renderer::RenderDevice,
 };
 
-use crate::{Material, MaterialPipeline, MaterialPipelineKey, MeshPipeline, MeshPipelineKey};
+use crate::{
+    Material, MaterialInternal, MaterialPipeline, MaterialPipelineKey, MeshPipeline,
+    MeshPipelineKey,
+};
 
 pub struct MaterialExtensionPipeline {
     pub mesh_pipeline: MeshPipeline,
@@ -154,7 +157,15 @@ where
 // causes the `TypePath` derive to not generate an implementation.
 impl_type_path!((in bevy_pbr::extended_material) ExtendedMaterial<B: Material, E: MaterialExtension>);
 
-impl<B: Material, E: MaterialExtension> AsBindGroup for ExtendedMaterial<B, E> {
+impl<B: Material, E: MaterialExtension> Material for ExtendedMaterial<B, E> {}
+
+#[derive(Clone, Debug, TypePath)]
+pub struct ExtendedMaterialInternal<B: MaterialInternal, E: MaterialExtension> {
+    pub base: B,
+    pub extension: E,
+}
+
+impl<B: MaterialInternal, E: MaterialExtension> AsBindGroup for ExtendedMaterialInternal<B, E> {
     type Data = (<B as AsBindGroup>::Data, <E as AsBindGroup>::Data);
     type Param = (<B as AsBindGroup>::Param, <E as AsBindGroup>::Param);
 
@@ -286,7 +297,18 @@ impl<B: Material, E: MaterialExtension> AsBindGroup for ExtendedMaterial<B, E> {
     }
 }
 
-impl<B: Material, E: MaterialExtension> Material for ExtendedMaterial<B, E> {
+impl<B: MaterialInternal, E: MaterialExtension> MaterialInternal
+    for ExtendedMaterialInternal<B, E>
+{
+    type SourceAsset = ExtendedMaterial<B::SourceAsset, E>;
+
+    fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
+        Self {
+            base: B::from_source_asset(source_asset.base),
+            extension: source_asset.extension,
+        }
+    }
+
     fn vertex_shader() -> ShaderRef {
         match E::vertex_shader() {
             ShaderRef::Default => B::vertex_shader(),

@@ -33,7 +33,7 @@ use bevy_platform::collections::hash_map::Entry;
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_platform::hash::FixedHasher;
 use bevy_reflect::std_traits::ReflectDefault;
-use bevy_reflect::Reflect;
+use bevy_reflect::{Reflect, TypePath};
 use bevy_render::camera::extract_cameras;
 use bevy_render::mesh::mark_3d_meshes_as_changed_if_their_assets_changed;
 use bevy_render::render_asset::prepare_assets;
@@ -124,7 +124,13 @@ use tracing::error;
 /// @group(2) @binding(1) var color_texture: texture_2d<f32>;
 /// @group(2) @binding(2) var color_sampler: sampler;
 /// ```
-pub trait Material: Asset + AsBindGroup + Clone + Sized {
+pub trait Material: Asset + Clone + Sized {}
+
+pub trait MaterialInternal: AsBindGroup + Clone + Sized + TypePath + Send + Sync + 'static {
+    type SourceAsset: Material;
+
+    fn from_source_asset(source_asset: Self::SourceAsset) -> Self;
+
     /// Returns this material's vertex shader. If [`ShaderRef::Default`] is returned, the default mesh vertex shader
     /// will be used.
     fn vertex_shader() -> ShaderRef {
@@ -250,7 +256,7 @@ pub trait Material: Asset + AsBindGroup + Clone + Sized {
 
 /// Adds the necessary ECS resources and render logic to enable rendering entities using the given [`Material`]
 /// asset type.
-pub struct MaterialPlugin<M: Material> {
+pub struct MaterialPlugin<M: MaterialInternal> {
     /// Controls if the prepass is enabled for the Material.
     /// For more information about what a prepass is, see the [`bevy_core_pipeline::prepass`] docs.
     ///
@@ -264,7 +270,7 @@ pub struct MaterialPlugin<M: Material> {
     pub _marker: PhantomData<M>,
 }
 
-impl<M: Material> Default for MaterialPlugin<M> {
+impl<M: MaterialInternal> Default for MaterialPlugin<M> {
     fn default() -> Self {
         Self {
             prepass_enabled: true,
@@ -275,13 +281,13 @@ impl<M: Material> Default for MaterialPlugin<M> {
     }
 }
 
-impl<M: Material> Plugin for MaterialPlugin<M>
+impl<M: MaterialInternal> Plugin for MaterialPlugin<M>
 where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     fn build(&self, app: &mut App) {
-        app.init_asset::<M>()
-            .register_type::<MeshMaterial3d<M>>()
+        app.init_asset::<M::SourceAsset>()
+            .register_type::<MeshMaterial3d<M::SourceAsset>>()
             .init_resource::<EntitiesNeedingSpecialization<M>>()
             .add_plugins((RenderAssetPlugin::<PreparedMaterial<M>>::default(),))
             .add_systems(
@@ -416,14 +422,14 @@ pub(crate) static DUMMY_MESH_MATERIAL: AssetId<StandardMaterial> =
     AssetId::<StandardMaterial>::invalid();
 
 /// A key uniquely identifying a specialized [`MaterialPipeline`].
-pub struct MaterialPipelineKey<M: Material> {
+pub struct MaterialPipelineKey<M: MaterialInternal> {
     pub mesh_key: MeshPipelineKey,
     pub bind_group_data: M::Data,
 }
 
-impl<M: Material> Eq for MaterialPipelineKey<M> where M::Data: PartialEq {}
+impl<M: MaterialInternal> Eq for MaterialPipelineKey<M> where M::Data: PartialEq {}
 
-impl<M: Material> PartialEq for MaterialPipelineKey<M>
+impl<M: MaterialInternal> PartialEq for MaterialPipelineKey<M>
 where
     M::Data: PartialEq,
 {
@@ -432,7 +438,7 @@ where
     }
 }
 
-impl<M: Material> Clone for MaterialPipelineKey<M>
+impl<M: MaterialInternal> Clone for MaterialPipelineKey<M>
 where
     M::Data: Clone,
 {
@@ -444,7 +450,7 @@ where
     }
 }
 
-impl<M: Material> Hash for MaterialPipelineKey<M>
+impl<M: MaterialInternal> Hash for MaterialPipelineKey<M>
 where
     M::Data: Hash,
 {
@@ -454,9 +460,9 @@ where
     }
 }
 
-/// Render pipeline data for a given [`Material`].
+/// Render pipeline data for a given [`MaterialInternal`].
 #[derive(Resource)]
-pub struct MaterialPipeline<M: Material> {
+pub struct MaterialPipeline<M: MaterialInternal> {
     pub mesh_pipeline: MeshPipeline,
     pub material_layout: BindGroupLayout,
     pub vertex_shader: Option<Handle<Shader>>,
@@ -467,7 +473,7 @@ pub struct MaterialPipeline<M: Material> {
     pub marker: PhantomData<M>,
 }
 
-impl<M: Material> Clone for MaterialPipeline<M> {
+impl<M: MaterialInternal> Clone for MaterialPipeline<M> {
     fn clone(&self) -> Self {
         Self {
             mesh_pipeline: self.mesh_pipeline.clone(),
@@ -480,7 +486,7 @@ impl<M: Material> Clone for MaterialPipeline<M> {
     }
 }
 
-impl<M: Material> SpecializedMeshPipeline for MaterialPipeline<M>
+impl<M: MaterialInternal> SpecializedMeshPipeline for MaterialPipeline<M>
 where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
@@ -516,7 +522,7 @@ where
     }
 }
 
-impl<M: Material> FromWorld for MaterialPipeline<M> {
+impl<M: MaterialInternal> FromWorld for MaterialPipeline<M> {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.resource::<AssetServer>();
         let render_device = world.resource::<RenderDevice>();
@@ -549,8 +555,10 @@ type DrawMaterial<M> = (
 );
 
 /// Sets the bind group for a given [`Material`] at the configured `I` index.
-pub struct SetMaterialBindGroup<M: Material, const I: usize>(PhantomData<M>);
-impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterialBindGroup<M, I> {
+pub struct SetMaterialBindGroup<M: MaterialInternal, const I: usize>(PhantomData<M>);
+impl<P: PhaseItem, M: MaterialInternal, const I: usize> RenderCommand<P>
+    for SetMaterialBindGroup<M, I>
+{
     type Param = (
         SRes<RenderAssets<PreparedMaterial<M>>>,
         SRes<RenderMaterialInstances>,
@@ -578,7 +586,7 @@ impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterial
         let Some(material_instance) = material_instances.instances.get(&item.main_entity()) else {
             return RenderCommandResult::Skip;
         };
-        let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M>() else {
+        let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>() else {
             return RenderCommandResult::Skip;
         };
         let Some(material) = materials.get(material_asset_id) else {
@@ -706,10 +714,13 @@ pub const fn screen_space_specular_transmission_pipeline_key(
 fn mark_meshes_as_changed_if_their_materials_changed<M>(
     mut changed_meshes_query: Query<
         &mut Mesh3d,
-        Or<(Changed<MeshMaterial3d<M>>, AssetChanged<MeshMaterial3d<M>>)>,
+        Or<(
+            Changed<MeshMaterial3d<M::SourceAsset>>,
+            AssetChanged<MeshMaterial3d<M::SourceAsset>>,
+        )>,
     >,
 ) where
-    M: Material,
+    M: MaterialInternal,
 {
     for mut mesh in &mut changed_meshes_query {
         mesh.set_changed();
@@ -718,12 +729,15 @@ fn mark_meshes_as_changed_if_their_materials_changed<M>(
 
 /// Fills the [`RenderMaterialInstances`] resources from the meshes in the
 /// scene.
-fn extract_mesh_materials<M: Material>(
+fn extract_mesh_materials<M: MaterialInternal>(
     mut material_instances: ResMut<RenderMaterialInstances>,
     changed_meshes_query: Extract<
         Query<
-            (Entity, &ViewVisibility, &MeshMaterial3d<M>),
-            Or<(Changed<ViewVisibility>, Changed<MeshMaterial3d<M>>)>,
+            (Entity, &ViewVisibility, &MeshMaterial3d<M::SourceAsset>),
+            Or<(
+                Changed<ViewVisibility>,
+                Changed<MeshMaterial3d<M::SourceAsset>>,
+            )>,
         >,
     >,
 ) {
@@ -762,9 +776,9 @@ fn extract_mesh_materials<M: Material>(
 /// bump [`RenderMaterialInstances::current_change_tick`] once.
 fn early_sweep_material_instances<M>(
     mut material_instances: ResMut<RenderMaterialInstances>,
-    mut removed_materials_query: Extract<RemovedComponents<MeshMaterial3d<M>>>,
+    mut removed_materials_query: Extract<RemovedComponents<MeshMaterial3d<M::SourceAsset>>>,
 ) where
-    M: Material,
+    M: MaterialInternal,
 {
     let last_change_tick = material_instances.current_change_tick;
 
@@ -809,7 +823,9 @@ pub(crate) fn late_sweep_material_instances(
 pub fn extract_entities_needs_specialization<M>(
     entities_needing_specialization: Extract<Res<EntitiesNeedingSpecialization<M>>>,
     mut entity_specialization_ticks: ResMut<EntitySpecializationTicks<M>>,
-    mut removed_mesh_material_components: Extract<RemovedComponents<MeshMaterial3d<M>>>,
+    mut removed_mesh_material_components: Extract<
+        RemovedComponents<MeshMaterial3d<M::SourceAsset>>,
+    >,
     mut specialized_material_pipeline_cache: ResMut<SpecializedMaterialPipelineCache<M>>,
     mut specialized_prepass_material_pipeline_cache: Option<
         ResMut<SpecializedPrepassMaterialPipelineCache<M>>,
@@ -820,7 +836,7 @@ pub fn extract_entities_needs_specialization<M>(
     views: Query<&ExtractedView>,
     ticks: SystemChangeTick,
 ) where
-    M: Material,
+    M: MaterialInternal,
 {
     // Clean up any despawned entities, we do this first in case the removed material was re-added
     // the same frame, thus will appear both in the removed components list and have been added to
@@ -930,16 +946,16 @@ pub fn check_entities_needing_specialization<M>(
             Or<(
                 Changed<Mesh3d>,
                 AssetChanged<Mesh3d>,
-                Changed<MeshMaterial3d<M>>,
-                AssetChanged<MeshMaterial3d<M>>,
+                Changed<MeshMaterial3d<M::SourceAsset>>,
+                AssetChanged<MeshMaterial3d<M::SourceAsset>>,
             )>,
-            With<MeshMaterial3d<M>>,
+            With<MeshMaterial3d<M::SourceAsset>>,
         ),
     >,
     mut par_local: Local<Parallel<Vec<Entity>>>,
     mut entities_needing_specialization: ResMut<EntitiesNeedingSpecialization<M>>,
 ) where
-    M: Material,
+    M: MaterialInternal,
 {
     entities_needing_specialization.clear();
 
@@ -950,7 +966,7 @@ pub fn check_entities_needing_specialization<M>(
     par_local.drain_into(&mut entities_needing_specialization);
 }
 
-pub fn specialize_material_meshes<M: Material>(
+pub fn specialize_material_meshes<M: MaterialInternal>(
     render_meshes: Res<RenderAssets<RenderMesh>>,
     render_materials: Res<RenderAssets<PreparedMaterial<M>>>,
     render_mesh_instances: Res<RenderMeshInstances>,
@@ -1013,7 +1029,8 @@ pub fn specialize_material_meshes<M: Material>(
             else {
                 continue;
             };
-            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M>() else {
+            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>()
+            else {
                 continue;
             };
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(*visible_entity)
@@ -1107,7 +1124,7 @@ pub fn specialize_material_meshes<M: Material>(
 
 /// For each view, iterates over all the meshes visible from that view and adds
 /// them to [`BinnedRenderPhase`]s or [`SortedRenderPhase`]s as appropriate.
-pub fn queue_material_meshes<M: Material>(
+pub fn queue_material_meshes<M: MaterialInternal>(
     render_materials: Res<RenderAssets<PreparedMaterial<M>>>,
     render_mesh_instances: Res<RenderMeshInstances>,
     render_material_instances: Res<RenderMaterialInstances>,
@@ -1164,7 +1181,8 @@ pub fn queue_material_meshes<M: Material>(
             else {
                 continue;
             };
-            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M>() else {
+            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>()
+            else {
                 continue;
             };
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(*visible_entity)
@@ -1359,15 +1377,15 @@ pub enum RenderPhaseType {
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct RenderMaterialBindings(HashMap<UntypedAssetId, MaterialBindingId>);
 
-/// Data prepared for a [`Material`] instance.
-pub struct PreparedMaterial<M: Material> {
+/// Data prepared for a [`MaterialInstance`] instance.
+pub struct PreparedMaterial<M: MaterialInternal> {
     pub binding: MaterialBindingId,
     pub properties: MaterialProperties,
     pub phantom: PhantomData<M>,
 }
 
-impl<M: Material> RenderAsset for PreparedMaterial<M> {
-    type SourceAsset = M;
+impl<M: MaterialInternal> RenderAsset for PreparedMaterial<M> {
+    type SourceAsset = M::SourceAsset;
 
     type Param = (
         SRes<RenderDevice>,
@@ -1387,7 +1405,7 @@ impl<M: Material> RenderAsset for PreparedMaterial<M> {
     );
 
     fn prepare_asset(
-        material: Self::SourceAsset,
+        material_source: Self::SourceAsset,
         material_id: AssetId<Self::SourceAsset>,
         (
             render_device,
@@ -1406,6 +1424,10 @@ impl<M: Material> RenderAsset for PreparedMaterial<M> {
             material_param,
         ): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
+        // XXX TODO: Review. Cloning material_source is awkward but required for retry.
+        // Cloning everything else is awkward but may be required for bind groups.
+        let material = M::from_source_asset(material_source.clone());
+
         let draw_opaque_pbr = opaque_draw_functions.read().id::<DrawMaterial<M>>();
         let draw_alpha_mask_pbr = alpha_mask_draw_functions.read().id::<DrawMaterial<M>>();
         let draw_transmissive_pbr = transmissive_draw_functions.read().id::<DrawMaterial<M>>();
@@ -1508,7 +1530,7 @@ impl<M: Material> RenderAsset for PreparedMaterial<M> {
             }
 
             Err(AsBindGroupError::RetryNextUpdate) => {
-                Err(PrepareAssetError::RetryNextUpdate(material))
+                Err(PrepareAssetError::RetryNextUpdate(material_source))
             }
 
             Err(AsBindGroupError::CreateBindGroupDirectly) => {
@@ -1545,7 +1567,7 @@ impl<M: Material> RenderAsset for PreparedMaterial<M> {
                     }
 
                     Err(AsBindGroupError::RetryNextUpdate) => {
-                        Err(PrepareAssetError::RetryNextUpdate(material))
+                        Err(PrepareAssetError::RetryNextUpdate(material_source))
                     }
 
                     Err(other) => Err(PrepareAssetError::AsBindGroupError(other)),
@@ -1593,7 +1615,7 @@ pub fn prepare_material_bind_groups<M>(
     fallback_image: Res<FallbackImage>,
     fallback_resources: Res<FallbackBindlessResources>,
 ) where
-    M: Material,
+    M: MaterialInternal,
 {
     allocator.prepare_bind_groups(&render_device, &fallback_resources, &fallback_image);
 }
@@ -1608,7 +1630,7 @@ pub fn write_material_bind_group_buffers<M>(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
 ) where
-    M: Material,
+    M: MaterialInternal,
 {
     allocator.write_buffers(&render_device, &render_queue);
 }
