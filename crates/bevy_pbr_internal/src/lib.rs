@@ -47,6 +47,7 @@ mod volumetric_fog;
 use bevy_color::{Color, LinearRgba};
 
 pub use atmosphere::*;
+use bevy_pbr_interface::StandardMaterial;
 pub use cluster::*;
 pub use components::*;
 pub use decal::clustered::ClusteredDecalPlugin;
@@ -76,7 +77,6 @@ pub mod prelude {
         light_probe::{environment_map::EnvironmentMapLight, LightProbe},
         material::MaterialPlugin,
         mesh_material::MeshMaterial3d,
-        pbr_material::StandardMaterial,
         ssao::ScreenSpaceAmbientOcclusionPlugin,
     };
 }
@@ -320,7 +320,7 @@ impl Plugin for PbrPlugin {
             Shader::from_wgsl
         );
 
-        app.register_asset_reflect::<StandardMaterial>()
+        app.register_asset_reflect::<StandardMaterial>() // XXX TODO: Should this be part of `bevy_pbr_interface`?
             .register_type::<AmbientLight>()
             .register_type::<CascadeShadowConfig>()
             .register_type::<Cascades>()

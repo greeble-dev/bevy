@@ -15,22 +15,22 @@ pub use bevy_pbr_internal::{
     MeshPipeline, MeshPipelineKey, MeshPipelineViewLayoutKey, MeshUniform, NotShadowCaster,
     NotShadowReceiver, PbrPlugin, PointLight, PointLightShadowMap, RenderMeshInstances,
     ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceReflections,
-    SetMeshBindGroup, SetMeshViewBindGroup, ShadowFilteringMethod, SpotLight, StandardMaterial,
+    SetMeshBindGroup, SetMeshViewBindGroup, ShadowFilteringMethod, SpotLight,
     TransmittedShadowReceiver, VisibleMeshEntities, VolumetricFog, VolumetricLight, MAX_JOINTS,
 };
 
-pub use bevy_pbr_interface::UvChannel;
+pub use bevy_pbr_interface::{StandardMaterial, UvChannel};
 
 pub mod prelude {
     #[doc(hidden)]
     pub use bevy_pbr_internal::{
         environment_map::EnvironmentMapLight, light_consts, AmbientLight, Atmosphere,
         CascadeShadowConfigBuilder, DirectionalLight, DistanceFog, FogFalloff, LightProbe,
-        MaterialPlugin, MeshMaterial3d, PointLight, SpotLight, StandardMaterial,
+        MaterialPlugin, MeshMaterial3d, PointLight, SpotLight,
     };
 
     #[doc(hidden)]
-    pub use bevy_pbr_interface::{Material, ParallaxMappingMethod};
+    pub use bevy_pbr_interface::{Material, ParallaxMappingMethod, StandardMaterial};
 }
 
 /// Experimental features that are not yet finished. Please report any issues you encounter!

@@ -18,7 +18,11 @@ experimental_pbr_pcss = []
 [dependencies]
 # bevy
 bevy_asset = { path = "../bevy_asset", version = "0.16.0-dev" }
+bevy_color = { path = "../bevy_color", version = "0.16.0-dev" }
+bevy_image = { path = "../bevy_image", version = "0.16.0-dev" }
+bevy_math = { path = "../bevy_math", version = "0.16.0-dev" }
 bevy_reflect = { path = "../bevy_reflect", version = "0.16.0-dev" }
+bevy_render = { path = "../bevy_render", version = "0.16.0-dev" }
 
 # other
 
