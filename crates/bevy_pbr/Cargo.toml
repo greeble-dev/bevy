@@ -9,6 +9,10 @@ license = "MIT OR Apache-2.0"
 keywords = ["bevy"]
 
 [features]
+pbr_transmission_textures = []
+pbr_multi_layer_material_textures = []
+pbr_anisotropy_texture = []
+pbr_specular_textures = []
 
 [dependencies]
 # bevy
