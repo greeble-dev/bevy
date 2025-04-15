@@ -1,5 +1,5 @@
 [package]
-name = "bevy_pbr"
+name = "bevy_pbr_interface"
 version = "0.16.0-dev"
 edition = "2024"
 description = "Adds PBR rendering to Bevy Engine"
@@ -14,12 +14,9 @@ pbr_multi_layer_material_textures = []
 pbr_anisotropy_texture = []
 pbr_specular_textures = []
 experimental_pbr_pcss = []
-meshlet = ["bevy_pbr_internal/meshlet"]
 
 [dependencies]
 # bevy
-bevy_pbr_internal = { path = "../bevy_pbr_internal", version = "0.16.0-dev" }
-bevy_pbr_interface = { path = "../bevy_pbr_interface", version = "0.16.0-dev" }
 # other
 
 [lints]
