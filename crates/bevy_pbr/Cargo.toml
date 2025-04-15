@@ -9,11 +9,26 @@ license = "MIT OR Apache-2.0"
 keywords = ["bevy"]
 
 [features]
-pbr_transmission_textures = []
-pbr_multi_layer_material_textures = []
-pbr_anisotropy_texture = []
-pbr_specular_textures = []
-experimental_pbr_pcss = []
+pbr_transmission_textures = [
+	"bevy_pbr_interface/pbr_transmission_textures",
+	"bevy_pbr_internal/pbr_transmission_textures",
+]
+pbr_multi_layer_material_textures = [
+	"bevy_pbr_interface/pbr_multi_layer_material_textures",
+	"bevy_pbr_internal/pbr_multi_layer_material_textures",
+]
+pbr_anisotropy_texture = [
+	"bevy_pbr_interface/pbr_anisotropy_texture",
+	"bevy_pbr_internal/pbr_anisotropy_texture",
+]
+pbr_specular_textures = [
+	"bevy_pbr_interface/pbr_specular_textures",
+	"bevy_pbr_internal/pbr_specular_textures",
+]
+experimental_pbr_pcss = [
+	"bevy_pbr_interface/experimental_pbr_pcss",
+	"bevy_pbr_internal/experimental_pbr_pcss",
+]
 meshlet = ["bevy_pbr_internal/meshlet"]
 
 [dependencies]
