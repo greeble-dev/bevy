@@ -330,7 +330,7 @@ impl<B: MaterialInternal, E: MaterialExtension> MaterialInternal
         }
     }
 
-    fn opaque_render_method(&self) -> crate::OpaqueRendererMethod {
+    fn opaque_render_method(&self) -> bevy_pbr_interface::OpaqueRendererMethod {
         B::opaque_render_method(&self.base)
     }
 

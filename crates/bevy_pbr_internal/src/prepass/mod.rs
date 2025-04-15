@@ -5,11 +5,12 @@ use crate::{
     collect_meshes_for_gpu_building, material_bind_groups::MaterialBindGroupAllocator,
     queue_material_meshes, set_mesh_motion_vector_flags, setup_morph_and_skinning_defs, skin,
     DrawMesh, EntitySpecializationTicks, MaterialInternal, MaterialPipeline, MaterialPipelineKey,
-    MeshLayouts, MeshPipeline, MeshPipelineKey, OpaqueRendererMethod, PreparedMaterial,
-    RenderLightmaps, RenderMaterialInstances, RenderMeshInstanceFlags, RenderMeshInstances,
-    RenderPhaseType, SetMaterialBindGroup, SetMeshBindGroup, ShadowView, StandardMaterialInternal,
+    MeshLayouts, MeshPipeline, MeshPipelineKey, PreparedMaterial, RenderLightmaps,
+    RenderMaterialInstances, RenderMeshInstanceFlags, RenderMeshInstances, RenderPhaseType,
+    SetMaterialBindGroup, SetMeshBindGroup, ShadowView, StandardMaterialInternal,
 };
 use bevy_app::{App, Plugin, PreUpdate};
+use bevy_pbr_interface::OpaqueRendererMethod;
 use bevy_render::{
     alpha::AlphaMode,
     batching::gpu_preprocessing::GpuPreprocessingSupport,
@@ -1130,7 +1131,8 @@ pub fn queue_prepass_material_meshes<M: MaterialInternal>(
             else {
                 continue;
             };
-            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>() else {
+            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>()
+            else {
                 continue;
             };
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(*visible_entity)

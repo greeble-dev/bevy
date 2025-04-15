@@ -13,11 +13,10 @@ pub use bevy_pbr_internal::{
     ExtendedMaterial, ExtractedPointLight, FogVolume, GlobalClusterableObjectMeta, Lightmap,
     MaterialExtension, MaterialPipeline, MaterialPipelineKey, MeshInputUniform, MeshMaterial3d,
     MeshPipeline, MeshPipelineKey, MeshPipelineViewLayoutKey, MeshUniform, NotShadowCaster,
-    NotShadowReceiver, OpaqueRendererMethod, PbrPlugin, PointLight, PointLightShadowMap,
-    RenderMeshInstances, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel,
-    ScreenSpaceReflections, SetMeshBindGroup, SetMeshViewBindGroup, ShadowFilteringMethod,
-    SpotLight, StandardMaterial, TransmittedShadowReceiver, VisibleMeshEntities, VolumetricFog,
-    VolumetricLight, MAX_JOINTS,
+    NotShadowReceiver, PbrPlugin, PointLight, PointLightShadowMap, RenderMeshInstances,
+    ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceReflections,
+    SetMeshBindGroup, SetMeshViewBindGroup, ShadowFilteringMethod, SpotLight, StandardMaterial,
+    TransmittedShadowReceiver, VisibleMeshEntities, VolumetricFog, VolumetricLight, MAX_JOINTS,
 };
 
 pub use bevy_pbr_interface::UvChannel;

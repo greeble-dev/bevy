@@ -1,7 +1,7 @@
 use bevy_asset::Asset;
 use bevy_color::{Alpha, ColorToComponents};
 use bevy_math::{Affine2, Affine3, Mat2, Mat3, Vec2, Vec3, Vec4};
-use bevy_pbr_interface::{Material, UvChannel};
+use bevy_pbr_interface::{Material, OpaqueRendererMethod, UvChannel};
 use bevy_reflect::{std_traits::ReflectDefault, Reflect, TypePath};
 use bevy_render::{
     mesh::MeshVertexBufferLayoutRef, render_asset::RenderAssets, render_resource::*,
