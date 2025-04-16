@@ -132,14 +132,14 @@ pub trait MaterialExtension: Asset + AsBindGroup + Clone + Sized {
 #[derive(Asset, Clone, Debug, Reflect)]
 #[reflect(type_path = false)]
 #[reflect(Clone)]
-pub struct ExtendedMaterial<B: Material, E: MaterialExtension> {
+pub struct ExtendedMaterial<B: Material + Asset + Clone, E: MaterialExtension> {
     pub base: B,
     pub extension: E,
 }
 
 impl<B, E> Default for ExtendedMaterial<B, E>
 where
-    B: Material + Default,
+    B: Material + Asset + Clone + Default,
     E: MaterialExtension + Default,
 {
     fn default() -> Self {
@@ -152,9 +152,9 @@ where
 
 // We don't use the `TypePath` derive here due to a bug where `#[reflect(type_path = false)]`
 // causes the `TypePath` derive to not generate an implementation.
-impl_type_path!((in bevy_pbr::extended_material) ExtendedMaterial<B: Material, E: MaterialExtension>);
+impl_type_path!((in bevy_pbr::extended_material) ExtendedMaterial<B: Material + Asset + Clone, E: MaterialExtension>);
 
-impl<B: Material, E: MaterialExtension> AsBindGroup for ExtendedMaterial<B, E> {
+impl<B: Material + Asset + Clone, E: MaterialExtension> AsBindGroup for ExtendedMaterial<B, E> {
     type Data = (<B as AsBindGroup>::Data, <E as AsBindGroup>::Data);
     type Param = (<B as AsBindGroup>::Param, <E as AsBindGroup>::Param);
 
@@ -286,7 +286,13 @@ impl<B: Material, E: MaterialExtension> AsBindGroup for ExtendedMaterial<B, E> {
     }
 }
 
-impl<B: Material, E: MaterialExtension> Material for ExtendedMaterial<B, E> {
+impl<B: Material + Asset + Clone, E: MaterialExtension> Material for ExtendedMaterial<B, E> {
+    type SourceAsset = Self;
+
+    fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
+        source_asset
+    }
+
     fn vertex_shader() -> ShaderRef {
         match E::vertex_shader() {
             ShaderRef::Default => B::vertex_shader(),
