@@ -125,7 +125,7 @@ use tracing::error;
 /// @group(2) @binding(1) var color_texture: texture_2d<f32>;
 /// @group(2) @binding(2) var color_sampler: sampler;
 /// ```
-pub trait Material: AsBindGroup + Clone + Sized + TypePath + Send + Sync + 'static {
+pub trait Material: AsBindGroup + Sized + TypePath + Send + Sync {
     type SourceAsset: Asset + Clone;
 
     fn from_source_asset(source_asset: Self::SourceAsset) -> Self;
