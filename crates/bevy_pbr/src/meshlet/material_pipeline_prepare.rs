@@ -151,7 +151,7 @@ pub fn prepare_material_meshlet_meshes_main_opaque_pass<M: Material>(
         for material_id in render_material_instances
             .instances
             .values()
-            .flat_map(|instance| instance.asset_id.try_typed::<M>().ok())
+            .flat_map(|instance| instance.asset_id.try_typed::<M::SourceAsset>().ok())
             .collect::<HashSet<_>>()
         {
             let Some(material) = render_materials.get(material_id) else {
@@ -301,7 +301,7 @@ pub fn prepare_material_meshlet_meshes_prepass<M: Material>(
         for material_id in render_material_instances
             .instances
             .values()
-            .flat_map(|instance| instance.asset_id.try_typed::<M>().ok())
+            .flat_map(|instance| instance.asset_id.try_typed::<M::SourceAsset>().ok())
             .collect::<HashSet<_>>()
         {
             let Some(material) = render_materials.get(material_id) else {

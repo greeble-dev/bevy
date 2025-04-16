@@ -280,7 +280,8 @@ pub fn queue_material_meshlet_meshes<M: Material>(
 
     for (i, (instance, _, _)) in instance_manager.instances.iter().enumerate() {
         if let Some(material_instance) = render_material_instances.instances.get(instance) {
-            if let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M>() {
+            if let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>()
+            {
                 if let Some(material_id) = instance_manager
                     .material_id_lookup
                     .get(&material_asset_id.untyped())
