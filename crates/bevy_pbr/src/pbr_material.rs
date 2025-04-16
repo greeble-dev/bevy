@@ -29,10 +29,7 @@ pub enum UvChannel {
 /// <https://google.github.io/filament/Material%20Properties.pdf>.
 ///
 /// May be created directly from a [`Color`] or an [`Image`].
-#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
-#[bind_group_data(StandardMaterialKey)]
-#[data(0, StandardMaterialUniform, binding_array(10))]
-#[bindless(index_table(range(0..31)))]
+#[derive(Asset, Reflect, Debug, Clone)]
 #[reflect(Default, Debug, Clone)]
 pub struct StandardMaterial {
     /// The color of the surface of the material before lighting.
@@ -62,8 +59,6 @@ pub struct StandardMaterial {
     /// tint the texture red.
     ///
     /// [`base_color`]: StandardMaterial::base_color
-    #[texture(1)]
-    #[sampler(2)]
     #[dependency]
     pub base_color_texture: Option<Handle<Image>>,
 
@@ -113,8 +108,6 @@ pub struct StandardMaterial {
     /// if you want to use the full range of color of the emissive texture.
     ///
     /// [`emissive`]: StandardMaterial::emissive
-    #[texture(3)]
-    #[sampler(4)]
     #[dependency]
     pub emissive_texture: Option<Handle<Image>>,
 
@@ -166,8 +159,6 @@ pub struct StandardMaterial {
     ///
     /// [`metallic`]: StandardMaterial::metallic
     /// [`perceptual_roughness`]: StandardMaterial::perceptual_roughness
-    #[texture(5)]
-    #[sampler(6)]
     #[dependency]
     pub metallic_roughness_texture: Option<Handle<Image>>,
 
@@ -230,8 +221,6 @@ pub struct StandardMaterial {
     ///
     /// **Important:** The [`StandardMaterial::diffuse_transmission`] property must be set to a value higher than 0.0,
     /// or this texture won't have any effect.
-    #[cfg_attr(feature = "pbr_transmission_textures", texture(19))]
-    #[cfg_attr(feature = "pbr_transmission_textures", sampler(20))]
     #[cfg(feature = "pbr_transmission_textures")]
     pub diffuse_transmission_texture: Option<Handle<Image>>,
 
@@ -271,8 +260,6 @@ pub struct StandardMaterial {
     ///
     /// **Important:** The [`StandardMaterial::specular_transmission`] property must be set to a value higher than 0.0,
     /// or this texture won't have any effect.
-    #[cfg_attr(feature = "pbr_transmission_textures", texture(15))]
-    #[cfg_attr(feature = "pbr_transmission_textures", sampler(16))]
     #[cfg(feature = "pbr_transmission_textures")]
     pub specular_transmission_texture: Option<Handle<Image>>,
 
@@ -300,8 +287,6 @@ pub struct StandardMaterial {
     ///
     /// **Important:** The [`StandardMaterial::thickness`] property must be set to a value higher than 0.0,
     /// or this texture won't have any effect.
-    #[cfg_attr(feature = "pbr_transmission_textures", texture(17))]
-    #[cfg_attr(feature = "pbr_transmission_textures", sampler(18))]
     #[cfg(feature = "pbr_transmission_textures")]
     pub thickness_texture: Option<Handle<Image>>,
 
@@ -386,8 +371,6 @@ pub struct StandardMaterial {
     ///
     /// [`Mesh::generate_tangents`]: bevy_render::mesh::Mesh::generate_tangents
     /// [`Mesh::with_generated_tangents`]: bevy_render::mesh::Mesh::with_generated_tangents
-    #[texture(9)]
-    #[sampler(10)]
     #[dependency]
     pub normal_map_texture: Option<Handle<Image>>,
 
@@ -410,8 +393,6 @@ pub struct StandardMaterial {
     ///
     /// The material will be less lit in places where this texture is dark.
     /// This is similar to ambient occlusion, but built into the model.
-    #[texture(7)]
-    #[sampler(8)]
     #[dependency]
     pub occlusion_texture: Option<Handle<Image>>,
 
@@ -437,8 +418,6 @@ pub struct StandardMaterial {
     /// the [`StandardMaterial::specular_tint_texture`] has no alpha value, it
     /// may be desirable to pack the values together and supply the same
     /// texture to both fields.
-    #[cfg_attr(feature = "pbr_specular_textures", texture(27))]
-    #[cfg_attr(feature = "pbr_specular_textures", sampler(28))]
     #[cfg(feature = "pbr_specular_textures")]
     pub specular_texture: Option<Handle<Image>>,
 
@@ -458,8 +437,6 @@ pub struct StandardMaterial {
     ///
     /// Like the fixed specular tint value, this texture map isn't supported in
     /// the deferred renderer.
-    #[cfg_attr(feature = "pbr_specular_textures", texture(29))]
-    #[cfg_attr(feature = "pbr_specular_textures", sampler(30))]
     #[cfg(feature = "pbr_specular_textures")]
     pub specular_tint_texture: Option<Handle<Image>>,
 
@@ -483,8 +460,6 @@ pub struct StandardMaterial {
     /// main [`StandardMaterial::clearcoat`] factor.
     ///
     /// As this is a non-color map, it must not be loaded as sRGB.
-    #[cfg_attr(feature = "pbr_multi_layer_material_textures", texture(21))]
-    #[cfg_attr(feature = "pbr_multi_layer_material_textures", sampler(22))]
     #[cfg(feature = "pbr_multi_layer_material_textures")]
     pub clearcoat_texture: Option<Handle<Image>>,
 
@@ -508,8 +483,6 @@ pub struct StandardMaterial {
     /// [`StandardMaterial::clearcoat_perceptual_roughness`] factor.
     ///
     /// As this is a non-color map, it must not be loaded as sRGB.
-    #[cfg_attr(feature = "pbr_multi_layer_material_textures", texture(23))]
-    #[cfg_attr(feature = "pbr_multi_layer_material_textures", sampler(24))]
     #[cfg(feature = "pbr_multi_layer_material_textures")]
     pub clearcoat_roughness_texture: Option<Handle<Image>>,
 
@@ -530,8 +503,6 @@ pub struct StandardMaterial {
     /// in both [`StandardMaterial::normal_map_texture`] and this field.
     ///
     /// As this is a non-color map, it must not be loaded as sRGB.
-    #[cfg_attr(feature = "pbr_multi_layer_material_textures", texture(25))]
-    #[cfg_attr(feature = "pbr_multi_layer_material_textures", sampler(26))]
     #[cfg(feature = "pbr_multi_layer_material_textures")]
     pub clearcoat_normal_texture: Option<Handle<Image>>,
 
@@ -600,8 +571,6 @@ pub struct StandardMaterial {
     ///
     /// [`KHR_materials_anisotropy` specification]:
     /// https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_materials_anisotropy/README.md
-    #[cfg_attr(feature = "pbr_anisotropy_texture", texture(13))]
-    #[cfg_attr(feature = "pbr_anisotropy_texture", sampler(14))]
     #[cfg(feature = "pbr_anisotropy_texture")]
     pub anisotropy_texture: Option<Handle<Image>>,
 
@@ -704,8 +673,6 @@ pub struct StandardMaterial {
     /// [`parallax_depth_scale`]: StandardMaterial::parallax_depth_scale
     /// [`parallax_mapping_method`]: StandardMaterial::parallax_mapping_method
     /// [`max_parallax_layer_count`]: StandardMaterial::max_parallax_layer_count
-    #[texture(11)]
-    #[sampler(12)]
     #[dependency]
     pub depth_map: Option<Handle<Image>>,
 
