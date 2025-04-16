@@ -7,7 +7,7 @@ use crate::{
     DrawMesh, EntitySpecializationTicks, Material, MaterialPipeline, MaterialPipelineKey,
     MeshLayouts, MeshPipeline, MeshPipelineKey, OpaqueRendererMethod, PreparedMaterial,
     RenderLightmaps, RenderMaterialInstances, RenderMeshInstanceFlags, RenderMeshInstances,
-    RenderPhaseType, SetMaterialBindGroup, SetMeshBindGroup, ShadowView, StandardMaterial,
+    RenderPhaseType, SetMaterialBindGroup, SetMeshBindGroup, ShadowView, StandardMaterialInternal,
 };
 use bevy_app::{App, Plugin, PreUpdate};
 use bevy_render::{
@@ -225,7 +225,7 @@ where
                         .in_set(RenderSet::QueueMeshes)
                         .after(prepare_assets::<PreparedMaterial<M>>)
                         // queue_material_meshes only writes to `material_bind_group_id`, which `queue_prepass_material_meshes` doesn't read
-                        .ambiguous_with(queue_material_meshes::<StandardMaterial>),
+                        .ambiguous_with(queue_material_meshes::<StandardMaterialInternal>),
                 ),
             );
 
