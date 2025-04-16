@@ -1,5 +1,4 @@
-use crate::Material;
-use bevy_asset::{AsAssetId, AssetId, Handle};
+use bevy_asset::{AsAssetId, Asset, AssetId, Handle};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{component::Component, reflect::ReflectComponent};
 use bevy_reflect::{std_traits::ReflectDefault, Reflect};
@@ -38,36 +37,36 @@ use derive_more::derive::From;
 /// ```
 #[derive(Component, Clone, Debug, Deref, DerefMut, Reflect, From)]
 #[reflect(Component, Default, Clone, PartialEq)]
-pub struct MeshMaterial3d<M: Material>(pub Handle<M>);
+pub struct MeshMaterial3d<A: Asset + Clone>(pub Handle<A>);
 
-impl<M: Material> Default for MeshMaterial3d<M> {
+impl<A: Asset + Clone> Default for MeshMaterial3d<A> {
     fn default() -> Self {
         Self(Handle::default())
     }
 }
 
-impl<M: Material> PartialEq for MeshMaterial3d<M> {
+impl<A: Asset + Clone> PartialEq for MeshMaterial3d<A> {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
 
-impl<M: Material> Eq for MeshMaterial3d<M> {}
+impl<A: Asset + Clone> Eq for MeshMaterial3d<A> {}
 
-impl<M: Material> From<MeshMaterial3d<M>> for AssetId<M> {
-    fn from(material: MeshMaterial3d<M>) -> Self {
+impl<A: Asset + Clone> From<MeshMaterial3d<A>> for AssetId<A> {
+    fn from(material: MeshMaterial3d<A>) -> Self {
         material.id()
     }
 }
 
-impl<M: Material> From<&MeshMaterial3d<M>> for AssetId<M> {
-    fn from(material: &MeshMaterial3d<M>) -> Self {
+impl<A: Asset + Clone> From<&MeshMaterial3d<A>> for AssetId<A> {
+    fn from(material: &MeshMaterial3d<A>) -> Self {
         material.id()
     }
 }
 
-impl<M: Material> AsAssetId for MeshMaterial3d<M> {
-    type Asset = M;
+impl<A: Asset + Clone> AsAssetId for MeshMaterial3d<A> {
+    type Asset = A;
 
     fn as_asset_id(&self) -> AssetId<Self::Asset> {
         self.id()
