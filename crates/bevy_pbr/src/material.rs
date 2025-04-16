@@ -284,8 +284,8 @@ where
     M::Data: PartialEq + Eq + Hash + Clone,
 {
     fn build(&self, app: &mut App) {
-        app.init_asset::<M>()
-            .register_type::<MeshMaterial3d<M>>()
+        app.init_asset::<M::SourceAsset>()
+            .register_type::<MeshMaterial3d<M::SourceAsset>>()
             .init_resource::<EntitiesNeedingSpecialization<M>>()
             .add_plugins((RenderAssetPlugin::<PreparedMaterial<M>>::default(),))
             .add_systems(
@@ -582,7 +582,7 @@ impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterial
         let Some(material_instance) = material_instances.instances.get(&item.main_entity()) else {
             return RenderCommandResult::Skip;
         };
-        let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M>() else {
+        let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>() else {
             return RenderCommandResult::Skip;
         };
         let Some(material) = materials.get(material_asset_id) else {
@@ -710,7 +710,10 @@ pub const fn screen_space_specular_transmission_pipeline_key(
 fn mark_meshes_as_changed_if_their_materials_changed<M>(
     mut changed_meshes_query: Query<
         &mut Mesh3d,
-        Or<(Changed<MeshMaterial3d<M>>, AssetChanged<MeshMaterial3d<M>>)>,
+        Or<(
+            Changed<MeshMaterial3d<M::SourceAsset>>,
+            AssetChanged<MeshMaterial3d<M::SourceAsset>>,
+        )>,
     >,
 ) where
     M: Material,
@@ -726,8 +729,11 @@ fn extract_mesh_materials<M: Material>(
     mut material_instances: ResMut<RenderMaterialInstances>,
     changed_meshes_query: Extract<
         Query<
-            (Entity, &ViewVisibility, &MeshMaterial3d<M>),
-            Or<(Changed<ViewVisibility>, Changed<MeshMaterial3d<M>>)>,
+            (Entity, &ViewVisibility, &MeshMaterial3d<M::SourceAsset>),
+            Or<(
+                Changed<ViewVisibility>,
+                Changed<MeshMaterial3d<M::SourceAsset>>,
+            )>,
         >,
     >,
 ) {
@@ -766,7 +772,7 @@ fn extract_mesh_materials<M: Material>(
 /// bump [`RenderMaterialInstances::current_change_tick`] once.
 fn early_sweep_material_instances<M>(
     mut material_instances: ResMut<RenderMaterialInstances>,
-    mut removed_materials_query: Extract<RemovedComponents<MeshMaterial3d<M>>>,
+    mut removed_materials_query: Extract<RemovedComponents<MeshMaterial3d<M::SourceAsset>>>,
 ) where
     M: Material,
 {
@@ -813,7 +819,9 @@ pub(crate) fn late_sweep_material_instances(
 pub fn extract_entities_needs_specialization<M>(
     entities_needing_specialization: Extract<Res<EntitiesNeedingSpecialization<M>>>,
     mut entity_specialization_ticks: ResMut<EntitySpecializationTicks<M>>,
-    mut removed_mesh_material_components: Extract<RemovedComponents<MeshMaterial3d<M>>>,
+    mut removed_mesh_material_components: Extract<
+        RemovedComponents<MeshMaterial3d<M::SourceAsset>>,
+    >,
     mut specialized_material_pipeline_cache: ResMut<SpecializedMaterialPipelineCache<M>>,
     mut specialized_prepass_material_pipeline_cache: Option<
         ResMut<SpecializedPrepassMaterialPipelineCache<M>>,
@@ -934,10 +942,10 @@ pub fn check_entities_needing_specialization<M>(
             Or<(
                 Changed<Mesh3d>,
                 AssetChanged<Mesh3d>,
-                Changed<MeshMaterial3d<M>>,
-                AssetChanged<MeshMaterial3d<M>>,
+                Changed<MeshMaterial3d<M::SourceAsset>>,
+                AssetChanged<MeshMaterial3d<M::SourceAsset>>,
             )>,
-            With<MeshMaterial3d<M>>,
+            With<MeshMaterial3d<M::SourceAsset>>,
         ),
     >,
     mut par_local: Local<Parallel<Vec<Entity>>>,
@@ -1017,7 +1025,8 @@ pub fn specialize_material_meshes<M: Material>(
             else {
                 continue;
             };
-            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M>() else {
+            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>()
+            else {
                 continue;
             };
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(*visible_entity)
@@ -1168,7 +1177,8 @@ pub fn queue_material_meshes<M: Material>(
             else {
                 continue;
             };
-            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M>() else {
+            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>()
+            else {
                 continue;
             };
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(*visible_entity)
@@ -1371,7 +1381,7 @@ pub struct PreparedMaterial<M: Material> {
 }
 
 impl<M: Material> RenderAsset for PreparedMaterial<M> {
-    type SourceAsset = M;
+    type SourceAsset = M::SourceAsset;
 
     type Param = (
         SRes<RenderDevice>,
@@ -1514,7 +1524,7 @@ impl<M: Material> RenderAsset for PreparedMaterial<M> {
             }
 
             Err(AsBindGroupError::RetryNextUpdate) => {
-                Err(PrepareAssetError::RetryNextUpdate(material))
+                Err(PrepareAssetError::RetryNextUpdate(material_asset))
             }
 
             Err(AsBindGroupError::CreateBindGroupDirectly) => {
@@ -1551,7 +1561,7 @@ impl<M: Material> RenderAsset for PreparedMaterial<M> {
                     }
 
                     Err(AsBindGroupError::RetryNextUpdate) => {
-                        Err(PrepareAssetError::RetryNextUpdate(material))
+                        Err(PrepareAssetError::RetryNextUpdate(material_asset))
                     }
 
                     Err(other) => Err(PrepareAssetError::AsBindGroupError(other)),

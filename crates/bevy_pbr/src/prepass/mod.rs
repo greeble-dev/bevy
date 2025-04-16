@@ -942,7 +942,8 @@ pub fn specialize_prepass_material_meshes<M>(
             else {
                 continue;
             };
-            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M>() else {
+            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>()
+            else {
                 continue;
             };
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(*visible_entity)
@@ -1129,7 +1130,8 @@ pub fn queue_prepass_material_meshes<M: Material>(
             else {
                 continue;
             };
-            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M>() else {
+            let Ok(material_asset_id) = material_instance.asset_id.try_typed::<M::SourceAsset>()
+            else {
                 continue;
             };
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(*visible_entity)
