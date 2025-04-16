@@ -1,7 +1,7 @@
 use bevy_asset::Asset;
 use bevy_color::{Alpha, ColorToComponents};
 use bevy_math::{Affine2, Affine3, Mat2, Mat3, Vec2, Vec3, Vec4};
-use bevy_reflect::{std_traits::ReflectDefault, Reflect};
+use bevy_reflect::{std_traits::ReflectDefault, Reflect, TypePath};
 use bevy_render::{
     mesh::MeshVertexBufferLayoutRef, render_asset::RenderAssets, render_resource::*,
     texture::GpuImage,
@@ -932,6 +932,139 @@ impl From<Handle<Image>> for StandardMaterial {
             ..Default::default()
         }
     }
+}
+
+/// A material with "standard" properties used in PBR lighting.
+/// Standard property values with pictures here:
+/// <https://google.github.io/filament/Material%20Properties.pdf>.
+///
+/// May be created directly from a [`Color`] or an [`Image`].
+#[derive(AsBindGroup, TypePath, Debug, Clone)]
+#[bind_group_data(StandardMaterialKey)]
+#[data(0, StandardMaterialUniform, binding_array(10))]
+#[bindless(index_table(range(0..31)))]
+pub struct StandardMaterialInternal {
+    pub base_color: Color,
+    pub base_color_channel: UvChannel,
+    #[texture(1)]
+    #[sampler(2)]
+    pub base_color_texture: Option<Handle<Image>>,
+    pub emissive: LinearRgba,
+    pub emissive_exposure_weight: f32,
+    pub emissive_channel: UvChannel,
+    #[texture(3)]
+    #[sampler(4)]
+    pub emissive_texture: Option<Handle<Image>>,
+    pub perceptual_roughness: f32,
+    pub metallic: f32,
+    pub metallic_roughness_channel: UvChannel,
+    #[texture(5)]
+    #[sampler(6)]
+    pub metallic_roughness_texture: Option<Handle<Image>>,
+    #[doc(alias = "specular_intensity")]
+    pub reflectance: f32,
+    #[doc(alias = "specular_color")]
+    pub specular_tint: Color,
+    #[doc(alias = "translucency")]
+    pub diffuse_transmission: f32,
+    #[cfg(feature = "pbr_transmission_textures")]
+    pub diffuse_transmission_channel: UvChannel,
+    #[cfg_attr(feature = "pbr_transmission_textures", texture(19))]
+    #[cfg_attr(feature = "pbr_transmission_textures", sampler(20))]
+    #[cfg(feature = "pbr_transmission_textures")]
+    pub diffuse_transmission_texture: Option<Handle<Image>>,
+    #[doc(alias = "refraction")]
+    pub specular_transmission: f32,
+    #[cfg(feature = "pbr_transmission_textures")]
+    pub specular_transmission_channel: UvChannel,
+    #[cfg_attr(feature = "pbr_transmission_textures", texture(15))]
+    #[cfg_attr(feature = "pbr_transmission_textures", sampler(16))]
+    #[cfg(feature = "pbr_transmission_textures")]
+    pub specular_transmission_texture: Option<Handle<Image>>,
+    #[doc(alias = "volume")]
+    #[doc(alias = "thin_walled")]
+    pub thickness: f32,
+    #[cfg(feature = "pbr_transmission_textures")]
+    pub thickness_channel: UvChannel,
+    #[cfg_attr(feature = "pbr_transmission_textures", texture(17))]
+    #[cfg_attr(feature = "pbr_transmission_textures", sampler(18))]
+    #[cfg(feature = "pbr_transmission_textures")]
+    pub thickness_texture: Option<Handle<Image>>,
+    #[doc(alias = "index_of_refraction")]
+    #[doc(alias = "refraction_index")]
+    #[doc(alias = "refractive_index")]
+    pub ior: f32,
+    #[doc(alias = "absorption_distance")]
+    #[doc(alias = "extinction_distance")]
+    pub attenuation_distance: f32,
+    #[doc(alias = "absorption_color")]
+    #[doc(alias = "extinction_color")]
+    pub attenuation_color: Color,
+    pub normal_map_channel: UvChannel,
+    #[texture(9)]
+    #[sampler(10)]
+    pub normal_map_texture: Option<Handle<Image>>,
+    pub flip_normal_map_y: bool,
+    pub occlusion_channel: UvChannel,
+    #[texture(7)]
+    #[sampler(8)]
+    pub occlusion_texture: Option<Handle<Image>>,
+    #[cfg(feature = "pbr_specular_textures")]
+    pub specular_channel: UvChannel,
+    #[cfg_attr(feature = "pbr_specular_textures", texture(27))]
+    #[cfg_attr(feature = "pbr_specular_textures", sampler(28))]
+    #[cfg(feature = "pbr_specular_textures")]
+    pub specular_texture: Option<Handle<Image>>,
+    #[cfg(feature = "pbr_specular_textures")]
+    pub specular_tint_channel: UvChannel,
+    #[cfg_attr(feature = "pbr_specular_textures", texture(29))]
+    #[cfg_attr(feature = "pbr_specular_textures", sampler(30))]
+    #[cfg(feature = "pbr_specular_textures")]
+    pub specular_tint_texture: Option<Handle<Image>>,
+    pub clearcoat: f32,
+    #[cfg(feature = "pbr_multi_layer_material_textures")]
+    pub clearcoat_channel: UvChannel,
+    #[cfg_attr(feature = "pbr_multi_layer_material_textures", texture(21))]
+    #[cfg_attr(feature = "pbr_multi_layer_material_textures", sampler(22))]
+    #[cfg(feature = "pbr_multi_layer_material_textures")]
+    pub clearcoat_texture: Option<Handle<Image>>,
+    pub clearcoat_perceptual_roughness: f32,
+    #[cfg(feature = "pbr_multi_layer_material_textures")]
+    pub clearcoat_roughness_channel: UvChannel,
+    #[cfg_attr(feature = "pbr_multi_layer_material_textures", texture(23))]
+    #[cfg_attr(feature = "pbr_multi_layer_material_textures", sampler(24))]
+    #[cfg(feature = "pbr_multi_layer_material_textures")]
+    pub clearcoat_roughness_texture: Option<Handle<Image>>,
+    #[cfg(feature = "pbr_multi_layer_material_textures")]
+    pub clearcoat_normal_channel: UvChannel,
+    #[cfg_attr(feature = "pbr_multi_layer_material_textures", texture(25))]
+    #[cfg_attr(feature = "pbr_multi_layer_material_textures", sampler(26))]
+    #[cfg(feature = "pbr_multi_layer_material_textures")]
+    pub clearcoat_normal_texture: Option<Handle<Image>>,
+    pub anisotropy_strength: f32,
+    pub anisotropy_rotation: f32,
+    #[cfg(feature = "pbr_anisotropy_texture")]
+    pub anisotropy_channel: UvChannel,
+    #[cfg_attr(feature = "pbr_anisotropy_texture", texture(13))]
+    #[cfg_attr(feature = "pbr_anisotropy_texture", sampler(14))]
+    #[cfg(feature = "pbr_anisotropy_texture")]
+    pub anisotropy_texture: Option<Handle<Image>>,
+    pub double_sided: bool,
+    pub cull_mode: Option<Face>,
+    pub unlit: bool,
+    pub fog_enabled: bool,
+    pub alpha_mode: AlphaMode,
+    pub depth_bias: f32,
+    #[texture(11)]
+    #[sampler(12)]
+    pub depth_map: Option<Handle<Image>>,
+    pub parallax_depth_scale: f32,
+    pub parallax_mapping_method: ParallaxMappingMethod,
+    pub max_parallax_layer_count: f32,
+    pub lightmap_exposure: f32,
+    pub opaque_render_method: OpaqueRendererMethod,
+    pub deferred_lighting_pass_id: u8,
+    pub uv_transform: Affine2,
 }
 
 // NOTE: These must match the bit flags in bevy_pbr/src/render/pbr_types.wgsl!
