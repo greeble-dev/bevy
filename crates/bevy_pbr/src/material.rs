@@ -33,7 +33,7 @@ use bevy_platform::collections::hash_map::Entry;
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_platform::hash::FixedHasher;
 use bevy_reflect::std_traits::ReflectDefault;
-use bevy_reflect::Reflect;
+use bevy_reflect::{Reflect, TypePath};
 use bevy_render::camera::extract_cameras;
 use bevy_render::mesh::mark_3d_meshes_as_changed_if_their_assets_changed;
 use bevy_render::render_asset::prepare_assets;
@@ -124,7 +124,11 @@ use tracing::error;
 /// @group(2) @binding(1) var color_texture: texture_2d<f32>;
 /// @group(2) @binding(2) var color_sampler: sampler;
 /// ```
-pub trait Material: Asset + AsBindGroup + Clone + Sized {
+pub trait Material: AsBindGroup + Sized + TypePath + Send + Sync {
+    type SourceAsset: Asset + Clone;
+
+    fn from_source_asset(source_asset: Self::SourceAsset) -> Self;
+
     /// Returns this material's vertex shader. If [`ShaderRef::Default`] is returned, the default mesh vertex shader
     /// will be used.
     fn vertex_shader() -> ShaderRef {
@@ -1387,7 +1391,7 @@ impl<M: Material> RenderAsset for PreparedMaterial<M> {
     );
 
     fn prepare_asset(
-        material: Self::SourceAsset,
+        material_asset: Self::SourceAsset,
         material_id: AssetId<Self::SourceAsset>,
         (
             render_device,
@@ -1406,6 +1410,8 @@ impl<M: Material> RenderAsset for PreparedMaterial<M> {
             material_param,
         ): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
+        let material = M::from_source_asset(material_asset.clone());
+
         let draw_opaque_pbr = opaque_draw_functions.read().id::<DrawMaterial<M>>();
         let draw_alpha_mask_pbr = alpha_mask_draw_functions.read().id::<DrawMaterial<M>>();
         let draw_transmissive_pbr = transmissive_draw_functions.read().id::<DrawMaterial<M>>();
