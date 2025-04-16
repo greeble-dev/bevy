@@ -1149,75 +1149,75 @@ impl Material for StandardMaterialInternal {
         Self {
             base_color: source_asset.base_color,
             base_color_channel: source_asset.base_color_channel,
-            base_color_texture: source_asset.base_color_texture.clone(),
+            base_color_texture: source_asset.base_color_texture,
             emissive: source_asset.emissive,
             emissive_exposure_weight: source_asset.emissive_exposure_weight,
             emissive_channel: source_asset.emissive_channel,
-            emissive_texture: source_asset.emissive_texture.clone(),
+            emissive_texture: source_asset.emissive_texture,
             perceptual_roughness: source_asset.perceptual_roughness,
             metallic: source_asset.metallic,
             metallic_roughness_channel: source_asset.metallic_roughness_channel,
-            metallic_roughness_texture: source_asset.metallic_roughness_texture.clone(),
+            metallic_roughness_texture: source_asset.metallic_roughness_texture,
             reflectance: source_asset.reflectance,
             specular_tint: source_asset.specular_tint,
             diffuse_transmission: source_asset.diffuse_transmission,
             #[cfg(feature = "pbr_transmission_textures")]
             diffuse_transmission_channel: source_asset.diffuse_transmission_channel,
             #[cfg(feature = "pbr_transmission_textures")]
-            diffuse_transmission_texture: source_asset.diffuse_transmission_texture.clone(),
+            diffuse_transmission_texture: source_asset.diffuse_transmission_texture,
             specular_transmission: source_asset.specular_transmission,
             #[cfg(feature = "pbr_transmission_textures")]
             specular_transmission_channel: source_asset.specular_transmission_channel,
             #[cfg(feature = "pbr_transmission_textures")]
-            specular_transmission_texture: source_asset.specular_transmission_texture.clone(),
+            specular_transmission_texture: source_asset.specular_transmission_texture,
             thickness: source_asset.thickness,
             #[cfg(feature = "pbr_transmission_textures")]
             thickness_channel: source_asset.thickness_channel,
             #[cfg(feature = "pbr_transmission_textures")]
-            thickness_texture: source_asset.thickness_texture.clone(),
+            thickness_texture: source_asset.thickness_texture,
             ior: source_asset.ior,
             attenuation_distance: source_asset.attenuation_distance,
             attenuation_color: source_asset.attenuation_color,
             normal_map_channel: source_asset.normal_map_channel,
-            normal_map_texture: source_asset.normal_map_texture.clone(),
+            normal_map_texture: source_asset.normal_map_texture,
             flip_normal_map_y: source_asset.flip_normal_map_y,
             occlusion_channel: source_asset.occlusion_channel,
-            occlusion_texture: source_asset.occlusion_texture.clone(),
+            occlusion_texture: source_asset.occlusion_texture,
             #[cfg(feature = "pbr_specular_textures")]
             specular_channel: source_asset.specular_channel,
             #[cfg(feature = "pbr_specular_textures")]
-            specular_texture: source_asset.specular_texture.clone(),
+            specular_texture: source_asset.specular_texture,
             #[cfg(feature = "pbr_specular_textures")]
             specular_tint_channel: source_asset.specular_tint_channel,
             #[cfg(feature = "pbr_specular_textures")]
-            specular_tint_texture: source_asset.specular_tint_texture.clone(),
+            specular_tint_texture: source_asset.specular_tint_texture,
             clearcoat: source_asset.clearcoat,
             #[cfg(feature = "pbr_multi_layer_material_textures")]
             clearcoat_channel: source_asset.clearcoat_channel,
             #[cfg(feature = "pbr_multi_layer_material_textures")]
-            clearcoat_texture: source_asset.clearcoat_texture.clone(),
+            clearcoat_texture: source_asset.clearcoat_texture,
             clearcoat_perceptual_roughness: source_asset.clearcoat_perceptual_roughness,
             #[cfg(feature = "pbr_multi_layer_material_textures")]
             clearcoat_roughness_channel: source_asset.clearcoat_roughness_channel,
             #[cfg(feature = "pbr_multi_layer_material_textures")]
-            clearcoat_roughness_texture: source_asset.clearcoat_roughness_texture.clone(),
+            clearcoat_roughness_texture: source_asset.clearcoat_roughness_texture,
             #[cfg(feature = "pbr_multi_layer_material_textures")]
             clearcoat_normal_channel: source_asset.clearcoat_normal_channel,
             #[cfg(feature = "pbr_multi_layer_material_textures")]
-            clearcoat_normal_texture: source_asset.clearcoat_normal_texture.clone(),
+            clearcoat_normal_texture: source_asset.clearcoat_normal_texture,
             anisotropy_strength: source_asset.anisotropy_strength,
             anisotropy_rotation: source_asset.anisotropy_rotation,
             #[cfg(feature = "pbr_anisotropy_texture")]
             anisotropy_channel: source_asset.anisotropy_channel,
             #[cfg(feature = "pbr_anisotropy_texture")]
-            anisotropy_texture: source_asset.anisotropy_texture.clone(),
+            anisotropy_texture: source_asset.anisotropy_texture,
             double_sided: source_asset.double_sided,
             cull_mode: source_asset.cull_mode,
             unlit: source_asset.unlit,
             fog_enabled: source_asset.fog_enabled,
             alpha_mode: source_asset.alpha_mode,
             depth_bias: source_asset.depth_bias,
-            depth_map: source_asset.depth_map.clone(),
+            depth_map: source_asset.depth_map,
             parallax_depth_scale: source_asset.parallax_depth_scale,
             parallax_mapping_method: source_asset.parallax_mapping_method,
             max_parallax_layer_count: source_asset.max_parallax_layer_count,
