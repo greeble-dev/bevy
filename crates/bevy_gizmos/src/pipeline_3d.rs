@@ -51,7 +51,9 @@ impl Plugin for LineGizmo3dPlugin {
                 Render,
                 GizmoRenderSystem::QueueLineGizmos3d
                     .in_set(RenderSet::Queue)
-                    .ambiguous_with(bevy_pbr::queue_material_meshes::<bevy_pbr::StandardMaterial>),
+                    .ambiguous_with(
+                        bevy_pbr::queue_material_meshes::<bevy_pbr::StandardMaterialInternal>,
+                    ),
             )
             .add_systems(
                 Render,
