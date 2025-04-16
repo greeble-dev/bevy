@@ -1344,6 +1344,12 @@ impl From<&StandardMaterial> for StandardMaterialKey {
 }
 
 impl Material for StandardMaterial {
+    type SourceAsset = Self;
+
+    fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
+        source_asset
+    }
+
     fn fragment_shader() -> ShaderRef {
         PBR_SHADER_HANDLE.into()
     }
