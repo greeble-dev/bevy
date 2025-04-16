@@ -3,7 +3,7 @@ use alloc::borrow::Cow;
 use bevy_asset::{Asset, Handle};
 use bevy_ecs::system::SystemParamItem;
 use bevy_platform::{collections::HashSet, hash::FixedHasher};
-use bevy_reflect::{impl_type_path, Reflect};
+use bevy_reflect::{impl_type_path, Reflect, TypePath};
 use bevy_render::{
     alpha::AlphaMode,
     mesh::MeshVertexBufferLayoutRef,
@@ -132,14 +132,14 @@ pub trait MaterialExtension: Asset + AsBindGroup + Clone + Sized {
 #[derive(Asset, Clone, Debug, Reflect)]
 #[reflect(type_path = false)]
 #[reflect(Clone)]
-pub struct ExtendedMaterial<B: Material + Asset + Clone, E: MaterialExtension> {
+pub struct ExtendedMaterial<B: Asset + Clone, E: MaterialExtension> {
     pub base: B,
     pub extension: E,
 }
 
 impl<B, E> Default for ExtendedMaterial<B, E>
 where
-    B: Material + Asset + Clone + Default,
+    B: Asset + Clone + Default,
     E: MaterialExtension + Default,
 {
     fn default() -> Self {
@@ -152,9 +152,15 @@ where
 
 // We don't use the `TypePath` derive here due to a bug where `#[reflect(type_path = false)]`
 // causes the `TypePath` derive to not generate an implementation.
-impl_type_path!((in bevy_pbr::extended_material) ExtendedMaterial<B: Material + Asset + Clone, E: MaterialExtension>);
+impl_type_path!((in bevy_pbr::extended_material) ExtendedMaterial<B: Asset + Clone, E: MaterialExtension>);
 
-impl<B: Material + Asset + Clone, E: MaterialExtension> AsBindGroup for ExtendedMaterial<B, E> {
+#[derive(Clone, Debug, TypePath)]
+pub struct ExtendedMaterialInternal<B: Material, E: MaterialExtension> {
+    pub base: B,
+    pub extension: E,
+}
+
+impl<B: Material, E: MaterialExtension> AsBindGroup for ExtendedMaterialInternal<B, E> {
     type Data = (<B as AsBindGroup>::Data, <E as AsBindGroup>::Data);
     type Param = (<B as AsBindGroup>::Param, <E as AsBindGroup>::Param);
 
@@ -286,11 +292,14 @@ impl<B: Material + Asset + Clone, E: MaterialExtension> AsBindGroup for Extended
     }
 }
 
-impl<B: Material + Asset + Clone, E: MaterialExtension> Material for ExtendedMaterial<B, E> {
-    type SourceAsset = Self;
+impl<B: Material, E: MaterialExtension> Material for ExtendedMaterialInternal<B, E> {
+    type SourceAsset = ExtendedMaterial<B::SourceAsset, E>;
 
     fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
-        source_asset
+        Self {
+            base: B::from_source_asset(source_asset.base),
+            extension: source_asset.extension,
+        }
     }
 
     fn vertex_shader() -> ShaderRef {
