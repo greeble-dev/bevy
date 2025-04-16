@@ -9,7 +9,7 @@ use bevy::{
     input::mouse::AccumulatedMouseMotion,
     pbr::{
         decal::{self, clustered::ClusteredDecal},
-        ExtendedMaterial, MaterialExtension,
+        ExtendedMaterial, ExtendedMaterialInternal, MaterialExtension, StandardMaterialInternal,
     },
     prelude::*,
     render::{
@@ -131,7 +131,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(MaterialPlugin::<
-            ExtendedMaterial<StandardMaterial, CustomDecalExtension>,
+            ExtendedMaterialInternal<StandardMaterialInternal, CustomDecalExtension>,
         >::default())
         .init_resource::<AppStatus>()
         .add_event::<WidgetClickEvent<Selection>>()

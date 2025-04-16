@@ -2,7 +2,10 @@
 
 use bevy::{
     color::palettes::basic::RED,
-    pbr::{ExtendedMaterial, MaterialExtension, OpaqueRendererMethod},
+    pbr::{
+        ExtendedMaterial, ExtendedMaterialInternal, MaterialExtension, OpaqueRendererMethod,
+        StandardMaterialInternal,
+    },
     prelude::*,
     render::render_resource::*,
 };
@@ -14,7 +17,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(MaterialPlugin::<
-            ExtendedMaterial<StandardMaterial, MyExtension>,
+            ExtendedMaterialInternal<StandardMaterialInternal, MyExtension>,
         >::default())
         .add_systems(Startup, setup)
         .add_systems(Update, rotate_things)

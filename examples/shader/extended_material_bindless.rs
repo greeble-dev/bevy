@@ -4,7 +4,10 @@ use std::f32::consts::FRAC_PI_2;
 
 use bevy::{
     color::palettes::{css::RED, tailwind::GRAY_600},
-    pbr::{ExtendedMaterial, MaterialExtension, MeshMaterial3d},
+    pbr::{
+        ExtendedMaterial, ExtendedMaterialInternal, MaterialExtension, MeshMaterial3d,
+        StandardMaterialInternal,
+    },
     prelude::*,
     render::{
         mesh::{SphereKind, SphereMeshBuilder},
@@ -99,7 +102,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(MaterialPlugin::<
-            ExtendedMaterial<StandardMaterial, ExampleBindlessExtension>,
+            ExtendedMaterialInternal<StandardMaterialInternal, ExampleBindlessExtension>,
         >::default())
         .add_systems(Startup, setup)
         .add_systems(Update, rotate_sphere)

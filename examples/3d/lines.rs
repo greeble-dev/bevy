@@ -77,7 +77,7 @@ impl Material for LineMaterial {
     fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
         source_asset.clone()
     }
-    
+
     fn fragment_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
     }
