@@ -81,6 +81,12 @@ fn setup(
 }
 
 impl Material for BindlessMaterial {
+    type SourceAsset = Self;
+
+    fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
+        source_asset.clone()
+    }
+    
     fn fragment_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
     }

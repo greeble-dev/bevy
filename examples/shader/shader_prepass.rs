@@ -155,6 +155,12 @@ struct CustomMaterial {
 /// Not shown in this example, but if you need to specialize your material, the specialize
 /// function will also be used by the prepass
 impl Material for CustomMaterial {
+    type SourceAsset = Self;
+
+    fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
+        source_asset.clone()
+    }
+    
     fn fragment_shader() -> ShaderRef {
         MATERIAL_SHADER_ASSET_PATH.into()
     }
@@ -197,6 +203,12 @@ struct PrepassOutputMaterial {
 }
 
 impl Material for PrepassOutputMaterial {
+    type SourceAsset = Self;
+
+    fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
+        source_asset.clone()
+    }
+    
     fn fragment_shader() -> ShaderRef {
         PREPASS_SHADER_ASSET_PATH.into()
     }
