@@ -10,20 +10,6 @@ use bitflags::bitflags;
 
 use crate::{deferred::DEFAULT_PBR_DEFERRED_LIGHTING_PASS_ID, *};
 
-/// An enum to define which UV attribute to use for a texture.
-///
-/// It is used for every texture in the [`StandardMaterial`].
-/// It only supports two UV attributes, [`bevy_render::mesh::Mesh::ATTRIBUTE_UV_0`] and
-/// [`bevy_render::mesh::Mesh::ATTRIBUTE_UV_1`].
-/// The default is [`UvChannel::Uv0`].
-#[derive(Reflect, Default, Debug, Clone, PartialEq, Eq)]
-#[reflect(Default, Debug, Clone, PartialEq)]
-pub enum UvChannel {
-    #[default]
-    Uv0,
-    Uv1,
-}
-
 /// A material with "standard" properties used in PBR lighting.
 /// Standard property values with pictures here:
 /// <https://google.github.io/filament/Material%20Properties.pdf>.
