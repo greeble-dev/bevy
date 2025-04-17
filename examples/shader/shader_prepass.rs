@@ -160,7 +160,7 @@ impl Material for CustomMaterial {
     fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
         source_asset.clone()
     }
-    
+
     fn fragment_shader() -> ShaderRef {
         MATERIAL_SHADER_ASSET_PATH.into()
     }
@@ -208,7 +208,7 @@ impl Material for PrepassOutputMaterial {
     fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
         source_asset.clone()
     }
-    
+
     fn fragment_shader() -> ShaderRef {
         PREPASS_SHADER_ASSET_PATH.into()
     }
