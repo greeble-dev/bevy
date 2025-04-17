@@ -21,6 +21,7 @@ use bevy_core_pipeline::{
 };
 use bevy_ecs::{prelude::*, query::QueryItem};
 use bevy_image::BevyDefault as _;
+use bevy_pbr_types::DEFAULT_PBR_DEFERRED_LIGHTING_PASS_ID;
 use bevy_render::{
     extract_component::{
         ComponentUniforms, ExtractComponent, ExtractComponentPlugin, UniformComponentPlugin,
@@ -36,8 +37,6 @@ pub struct DeferredPbrLightingPlugin;
 
 pub const DEFERRED_LIGHTING_SHADER_HANDLE: Handle<Shader> =
     weak_handle!("f4295279-8890-4748-b654-ca4d2183df1c");
-
-pub const DEFAULT_PBR_DEFERRED_LIGHTING_PASS_ID: u8 = 1;
 
 /// Component with a `depth_id` for specifying which corresponding materials should be rendered by this specific PBR deferred lighting pass.
 ///

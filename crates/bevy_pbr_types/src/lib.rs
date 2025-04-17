@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+pub mod deferred;
 pub mod directional_light;
 pub mod light;
 pub mod material;
@@ -17,6 +18,7 @@ pub mod point_light;
 pub mod skin;
 pub mod spot_light;
 
+pub use deferred::*;
 pub use directional_light::*;
 pub use light::*;
 pub use material::*;
