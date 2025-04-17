@@ -1,13 +1,14 @@
 //! Bind group layout related definitions for the mesh pipeline.
 
 use bevy_math::Mat4;
+use bevy_pbr_types::MAX_JOINTS;
 use bevy_render::{
     mesh::morph::MAX_MORPH_WEIGHTS,
     render_resource::*,
     renderer::{RenderAdapter, RenderDevice},
 };
 
-use crate::{binding_arrays_are_usable, render::skin::MAX_JOINTS, LightmapSlab};
+use crate::{binding_arrays_are_usable, LightmapSlab};
 
 const MORPH_WEIGHT_SIZE: usize = size_of::<f32>();
 

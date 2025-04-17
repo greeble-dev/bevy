@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use bevy_asset::{prelude::AssetChanged, Assets};
 use bevy_ecs::prelude::*;
 use bevy_math::Mat4;
+use bevy_pbr_types::MAX_JOINTS;
 use bevy_platform::collections::hash_map::Entry;
 use bevy_render::render_resource::{Buffer, BufferDescriptor};
 use bevy_render::sync_world::{MainEntity, MainEntityHashMap, MainEntityHashSet};
@@ -19,15 +20,6 @@ use bevy_transform::prelude::GlobalTransform;
 use offset_allocator::{Allocation, Allocator};
 use smallvec::SmallVec;
 use tracing::error;
-
-/// Maximum number of joints supported for skinned meshes.
-///
-/// It is used to allocate buffers.
-/// The correctness of the value depends on the GPU/platform.
-/// The current value is chosen because it is guaranteed to work everywhere.
-/// To allow for bigger values, a check must be made for the limits
-/// of the GPU at runtime, which would mean not using consts anymore.
-pub const MAX_JOINTS: usize = 256;
 
 /// The total number of joints we support.
 ///
