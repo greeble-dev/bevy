@@ -25,8 +25,7 @@ use crate::*;
 mod ambient_light;
 pub use ambient_light::AmbientLight;
 
-mod point_light;
-pub use point_light::PointLight;
+pub use bevy_pbr_types::PointLight;
 mod spot_light;
 pub use bevy_pbr_types::DirectionalLight;
 pub use spot_light::SpotLight;
