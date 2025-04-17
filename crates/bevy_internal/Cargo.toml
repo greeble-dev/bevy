@@ -410,6 +410,7 @@ bevy_input_focus = { path = "../bevy_input_focus", optional = true, version = "0
   "bevy_reflect",
 ] }
 bevy_pbr = { path = "../bevy_pbr", optional = true, version = "0.16.0-dev" }
+bevy_pbr_types = { path = "../bevy_pbr_types", optional = true, version = "0.16.0-dev" }
 bevy_picking = { path = "../bevy_picking", optional = true, version = "0.16.0-dev" }
 bevy_remote = { path = "../bevy_remote", optional = true, version = "0.16.0-dev" }
 bevy_render = { path = "../bevy_render", optional = true, version = "0.16.0-dev" }
