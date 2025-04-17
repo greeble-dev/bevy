@@ -63,6 +63,13 @@ pub use ssao::*;
 pub use ssr::*;
 pub use volumetric_fog::{FogVolume, VolumetricFog, VolumetricFogPlugin, VolumetricLight};
 
+// For backwards compatibility, re-export `bevy_pbr_types` that used to be exported by this crate.
+pub use bevy_pbr_types::{
+    light_consts, DirectionalLight, LightVisibilityClass, MeshMaterial3d, OpaqueRendererMethod,
+    ParallaxMappingMethod, PointLight, SpotLight, StandardMaterial, UvChannel,
+    DEFAULT_PBR_DEFERRED_LIGHTING_PASS_ID, MAX_JOINTS,
+};
+
 /// The PBR prelude.
 ///
 /// This includes the most common types in this crate, re-exported for your convenience.
@@ -76,18 +83,12 @@ pub mod prelude {
         ssao::ScreenSpaceAmbientOcclusionPlugin,
     };
 
-    // Re-export `bevy_pbr_types` that were previously in this crate.
+    // For backwards compatibility, re-export `bevy_pbr_types` that used to be in this prelude.
     #[doc(hidden)]
     pub use bevy_pbr_types::{
         light_consts, MeshMaterial3d, ParallaxMappingMethod, StandardMaterial,
     };
 }
-
-// Re-export `bevy_pbr_types` that were previously in this crate.
-pub use bevy_pbr_types::{
-    light_consts, MeshMaterial3d, OpaqueRendererMethod, ParallaxMappingMethod, StandardMaterial,
-    UvChannel, DEFAULT_PBR_DEFERRED_LIGHTING_PASS_ID, MAX_JOINTS,
-};
 
 pub mod graph {
     use bevy_render::render_graph::RenderLabel;
