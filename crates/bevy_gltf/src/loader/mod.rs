@@ -31,8 +31,8 @@ use bevy_mesh::{
     Indices, Mesh, MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues,
 };
 #[cfg(feature = "pbr_transmission_textures")]
-use bevy_pbr::UvChannel;
-use bevy_pbr::{
+use bevy_pbr_types::UvChannel;
+use bevy_pbr_types::{
     DirectionalLight, MeshMaterial3d, PointLight, SpotLight, StandardMaterial, MAX_JOINTS,
 };
 use bevy_platform::collections::{HashMap, HashSet};

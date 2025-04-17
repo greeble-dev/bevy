@@ -54,7 +54,7 @@ pub enum GltfAssetLabel {
     },
     /// `Texture{}`: glTF Texture as a Bevy [`Image`](bevy_image::prelude::Image)
     Texture(usize),
-    /// `Material{}`: glTF Material as a Bevy [`StandardMaterial`](bevy_pbr::StandardMaterial)
+    /// `Material{}`: glTF Material as a Bevy [`StandardMaterial`](bevy_pbr_types::StandardMaterial)
     Material {
         /// Index of this material
         index: usize,
@@ -63,7 +63,7 @@ pub enum GltfAssetLabel {
         is_scale_inverted: bool,
     },
     /// `DefaultMaterial`: glTF's default Material as a
-    /// Bevy [`StandardMaterial`](bevy_pbr::StandardMaterial)
+    /// Bevy [`StandardMaterial`](bevy_pbr_types::StandardMaterial)
     DefaultMaterial,
     /// `Animation{}`: glTF Animation as Bevy [`AnimationClip`](bevy_animation::AnimationClip)
     Animation(usize),
