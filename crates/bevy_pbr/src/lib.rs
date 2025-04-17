@@ -73,19 +73,20 @@ pub mod prelude {
         light::{AmbientLight, DirectionalLight, PointLight, SpotLight},
         light_probe::{environment_map::EnvironmentMapLight, LightProbe},
         material::{Material, MaterialPlugin},
-        pbr_material::StandardMaterial,
         ssao::ScreenSpaceAmbientOcclusionPlugin,
     };
 
     // Re-export `bevy_pbr_types` that were previously in this crate.
     #[doc(hidden)]
-    pub use bevy_pbr_types::{light_consts, MeshMaterial3d, ParallaxMappingMethod};
+    pub use bevy_pbr_types::{
+        light_consts, MeshMaterial3d, ParallaxMappingMethod, StandardMaterial,
+    };
 }
 
 // Re-export `bevy_pbr_types` that were previously in this crate.
 pub use bevy_pbr_types::{
-    light_consts, MeshMaterial3d, OpaqueRendererMethod, ParallaxMappingMethod, UvChannel,
-    DEFAULT_PBR_DEFERRED_LIGHTING_PASS_ID, MAX_JOINTS,
+    light_consts, MeshMaterial3d, OpaqueRendererMethod, ParallaxMappingMethod, StandardMaterial,
+    UvChannel, DEFAULT_PBR_DEFERRED_LIGHTING_PASS_ID, MAX_JOINTS,
 };
 
 pub mod graph {

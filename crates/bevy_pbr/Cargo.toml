@@ -11,11 +11,13 @@ keywords = ["bevy"]
 [features]
 webgl = []
 webgpu = []
-pbr_transmission_textures = []
-pbr_multi_layer_material_textures = []
-pbr_anisotropy_texture = []
+pbr_transmission_textures = ["bevy_pbr_types/pbr_transmission_textures"]
+pbr_multi_layer_material_textures = [
+  "bevy_pbr_types/pbr_multi_layer_material_textures",
+]
+pbr_anisotropy_texture = ["bevy_pbr_types/pbr_anisotropy_texture"]
 experimental_pbr_pcss = ["bevy_pbr_types/experimental_pbr_pcss"]
-pbr_specular_textures = []
+pbr_specular_textures = ["bevy_pbr_types/pbr_specular_textures"]
 shader_format_glsl = ["bevy_render/shader_format_glsl"]
 trace = ["bevy_render/trace"]
 # Enables the meshlet renderer for dense high-poly scenes (experimental)
