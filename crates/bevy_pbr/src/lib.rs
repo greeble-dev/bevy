@@ -36,7 +36,6 @@ mod light_probe;
 mod lightmap;
 mod material;
 mod material_bind_groups;
-mod mesh_material;
 mod parallax;
 mod pbr_material;
 mod prepass;
@@ -58,7 +57,6 @@ pub use light_probe::*;
 pub use lightmap::*;
 pub use material::*;
 pub use material_bind_groups::*;
-pub use mesh_material::*;
 pub use parallax::*;
 pub use pbr_material::*;
 pub use prepass::*;
@@ -77,7 +75,6 @@ pub mod prelude {
         light::{AmbientLight, DirectionalLight, PointLight, SpotLight},
         light_probe::{environment_map::EnvironmentMapLight, LightProbe},
         material::{Material, MaterialPlugin},
-        mesh_material::MeshMaterial3d,
         parallax::ParallaxMappingMethod,
         pbr_material::StandardMaterial,
         ssao::ScreenSpaceAmbientOcclusionPlugin,
@@ -85,11 +82,11 @@ pub mod prelude {
 
     // Re-export `bevy_pbr_types` that were previously in this crate.
     #[doc(hidden)]
-    pub use bevy_pbr_types::light_consts;
+    pub use bevy_pbr_types::{light_consts, MeshMaterial3d};
 }
 
 // Re-export `bevy_pbr_types` that were previously in this crate.
-pub use bevy_pbr_types::{light_consts, MAX_JOINTS};
+pub use bevy_pbr_types::{light_consts, MeshMaterial3d, MAX_JOINTS};
 
 pub mod graph {
     use bevy_render::render_graph::RenderLabel;
