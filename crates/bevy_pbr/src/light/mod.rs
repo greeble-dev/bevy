@@ -14,7 +14,7 @@ use bevy_render::{
     primitives::{Aabb, CascadesFrusta, CubemapFrusta, Frustum, Sphere},
     view::{
         InheritedVisibility, NoFrustumCulling, PreviousVisibleEntities, RenderLayers,
-        ViewVisibility, VisibilityClass, VisibilityRange, VisibleEntityRanges,
+        ViewVisibility, VisibilityRange, VisibleEntityRanges,
     },
 };
 use bevy_transform::components::{GlobalTransform, Transform};

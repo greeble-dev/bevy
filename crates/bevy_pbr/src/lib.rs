@@ -133,7 +133,7 @@ use bevy_render::{
     camera::{sort_cameras, CameraUpdateSystem, Projection},
     extract_component::ExtractComponentPlugin,
     extract_resource::ExtractResourcePlugin,
-    primitives::{CascadesFrusta, CubemapFrusta},
+    primitives::{CascadesFrusta, CubemapFrusta, Frustum},
     render_graph::RenderGraph,
     render_resource::Shader,
     sync_component::SyncComponentPlugin,
@@ -351,6 +351,11 @@ impl Plugin for PbrPlugin {
             .register_required_components::<PointLight, VisibilityClass>()
             .register_type::<PointLightShadowMap>()
             .register_type::<SpotLight>()
+            .register_required_components::<SpotLight, Frustum>()
+            .register_required_components::<SpotLight, VisibleMeshEntities>()
+            .register_required_components::<SpotLight, Transform>()
+            .register_required_components::<SpotLight, Visibility>()
+            .register_required_components::<SpotLight, VisibilityClass>()
             .register_type::<ShadowFilteringMethod>()
             .init_resource::<AmbientLight>()
             .init_resource::<GlobalVisibleClusterableObjects>()
