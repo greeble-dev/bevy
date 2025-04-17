@@ -1,4 +1,4 @@
-use bevy_render::view::{self, Visibility};
+use bevy_render::view::{self};
 
 use super::*;
 
@@ -27,13 +27,6 @@ use super::*;
 /// To control the resolution of the shadow maps, use the [`PointLightShadowMap`] resource.
 #[derive(Component, Debug, Clone, Copy, Reflect)]
 #[reflect(Component, Default, Debug, Clone)]
-#[require(
-    CubemapFrusta,
-    CubemapVisibleEntities,
-    Transform,
-    Visibility,
-    VisibilityClass
-)]
 #[component(on_add = view::add_visibility_class::<LightVisibilityClass>)]
 pub struct PointLight {
     /// The color of this light source.
