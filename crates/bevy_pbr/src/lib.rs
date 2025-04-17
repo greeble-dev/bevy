@@ -133,14 +133,15 @@ use bevy_render::{
     camera::{sort_cameras, CameraUpdateSystem, Projection},
     extract_component::ExtractComponentPlugin,
     extract_resource::ExtractResourcePlugin,
+    primitives::CascadesFrusta,
     render_graph::RenderGraph,
     render_resource::Shader,
     sync_component::SyncComponentPlugin,
-    view::VisibilitySystems,
+    view::{Visibility, VisibilityClass, VisibilitySystems},
     ExtractSchedule, Render, RenderApp, RenderDebugFlags, RenderSet,
 };
 
-use bevy_transform::TransformSystem;
+use bevy_transform::{components::Transform, TransformSystem};
 
 pub const PBR_TYPES_SHADER_HANDLE: Handle<Shader> =
     weak_handle!("b0330585-2335-4268-9032-a6c4c2d932f6");
@@ -332,6 +333,13 @@ impl Plugin for PbrPlugin {
             .register_type::<ClusterConfig>()
             .register_type::<CubemapVisibleEntities>()
             .register_type::<DirectionalLight>()
+            .register_required_components::<DirectionalLight, Cascades>()
+            .register_required_components::<DirectionalLight, CascadesFrusta>()
+            .register_required_components::<DirectionalLight, CascadeShadowConfig>()
+            .register_required_components::<DirectionalLight, CascadesVisibleEntities>()
+            .register_required_components::<DirectionalLight, Transform>()
+            .register_required_components::<DirectionalLight, Visibility>()
+            .register_required_components::<DirectionalLight, VisibilityClass>()
             .register_type::<DirectionalLightShadowMap>()
             .register_type::<NotShadowCaster>()
             .register_type::<NotShadowReceiver>()

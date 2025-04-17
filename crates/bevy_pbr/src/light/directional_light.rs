@@ -1,4 +1,4 @@
-use bevy_render::view::{self, Visibility};
+use bevy_render::view::{self};
 
 use super::*;
 
@@ -44,15 +44,6 @@ use super::*;
 /// To control the resolution of the shadow maps, use the [`DirectionalLightShadowMap`] resource.
 #[derive(Component, Debug, Clone, Reflect)]
 #[reflect(Component, Default, Debug, Clone)]
-#[require(
-    Cascades,
-    CascadesFrusta,
-    CascadeShadowConfig,
-    CascadesVisibleEntities,
-    Transform,
-    Visibility,
-    VisibilityClass
-)]
 #[component(on_add = view::add_visibility_class::<LightVisibilityClass>)]
 pub struct DirectionalLight {
     /// The color of the light.
