@@ -25,10 +25,9 @@ use crate::*;
 mod ambient_light;
 pub use ambient_light::AmbientLight;
 
-pub use bevy_pbr_types::PointLight;
-mod spot_light;
 pub use bevy_pbr_types::DirectionalLight;
-pub use spot_light::SpotLight;
+pub use bevy_pbr_types::PointLight;
+pub use bevy_pbr_types::SpotLight;
 
 /// Controls the resolution of [`PointLight`] shadow maps.
 ///

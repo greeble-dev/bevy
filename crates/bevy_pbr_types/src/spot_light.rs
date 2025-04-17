@@ -1,7 +1,9 @@
-use bevy_pbr_types::LightVisibilityClass;
+use bevy_color::Color;
+use bevy_ecs::{component::Component, reflect::ReflectComponent};
+use bevy_reflect::{std_traits::ReflectDefault, Reflect};
 use bevy_render::view::{self};
 
-use super::*;
+use crate::LightVisibilityClass;
 
 /// A light that emits light in a given direction from a central point.
 ///
