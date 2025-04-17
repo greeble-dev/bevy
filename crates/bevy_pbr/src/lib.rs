@@ -86,7 +86,9 @@ pub mod prelude {
 }
 
 // Re-export `bevy_pbr_types` that were previously in this crate.
-pub use bevy_pbr_types::{light_consts, MeshMaterial3d, UvChannel, MAX_JOINTS};
+pub use bevy_pbr_types::{
+    light_consts, MeshMaterial3d, OpaqueRendererMethod, UvChannel, MAX_JOINTS,
+};
 
 pub mod graph {
     use bevy_render::render_graph::RenderLabel;

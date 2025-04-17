@@ -10,6 +10,7 @@ extern crate alloc;
 
 pub mod directional_light;
 pub mod light;
+pub mod material;
 pub mod mesh_material;
 pub mod pbr_material;
 pub mod point_light;
@@ -18,6 +19,7 @@ pub mod spot_light;
 
 pub use directional_light::*;
 pub use light::*;
+pub use material::*;
 pub use mesh_material::*;
 pub use pbr_material::*;
 pub use point_light::*;
