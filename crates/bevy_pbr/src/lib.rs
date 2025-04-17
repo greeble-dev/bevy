@@ -74,7 +74,7 @@ pub mod prelude {
     #[doc(hidden)]
     pub use crate::{
         fog::{DistanceFog, FogFalloff},
-        light::{light_consts, AmbientLight, DirectionalLight, PointLight, SpotLight},
+        light::{AmbientLight, DirectionalLight, PointLight, SpotLight},
         light_probe::{environment_map::EnvironmentMapLight, LightProbe},
         material::{Material, MaterialPlugin},
         mesh_material::MeshMaterial3d,
@@ -82,10 +82,14 @@ pub mod prelude {
         pbr_material::StandardMaterial,
         ssao::ScreenSpaceAmbientOcclusionPlugin,
     };
+
+    // Re-export `bevy_pbr_types` that were previously in this crate.
+    #[doc(hidden)]
+    pub use bevy_pbr_types::light_consts;
 }
 
 // Re-export `bevy_pbr_types` that were previously in this crate.
-pub use bevy_pbr_types::MAX_JOINTS;
+pub use bevy_pbr_types::{light_consts, MAX_JOINTS};
 
 pub mod graph {
     use bevy_render::render_graph::RenderLabel;

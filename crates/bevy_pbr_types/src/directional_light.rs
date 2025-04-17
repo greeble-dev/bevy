@@ -1,6 +1,9 @@
+use bevy_color::Color;
+use bevy_ecs::{component::Component, reflect::ReflectComponent};
+use bevy_reflect::{std_traits::ReflectDefault, Reflect};
 use bevy_render::view::{self};
 
-use super::*;
+use crate::{light_consts, LightVisibilityClass};
 
 /// A Directional light.
 ///

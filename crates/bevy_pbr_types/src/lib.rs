@@ -8,6 +8,10 @@
 
 extern crate alloc;
 
+pub mod directional_light;
+pub mod light;
 pub mod skin;
 
+pub use directional_light::*;
+pub use light::*;
 pub use skin::*;

@@ -1,3 +1,4 @@
+use bevy_pbr_types::LightVisibilityClass;
 use bevy_render::view::{self};
 
 use super::*;

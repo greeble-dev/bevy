@@ -137,7 +137,10 @@ pbr_anisotropy_texture = [
 ]
 
 # Percentage-closer soft shadows
-experimental_pbr_pcss = ["bevy_pbr?/experimental_pbr_pcss"]
+experimental_pbr_pcss = [
+  "bevy_pbr?/experimental_pbr_pcss",
+  "bevy_pbr_types?/experimental_pbr_pcss",
+]
 
 # Specular textures in `StandardMaterial`:
 pbr_specular_textures = [

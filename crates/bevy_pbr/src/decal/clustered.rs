@@ -30,6 +30,7 @@ use bevy_ecs::{
 };
 use bevy_image::Image;
 use bevy_math::Mat4;
+use bevy_pbr_types::LightVisibilityClass;
 use bevy_platform::collections::HashMap;
 use bevy_reflect::Reflect;
 use bevy_render::{
@@ -48,9 +49,7 @@ use bevy_render::{
 use bevy_transform::{components::GlobalTransform, prelude::Transform};
 use bytemuck::{Pod, Zeroable};
 
-use crate::{
-    binding_arrays_are_usable, prepare_lights, GlobalClusterableObjectMeta, LightVisibilityClass,
-};
+use crate::{binding_arrays_are_usable, prepare_lights, GlobalClusterableObjectMeta};
 
 /// The handle to the `clustered.wgsl` shader.
 pub(crate) const CLUSTERED_DECAL_SHADER_HANDLE: Handle<Shader> =
