@@ -132,6 +132,6 @@ impl Material for MeshletDebugMaterial {
     type SourceAsset = Self;
 
     fn from_source_asset(source_asset: Self::SourceAsset) -> Self {
-        source_asset.clone()
+        source_asset
     }
 }
