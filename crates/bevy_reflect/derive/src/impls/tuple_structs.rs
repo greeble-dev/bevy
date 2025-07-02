@@ -21,8 +21,7 @@ pub(crate) fn impl_tuple_struct(reflect_struct: &ReflectStruct) -> proc_macro2::
         ..
     } = FieldAccessors::new(reflect_struct);
 
-    let where_clause_options = reflect_struct.where_clause_options();
-    let get_type_registration_impl = reflect_struct.get_type_registration(&where_clause_options);
+    let (get_type_registration_impl, where_clause_options) = reflect_struct.get_type_registration();
 
     let typed_impl = impl_typed(&where_clause_options, reflect_struct.to_info_tokens(true));
 

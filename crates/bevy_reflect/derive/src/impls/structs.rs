@@ -33,7 +33,7 @@ pub(crate) fn impl_struct(reflect_struct: &ReflectStruct) -> proc_macro2::TokenS
         ..
     } = FieldAccessors::new(reflect_struct);
 
-    let where_clause_options = reflect_struct.where_clause_options();
+    let (get_type_registration_impl, where_clause_options) = reflect_struct.get_type_registration();
     let typed_impl = impl_typed(&where_clause_options, reflect_struct.to_info_tokens(false));
 
     let type_path_impl = impl_type_path(reflect_struct.meta());
@@ -49,8 +49,6 @@ pub(crate) fn impl_struct(reflect_struct: &ReflectStruct) -> proc_macro2::TokenS
     let function_impls = None::<proc_macro2::TokenStream>;
     #[cfg(feature = "functions")]
     let function_impls = crate::impls::impl_function_traits(&where_clause_options);
-
-    let get_type_registration_impl = reflect_struct.get_type_registration(&where_clause_options);
 
     let (impl_generics, ty_generics, where_clause) = reflect_struct
         .meta()

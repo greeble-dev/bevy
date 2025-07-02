@@ -55,7 +55,7 @@ pub(crate) fn impl_enum(reflect_enum: &ReflectEnum) -> proc_macro2::TokenStream 
         ..
     } = TryApplyVariantBuilder::new(reflect_enum).build(&ref_value);
 
-    let where_clause_options = reflect_enum.where_clause_options();
+    let (get_type_registration_impl, where_clause_options) = reflect_enum.get_type_registration();
     let typed_impl = impl_typed(&where_clause_options, reflect_enum.to_info_tokens());
 
     let type_path_impl = impl_type_path(reflect_enum.meta());
@@ -71,8 +71,6 @@ pub(crate) fn impl_enum(reflect_enum: &ReflectEnum) -> proc_macro2::TokenStream 
     let function_impls = None::<proc_macro2::TokenStream>;
     #[cfg(feature = "functions")]
     let function_impls = crate::impls::impl_function_traits(&where_clause_options);
-
-    let get_type_registration_impl = reflect_enum.get_type_registration(&where_clause_options);
 
     let (impl_generics, ty_generics, where_clause) =
         reflect_enum.meta().type_path().generics().split_for_impl();

@@ -477,15 +477,15 @@ impl<'a> ReflectMeta<'a> {
     }
 
     /// Returns the `GetTypeRegistration` impl as a `TokenStream`.
-    pub fn get_type_registration(
-        &self,
-        where_clause_options: &WhereClauseOptions,
-    ) -> proc_macro2::TokenStream {
-        crate::registration::impl_get_type_registration(
-            where_clause_options,
+    pub fn get_type_registration(&self) -> (proc_macro2::TokenStream, WhereClauseOptions) {
+        let where_clause_options = WhereClauseOptions::new(self);
+        let type_registration = crate::registration::impl_get_type_registration(
+            &where_clause_options,
             None,
             Option::<core::iter::Empty<&Type>>::None,
-        )
+        );
+
+        (type_registration, where_clause_options)
     }
 
     /// The collection of docstrings for this type, if any.
@@ -593,15 +593,15 @@ impl<'a> ReflectStruct<'a> {
     /// Returns the `GetTypeRegistration` impl as a `TokenStream`.
     ///
     /// Returns a specific implementation for structs and this method should be preferred over the generic [`get_type_registration`](ReflectMeta) method
-    pub fn get_type_registration(
-        &self,
-        where_clause_options: &WhereClauseOptions,
-    ) -> proc_macro2::TokenStream {
-        crate::registration::impl_get_type_registration(
-            where_clause_options,
+    pub fn get_type_registration(&self) -> (proc_macro2::TokenStream, WhereClauseOptions) {
+        let where_clause_options = self.where_clause_options();
+        let type_registration = crate::registration::impl_get_type_registration(
+            &where_clause_options,
             self.serialization_data(),
             Some(self.active_types().iter()),
-        )
+        );
+
+        (type_registration, where_clause_options)
     }
 
     /// Get a collection of types which are exposed to the reflection API
@@ -873,15 +873,15 @@ impl<'a> ReflectEnum<'a> {
     /// Returns the `GetTypeRegistration` impl as a `TokenStream`.
     ///
     /// Returns a specific implementation for enums and this method should be preferred over the generic [`get_type_registration`](crate::ReflectMeta) method
-    pub fn get_type_registration(
-        &self,
-        where_clause_options: &WhereClauseOptions,
-    ) -> proc_macro2::TokenStream {
-        crate::registration::impl_get_type_registration(
-            where_clause_options,
+    pub fn get_type_registration(&self) -> (proc_macro2::TokenStream, WhereClauseOptions) {
+        let where_clause_options = self.where_clause_options();
+        let type_registration = crate::registration::impl_get_type_registration(
+            &where_clause_options,
             None,
             Some(self.active_fields().map(StructField::reflected_type)),
-        )
+        );
+
+        (type_registration, where_clause_options)
     }
 
     /// Generates a `TokenStream` for `TypeInfo::Enum` construction.

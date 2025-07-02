@@ -1,6 +1,5 @@
 use crate::{
     impls::{common_partial_reflect_methods, impl_full_reflect, impl_type_path, impl_typed},
-    where_clause_options::WhereClauseOptions,
     ReflectMeta,
 };
 use bevy_macro_utils::fq_std::{FQClone, FQOption, FQResult};
@@ -19,7 +18,7 @@ pub(crate) fn impl_opaque(meta: &ReflectMeta) -> proc_macro2::TokenStream {
     #[cfg(not(feature = "documentation"))]
     let with_docs: Option<proc_macro2::TokenStream> = None;
 
-    let where_clause_options = WhereClauseOptions::new(meta);
+    let (get_type_registration_impl, where_clause_options) = meta.get_type_registration();
     let typed_impl = impl_typed(
         &where_clause_options,
         quote! {
@@ -57,7 +56,6 @@ pub(crate) fn impl_opaque(meta: &ReflectMeta) -> proc_macro2::TokenStream {
 
     let (impl_generics, ty_generics, where_clause) = type_path.generics().split_for_impl();
     let where_reflect_clause = where_clause_options.extend_where_clause(where_clause);
-    let get_type_registration_impl = meta.get_type_registration(&where_clause_options);
 
     quote! {
         #get_type_registration_impl
