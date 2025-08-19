@@ -1,4 +1,3 @@
-use bevy_ecs::name::Name;
 use bevy_math::{Mat4, Vec3};
 use bevy_transform::components::Transform;
 
@@ -15,12 +14,10 @@ use crate::{
     GltfError,
 };
 
-pub(crate) fn node_name(node: &Node) -> Name {
-    let name = node
-        .name()
+pub(crate) fn node_name(node: &Node) -> String {
+    node.name()
         .map(ToString::to_string)
-        .unwrap_or_else(|| format!("GltfNode{}", node.index()));
-    Name::new(name)
+        .unwrap_or_else(|| format!("GltfNode{}", node.index()))
 }
 
 /// Calculate the transform of gLTF [`Node`].
@@ -89,8 +86,8 @@ pub(crate) fn check_is_part_of_cycle(
 #[cfg(feature = "bevy_animation")]
 pub(crate) fn collect_path(
     node: &Node,
-    current_path: &[Name],
-    paths: &mut HashMap<usize, (usize, Vec<Name>)>,
+    current_path: &[String],
+    paths: &mut HashMap<usize, (usize, Vec<String>)>,
     root_index: usize,
     visited: &mut HashSet<usize>,
 ) {

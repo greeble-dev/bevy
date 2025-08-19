@@ -254,7 +254,7 @@ impl GltfLoader {
 
         #[cfg(feature = "bevy_animation")]
         let paths = {
-            let mut paths = HashMap::<usize, (usize, Vec<Name>)>::default();
+            let mut paths = HashMap::<usize, (usize, Vec<String>)>::default();
             for scene in gltf.scenes() {
                 for node in scene.nodes() {
                     let root_index = node.index();
@@ -551,7 +551,7 @@ impl GltfLoader {
                     if let Some((root_index, path)) = paths.get(&node.index()) {
                         animation_roots.insert(*root_index);
                         animation_clip.add_variable_curve_to_target(
-                            AnimationTargetId::from_names(path.iter()),
+                            AnimationTargetId::from_iter(path.iter()),
                             curve,
                         );
                     } else {
@@ -1415,7 +1415,7 @@ fn load_node(
     let mut node = child_spawner.spawn((transform, Visibility::default()));
 
     let name = node_name(gltf_node);
-    node.insert(name.clone());
+    node.insert(Name::new(name.clone()));
 
     #[cfg(feature = "bevy_animation")]
     if animation_context.is_none() && animation_roots.contains(&gltf_node.index()) {
@@ -1428,10 +1428,10 @@ fn load_node(
 
     #[cfg(feature = "bevy_animation")]
     if let Some(ref mut animation_context) = animation_context {
-        animation_context.path.push(name);
+        animation_context.path.push(name.clone());
 
         node.insert(AnimationTarget {
-            id: AnimationTargetId::from_names(animation_context.path.iter()),
+            id: AnimationTargetId::from_iter(animation_context.path.iter()),
             player: animation_context.root,
         });
     }
@@ -1875,7 +1875,7 @@ struct AnimationContext {
     pub root: Entity,
     /// The path to the animation root. This is used for constructing the
     /// animation target UUIDs.
-    pub path: SmallVec<[Name; 8]>,
+    pub path: SmallVec<[String; 8]>,
 }
 
 #[derive(Deserialize)]
