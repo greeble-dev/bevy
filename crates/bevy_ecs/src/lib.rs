@@ -87,7 +87,7 @@ pub mod prelude {
             Add, Despawn, Insert, OnAdd, OnDespawn, OnInsert, OnRemove, OnReplace, Remove,
             RemovedComponents, Replace,
         },
-        name::{Name, NameOrEntity},
+        name::{DebugTag, Name, NameOrEntity},
         observer::{Observer, On, Trigger},
         query::{Added, Allow, AnyOf, Changed, Has, Or, QueryBuilder, QueryState, With, Without},
         related,
