@@ -309,7 +309,7 @@ impl GltfLoader {
         };
 
         #[cfg(feature = "bevy_animation")]
-        let _animation_settings = settings
+        let animation_settings = settings
             .animation_settings
             .unwrap_or(loader.default_animation_settings);
 
@@ -1019,29 +1019,39 @@ impl GltfLoader {
             }
 
             #[cfg(feature = "bevy_animation")]
-            {
+            if animation_settings.create_target_ids != CreateAnimationTargetIds::Never {
                 for (node_index, &entity_id) in &node_index_to_entity_map {
                     let (root_node_index, path) = paths.get(node_index).unwrap();
 
-                    if animation_roots.contains(root_node_index) {
+                    if (animation_settings.create_target_ids == CreateAnimationTargetIds::Always)
+                        || animation_roots.contains(root_node_index)
+                    {
                         let mut entity = world.entity_mut(entity_id);
 
-                        entity.insert((
-                            AnimationTargetId::from_names(path.iter()),
-                            AnimationPlayerTarget(
+                        entity.insert(AnimationTargetId::from_names(path.iter()));
+
+                        if animation_settings.create_players
+                            == CreateAnimationPlayers::Automatically
+                        {
+                            entity.insert(AnimationPlayerTarget(
                                 *node_index_to_entity_map.get(root_node_index).unwrap(),
-                            ),
-                        ));
+                            ));
+                        }
                     }
                 }
 
                 // for each node root in a scene, check if it's the root of an animation
                 // if it is, add the AnimationPlayer component
-                for node in scene.nodes() {
-                    if animation_roots.contains(&node.index()) {
-                        world
-                            .entity_mut(*node_index_to_entity_map.get(&node.index()).unwrap())
-                            .insert(AnimationPlayer::default());
+                if animation_settings.create_players != CreateAnimationPlayers::Never {
+                    for node in scene.nodes() {
+                        if (animation_settings.create_target_ids
+                            == CreateAnimationTargetIds::Always)
+                            || animation_roots.contains(&node.index())
+                        {
+                            world
+                                .entity_mut(*node_index_to_entity_map.get(&node.index()).unwrap())
+                                .insert(AnimationPlayer::default());
+                        }
                     }
                 }
             }
