@@ -177,6 +177,10 @@ pub struct GltfPlugin {
     ///
     /// To specify, use [`GltfPlugin::add_custom_vertex_attribute`].
     pub custom_vertex_attributes: HashMap<Box<str>, MeshVertexAttribute>,
+
+    /// XXX TODO
+    #[cfg(feature = "bevy_animation")]
+    pub animation_settings: GltfAnimationSettings,
 }
 
 impl Default for GltfPlugin {
@@ -185,6 +189,8 @@ impl Default for GltfPlugin {
             default_sampler: ImageSamplerDescriptor::linear(),
             custom_vertex_attributes: HashMap::default(),
             use_model_forward_direction: false,
+            #[cfg(feature = "bevy_animation")]
+            animation_settings: GltfAnimationSettings::default(),
         }
     }
 }
@@ -235,6 +241,7 @@ impl Plugin for GltfPlugin {
             custom_vertex_attributes: self.custom_vertex_attributes.clone(),
             default_sampler,
             default_use_model_forward_direction: self.use_model_forward_direction,
+            default_animation_settings: self.animation_settings,
         });
     }
 }

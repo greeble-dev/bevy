@@ -135,6 +135,38 @@ pub enum GltfError {
     Io(#[from] Error),
 }
 
+/// XXX TODO
+#[cfg(feature = "bevy_animation")]
+#[derive(Default, Clone, Copy, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum CreateAnimationTargetIds {
+    /// XXX TODO
+    Never,
+    /// XXX TODO
+    Always,
+    /// XXX TODO
+    #[default]
+    Automatically,
+}
+
+/// XXX TODO
+#[cfg(feature = "bevy_animation")]
+#[derive(Default, Clone, Copy, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum CreateAnimationPlayers {
+    /// XXX TODO
+    Never,
+    /// XXX TODO
+    #[default]
+    Automatically,
+}
+
+/// XXX TODO
+#[cfg(feature = "bevy_animation")]
+#[derive(Default, Clone, Copy, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct GltfAnimationSettings {
+    create_target_ids: CreateAnimationTargetIds,
+    create_players: CreateAnimationPlayers,
+}
+
 /// Loads glTF files with all of their data as their corresponding bevy representations.
 pub struct GltfLoader {
     /// List of compressed image formats handled by the loader.
@@ -158,6 +190,10 @@ pub struct GltfLoader {
     ///
     /// The default is `false`.
     pub default_use_model_forward_direction: bool,
+
+    /// XXX TODO
+    #[cfg(feature = "bevy_animation")]
+    pub default_animation_settings: GltfAnimationSettings,
 }
 
 /// Specifies optional settings for processing gltfs at load time. By default, all recognized contents of
@@ -212,6 +248,10 @@ pub struct GltfLoaderSettings {
     ///
     /// If `None`, uses the global default set by [`GltfPlugin::use_model_forward_direction`](crate::GltfPlugin::use_model_forward_direction).
     pub use_model_forward_direction: Option<bool>,
+
+    /// XXX TODO
+    #[cfg(feature = "bevy_animation")]
+    pub animation_settings: Option<GltfAnimationSettings>,
 }
 
 impl Default for GltfLoaderSettings {
@@ -225,6 +265,8 @@ impl Default for GltfLoaderSettings {
             default_sampler: None,
             override_sampler: false,
             use_model_forward_direction: None,
+            #[cfg(feature = "bevy_animation")]
+            animation_settings: None,
         }
     }
 }
@@ -268,6 +310,11 @@ impl GltfLoader {
             Some(convert_coordinates) => convert_coordinates,
             None => loader.default_use_model_forward_direction,
         };
+
+        #[cfg(feature = "bevy_animation")]
+        let _animation_settings = settings
+            .animation_settings
+            .unwrap_or(loader.default_animation_settings);
 
         #[cfg(feature = "bevy_animation")]
         let (animations, named_animations, animation_roots) = {
