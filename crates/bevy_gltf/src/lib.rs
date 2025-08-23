@@ -178,7 +178,8 @@ pub struct GltfPlugin {
     /// To specify, use [`GltfPlugin::add_custom_vertex_attribute`].
     pub custom_vertex_attributes: HashMap<Box<str>, MeshVertexAttribute>,
 
-    /// XXX TODO
+    /// The default animation settings. These can be overridden per-load by
+    /// [`GltfLoaderSettings::animation_settings`].
     #[cfg(feature = "bevy_animation")]
     pub animation_settings: GltfAnimationSettings,
 }

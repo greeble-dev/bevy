@@ -132,31 +132,46 @@ pub enum GltfError {
     Io(#[from] Error),
 }
 
-/// XXX TODO
+/// Decides if the loader will create [`AnimationTargetId`](bevy_animation::AnimationTargetId)
+/// components for nodes within a hierarchy.
 #[cfg(feature = "bevy_animation")]
 #[derive(Default, Clone, Copy, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum CreateAnimationTargetIds {
-    /// XXX TODO
+    /// Never create `AnimationTargetId`s.
     Never,
-    /// XXX TODO
+    /// Always create `AnimationTargetId`s. This is typically used when the glTF
+    /// does not contain animations itself, but might be bound to animations in
+    /// another glTF or some other source.
     Always,
-    /// XXX TODO
+    /// Only create `AnimationTargetId`s for a hierarchy if at least one node in
+    /// the hierarchy is affected by an animation within the glTF.
     #[default]
     Automatically,
 }
 
-/// XXX TODO
+/// Decides if the loader will create [`AnimationPlayer`](bevy_animation::AnimationPlayer)
+/// components, and [`AnimationPlayerTarget`] components that link nodes to the
+/// player.
+///
+/// These components are only created if a hierarchy has
+/// [`AnimationTargetId`](bevy_animation::AnimationTargetId) components (see
+/// [`CreateAnimationTargetIds`]). `AnimationPlayer` components are created
+/// on the root node of a hierarchy. `AnimationPlayerTarget` components are
+/// created on all nodes in the hierarchy, alongside the `AnimationTargetId`.
+/// components.
 #[cfg(feature = "bevy_animation")]
 #[derive(Default, Clone, Copy, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum CreateAnimationPlayers {
-    /// XXX TODO
+    /// Never create `AnimationPlayer` and `AnimationPlayerTarget` components.
     Never,
-    /// XXX TODO
+    /// Only create `AnimationPlayer` and `AnimationPlayerTarget` components if
+    /// the hierarchy has `AnimationTargetId` components.
     #[default]
     Automatically,
 }
 
-/// XXX TODO
+/// Animation specific settings. Used by [`GltfPlugin`](crate::GltfPlugin) and
+/// [`GltfLoaderSettings`].
 #[cfg(feature = "bevy_animation")]
 #[derive(Default, Clone, Copy, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct GltfAnimationSettings {
@@ -188,7 +203,8 @@ pub struct GltfLoader {
     /// The default is `false`.
     pub default_use_model_forward_direction: bool,
 
-    /// XXX TODO
+    /// The default animation settings. These can be be overridden per-load by
+    /// [`GltfLoaderSettings::animation_settings`].
     #[cfg(feature = "bevy_animation")]
     pub default_animation_settings: GltfAnimationSettings,
 }
@@ -246,7 +262,9 @@ pub struct GltfLoaderSettings {
     /// If `None`, uses the global default set by [`GltfPlugin::use_model_forward_direction`](crate::GltfPlugin::use_model_forward_direction).
     pub use_model_forward_direction: Option<bool>,
 
-    /// XXX TODO
+    /// Overrides the default animation settings.
+    ///
+    /// If `None`, uses the global default set by [`GltfPlugin::animation_settings`](crate::GltfPlugin::animation_settings).
     #[cfg(feature = "bevy_animation")]
     pub animation_settings: Option<GltfAnimationSettings>,
 }
@@ -1013,6 +1031,8 @@ impl GltfLoader {
                 return Err(err);
             }
 
+            // Create AnimationTargetId, AnimationPlayer and
+            // AnimationPlayerTarget components.
             #[cfg(feature = "bevy_animation")]
             {
                 let animation_settings = settings
@@ -1020,6 +1040,9 @@ impl GltfLoader {
                     .unwrap_or(loader.default_animation_settings);
 
                 if animation_settings.create_target_ids != CreateAnimationTargetIds::Never {
+                    // Add AnimationTargetId and AnimationPlayerTarget
+                    // components to nodes, following the rules in
+                    // animation_settings.
                     for (node_index, &entity_id) in &node_index_to_entity_map {
                         let (root_node_index, path) = paths.get(node_index).unwrap();
 
@@ -1041,9 +1064,10 @@ impl GltfLoader {
                         }
                     }
 
-                    // for each node root in a scene, check if it's the root of an animation
-                    // if it is, add the AnimationPlayer component
                     if animation_settings.create_players != CreateAnimationPlayers::Never {
+                        // Add AnimationPlayer components to the root node of
+                        // hierarchies that we know contain AnimationTargetId
+                        // components.
                         for node in scene.nodes() {
                             if (animation_settings.create_target_ids
                                 == CreateAnimationTargetIds::Always)
