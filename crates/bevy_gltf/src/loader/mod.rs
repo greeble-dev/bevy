@@ -132,8 +132,8 @@ pub enum GltfError {
     Io(#[from] Error),
 }
 
-/// Decides if the loader will create [`AnimationTargetId`](bevy_animation::AnimationTargetId)
-/// components for nodes within a hierarchy.
+/// Decides if the loader will create [`AnimationTargetId`] components for nodes
+/// within a hierarchy.
 #[cfg(feature = "bevy_animation")]
 #[derive(Default, Clone, Copy, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum CreateAnimationTargetIds {
@@ -149,16 +149,14 @@ pub enum CreateAnimationTargetIds {
     Automatically,
 }
 
-/// Decides if the loader will create [`AnimationPlayer`](bevy_animation::AnimationPlayer)
-/// components, and [`AnimationPlayerTarget`] components that link nodes to the
-/// player.
+/// Decides if the loader will create [`AnimationPlayer`] components, and
+/// [`AnimationPlayerTarget`] components that link nodes to the player.
 ///
 /// These components are only created if a hierarchy has
-/// [`AnimationTargetId`](bevy_animation::AnimationTargetId) components (see
-/// [`CreateAnimationTargetIds`]). `AnimationPlayer` components are created
-/// on the root node of a hierarchy. `AnimationPlayerTarget` components are
-/// created on all nodes in the hierarchy, alongside the `AnimationTargetId`.
-/// components.
+/// [`AnimationTargetId`] components (see [`CreateAnimationTargetIds`]).
+/// `AnimationPlayer` components are created on the root node of a hierarchy.
+/// `AnimationPlayerTarget` components are created on all nodes in a
+/// hierarchy, alongside the `AnimationTargetId` components.
 #[cfg(feature = "bevy_animation")]
 #[derive(Default, Clone, Copy, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum CreateAnimationPlayers {
