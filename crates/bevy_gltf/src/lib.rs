@@ -242,6 +242,7 @@ impl Plugin for GltfPlugin {
             custom_vertex_attributes: self.custom_vertex_attributes.clone(),
             default_sampler,
             default_use_model_forward_direction: self.use_model_forward_direction,
+            #[cfg(feature = "bevy_animation")]
             default_animation_settings: self.animation_settings,
         });
     }
