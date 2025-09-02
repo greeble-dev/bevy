@@ -955,17 +955,6 @@ pub fn extract_text_sections(
             },
         ) in text_layout_info.glyphs.iter().enumerate()
         {
-            let rect = texture_atlases
-                .get(atlas_info.texture_atlas)
-                .unwrap()
-                .textures[atlas_info.location.glyph_index]
-                .as_rect();
-            extracted_uinodes.glyphs.push(ExtractedGlyph {
-                color,
-                translation: *position,
-                rect,
-            });
-
             if text_layout_info.glyphs.get(i + 1).is_none_or(|info| {
                 info.span_index != *span_index || info.atlas_info.texture != atlas_info.texture
             }) {
@@ -993,6 +982,18 @@ pub fn extract_text_sections(
             }
 
             end += 1;
+
+            let rect = texture_atlases
+                .get(atlas_info.texture_atlas)
+                .unwrap()
+                .textures[atlas_info.location.glyph_index]
+                .as_rect();
+
+            extracted_uinodes.glyphs.push(ExtractedGlyph {
+                color,
+                translation: *position,
+                rect,
+            });
         }
     }
 }
