@@ -1880,6 +1880,17 @@ category = "Assets"
 wasm = false
 
 [[example]]
+name = "basset"
+path = "examples/asset/basset/basset.rs"
+doc-scrape-examples = true
+
+[package.metadata.example.basset]
+name = "Basset"
+description = "TODO"
+category = "Assets"
+wasm = false
+
+[[example]]
 name = "repeated_texture"
 path = "examples/asset/repeated_texture.rs"
 doc-scrape-examples = true
