@@ -212,6 +212,7 @@ use crate::{
     processor::{AssetProcessor, Process},
 };
 use alloc::{
+    boxed::Box,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -539,6 +540,8 @@ impl VisitAssetDependencies for HashSet<UntypedHandle> {
 pub trait AssetApp {
     /// Registers the given `loader` in the [`App`]'s [`AssetServer`].
     fn register_asset_loader<L: AssetLoader>(&mut self, loader: L) -> &mut Self;
+    /// XXX TODO: Document.
+    fn register_erased_asset_loader(&mut self, loader: Box<dyn ErasedAssetLoader>) -> &mut Self;
     /// Registers the given `processor` in the [`App`]'s [`AssetProcessor`].
     fn register_asset_processor<P: Process>(&mut self, processor: P) -> &mut Self;
     /// Registers the given [`AssetSourceBuilder`] with the given `id`.
@@ -579,6 +582,13 @@ impl AssetApp for App {
         self.world()
             .resource::<AssetServer>()
             .register_loader(loader);
+        self
+    }
+
+    fn register_erased_asset_loader(&mut self, loader: Box<dyn ErasedAssetLoader>) -> &mut Self {
+        self.world()
+            .resource::<AssetServer>()
+            .register_erased_loader(loader);
         self
     }
 

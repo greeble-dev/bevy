@@ -161,6 +161,11 @@ impl AssetServer {
         self.data.loaders.write().push(loader);
     }
 
+    /// XXX TODO: Document.
+    pub fn register_erased_loader(&self, loader: Box<dyn ErasedAssetLoader>) {
+        self.data.loaders.write().push_erased(loader);
+    }
+
     /// Registers a new [`Asset`] type. [`Asset`] types must be registered before assets of that type can be loaded.
     pub fn register_asset<A: Asset>(&self, assets: &Assets<A>) {
         self.register_handle_provider(assets.get_handle_provider());
@@ -700,11 +705,18 @@ impl AssetServer {
             let mut infos = self.data.infos.write();
             let result = infos.get_or_create_path_handle_internal(
                 path.clone(),
-                path.label().is_none().then(|| loader.asset_type_id()),
+                if path.label().is_none() {
+                    loader.asset_type_id() // XXX TODO: Review if asset_type_id is ok to be Option. Also can this be simplified?
+                } else {
+                    None
+                },
                 HandleLoadingMode::Request,
                 meta_transform,
             );
-            match unwrap_with_context(result, Either::Left(loader.asset_type_name())) {
+            match loader.asset_type_name().and_then(|asset_type_name| {
+                unwrap_with_context(result, Either::Left(asset_type_name))
+            }) {
+                // XXX TODO: Review if asset_type_name is ok to be Option.
                 // We couldn't figure out the correct handle without its type ID (which can only
                 // happen if we are loading a subasset).
                 None => {
@@ -727,7 +739,12 @@ impl AssetServer {
         if let Some(asset_type_id) = asset_id.map(|id| id.type_id()) {
             // If we are loading a subasset, then the subasset's type almost certainly doesn't match
             // the loader's type - and that's ok.
-            if path.label().is_none() && asset_type_id != loader.asset_type_id() {
+            if path.label().is_none()
+                && loader
+                    .asset_type_id()
+                    // XXX TODO: Review changes.
+                    .is_some_and(|loader_asset_type_id| loader_asset_type_id != asset_type_id)
+            {
                 error!(
                     "Expected {:?}, got {:?}",
                     asset_type_id,
@@ -736,7 +753,7 @@ impl AssetServer {
                 return Err(AssetLoadError::RequestedHandleTypeMismatch {
                     path: path.into_owned(),
                     requested: asset_type_id,
-                    actual_asset_name: loader.asset_type_name(),
+                    actual_asset_name: loader.asset_type_name().unwrap(), // XXX TODO: This is assumung that asset_type_name is Some if asset_type_id is Some - see condition above.
                     loader_name: loader.type_name(),
                 });
             }
@@ -755,8 +772,8 @@ impl AssetServer {
             let base_handle = infos
                 .get_or_create_path_handle_erased(
                     base_path.clone(),
-                    loader.asset_type_id(),
-                    Some(loader.asset_type_name()),
+                    loader.asset_type_id().unwrap(), // XXX TODO: Avoid unwrap. Not sure how to handle this. Can't work out the type until it's loaded.
+                    Some(loader.asset_type_name().unwrap()), // XXX TODO: Ditto.
                     HandleLoadingMode::Force,
                     None,
                 )

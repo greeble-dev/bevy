@@ -466,7 +466,8 @@ impl NestedLoader<'_, '_, StaticTyped, Immediate<'_, '_>> {
                         error: AssetLoadError::RequestedHandleTypeMismatch {
                             path,
                             requested: TypeId::of::<A>(),
-                            actual_asset_name: loader.asset_type_name(),
+                            // XXX TODO: Needs work now that asset_type_name is Option. Could use untyped_asset.asset_type_name()? But needs refactoring as that's already been moved.
+                            actual_asset_name: "", // loader.asset_type_name(),
                             loader_name: loader.type_name(),
                         },
                     })

@@ -71,9 +71,11 @@ pub trait ErasedAssetLoader: Send + Sync + 'static {
     /// Returns the [`TypeId`] of the [`AssetLoader`].
     fn type_id(&self) -> TypeId;
     /// Returns the type name of the top-level [`Asset`] loaded by the [`AssetLoader`].
-    fn asset_type_name(&self) -> &'static str;
+    /// XXX TODO: Document.
+    fn asset_type_name(&self) -> Option<&'static str>;
     /// Returns the [`TypeId`] of the top-level [`Asset`] loaded by the [`AssetLoader`].
-    fn asset_type_id(&self) -> TypeId;
+    /// XXX TODO: Document.
+    fn asset_type_id(&self) -> Option<TypeId>;
 }
 
 impl<L> ErasedAssetLoader for L
@@ -124,12 +126,12 @@ where
         TypeId::of::<L>()
     }
 
-    fn asset_type_name(&self) -> &'static str {
-        core::any::type_name::<L::Asset>()
+    fn asset_type_name(&self) -> Option<&'static str> {
+        Some(core::any::type_name::<L::Asset>())
     }
 
-    fn asset_type_id(&self) -> TypeId {
-        TypeId::of::<L::Asset>()
+    fn asset_type_id(&self) -> Option<TypeId> {
+        Some(TypeId::of::<L::Asset>())
     }
 }
 

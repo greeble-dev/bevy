@@ -2,21 +2,30 @@ use crate::{
     loader::{AssetLoader, ErasedAssetLoader},
     path::AssetPath,
 };
+#[cfg(feature = "trace")]
+use crate::{meta::AssetMetaDyn, DeserializeMetaError, ErasedLoadedAsset};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use async_broadcast::RecvError;
+#[cfg(feature = "trace")]
+use bevy_ecs::error::BevyError;
 use bevy_platform::collections::HashMap;
+#[cfg(feature = "trace")]
+use bevy_tasks::BoxedFuture;
 use bevy_tasks::IoTaskPool;
 use bevy_utils::TypeIdMap;
 use core::any::TypeId;
 use thiserror::Error;
 use tracing::warn;
 
+// XXX TODO: Will return when InstrumentedAssetLoader is properly implemented.
+/*
 #[cfg(feature = "trace")]
 use {
     alloc::string::ToString,
     bevy_tasks::ConditionalSendFuture,
     tracing::{info_span, instrument::Instrument},
 };
+*/
 
 #[derive(Default)]
 pub(crate) struct AssetLoaders {
@@ -35,13 +44,18 @@ impl AssetLoaders {
 
     /// Registers a new [`AssetLoader`]. [`AssetLoader`]s must be registered before they can be used.
     pub(crate) fn push<L: AssetLoader>(&mut self, loader: L) {
-        let type_name = core::any::type_name::<L>();
-        let loader_asset_type = TypeId::of::<L::Asset>();
-        let loader_asset_type_name = core::any::type_name::<L::Asset>();
+        self.push_erased(Box::new(loader));
+    }
+
+    /// Registers a new [`ErasedAssetLoader`]. [`AssetLoader`]s must be registered before they can be used.
+    pub(crate) fn push_erased(&mut self, loader: Box<dyn ErasedAssetLoader>) {
+        let type_name = loader.type_name();
+        let loader_asset_type = loader.asset_type_id();
+        let loader_asset_type_name = loader.asset_type_name();
 
         #[cfg(feature = "trace")]
-        let loader = InstrumentedAssetLoader(loader);
-        let loader = Arc::new(loader);
+        let loader: Box<dyn ErasedAssetLoader> = Box::new(InstrumentedAssetLoader(loader));
+        let loader: Arc<dyn ErasedAssetLoader> = loader.into();
 
         let (loader_index, is_new) =
             if let Some(index) = self.preregistered_loaders.remove(type_name) {
@@ -51,36 +65,42 @@ impl AssetLoaders {
             };
 
         if is_new {
-            let existing_loaders_for_type_id = self.type_id_to_loaders.get(&loader_asset_type);
-            let mut duplicate_extensions = Vec::new();
-            for extension in AssetLoader::extensions(&*loader) {
-                let list = self
-                    .extension_to_loaders
-                    .entry((*extension).into())
-                    .or_default();
+            // XXX TODO: Is it ok if loader_asset_type or loader_asset_type_name are None? Means they won't be
+            // added to type_name_to_loader and type_id_to_loaders.
+            if let Some(loader_asset_type) = loader_asset_type
+                && let Some(loader_asset_type_name) = loader_asset_type_name
+            {
+                let existing_loaders_for_type_id = self.type_id_to_loaders.get(&loader_asset_type);
+                let mut duplicate_extensions = Vec::new();
+                for extension in loader.extensions() {
+                    let list = self
+                        .extension_to_loaders
+                        .entry((*extension).into())
+                        .or_default();
 
-                if !list.is_empty()
-                    && let Some(existing_loaders_for_type_id) = existing_loaders_for_type_id
-                    && list
-                        .iter()
-                        .any(|index| existing_loaders_for_type_id.contains(index))
-                {
-                    duplicate_extensions.push(extension);
+                    if !list.is_empty()
+                        && let Some(existing_loaders_for_type_id) = existing_loaders_for_type_id
+                        && list
+                            .iter()
+                            .any(|index| existing_loaders_for_type_id.contains(index))
+                    {
+                        duplicate_extensions.push(extension);
+                    }
+
+                    list.push(loader_index);
+                }
+                if !duplicate_extensions.is_empty() {
+                    warn!("Duplicate AssetLoader registered for Asset type `{loader_asset_type_name}` with extensions `{duplicate_extensions:?}`. \
+                    Loader must be specified in a .meta file in order to load assets of this type with these extensions.");
                 }
 
-                list.push(loader_index);
-            }
-            if !duplicate_extensions.is_empty() {
-                warn!("Duplicate AssetLoader registered for Asset type `{loader_asset_type_name}` with extensions `{duplicate_extensions:?}`. \
-                Loader must be specified in a .meta file in order to load assets of this type with these extensions.");
-            }
+                self.type_name_to_loader.insert(type_name, loader_index);
 
-            self.type_name_to_loader.insert(type_name, loader_index);
-
-            self.type_id_to_loaders
-                .entry(loader_asset_type)
-                .or_default()
-                .push(loader_index);
+                self.type_id_to_loaders
+                    .entry(loader_asset_type)
+                    .or_default()
+                    .push(loader_index);
+            }
 
             self.loaders.push(MaybeAssetLoader::Ready(loader));
         } else {
@@ -309,30 +329,47 @@ impl MaybeAssetLoader {
 }
 
 #[cfg(feature = "trace")]
-struct InstrumentedAssetLoader<T>(T);
+struct InstrumentedAssetLoader(Box<dyn ErasedAssetLoader>);
 
 #[cfg(feature = "trace")]
-impl<T: AssetLoader> AssetLoader for InstrumentedAssetLoader<T> {
-    type Asset = T::Asset;
-    type Settings = T::Settings;
-    type Error = T::Error;
-
-    fn load(
-        &self,
-        reader: &mut dyn crate::io::Reader,
-        settings: &Self::Settings,
-        load_context: &mut crate::LoadContext,
-    ) -> impl ConditionalSendFuture<Output = Result<Self::Asset, Self::Error>> {
+impl ErasedAssetLoader for InstrumentedAssetLoader {
+    fn load<'a>(
+        &'a self,
+        reader: &'a mut dyn crate::io::Reader,
+        meta: &'a dyn AssetMetaDyn,
+        load_context: crate::LoadContext<'a>,
+    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+        // XXX TODO: Implement.
+        /*
         let span = info_span!(
             "asset loading",
-            loader = core::any::type_name::<T>(),
+            loader = self.0.type_name(),
             asset = load_context.asset_path().to_string(),
         );
-        self.0.load(reader, settings, load_context).instrument(span)
+        */
+        self.0.load(reader, meta, load_context) //.instrument(span)
     }
 
     fn extensions(&self) -> &[&str] {
         self.0.extensions()
+    }
+    fn deserialize_meta(&self, meta: &[u8]) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
+        self.0.deserialize_meta(meta)
+    }
+    fn default_meta(&self) -> Box<dyn AssetMetaDyn> {
+        self.0.default_meta()
+    }
+    fn type_name(&self) -> &'static str {
+        self.0.type_name()
+    }
+    fn type_id(&self) -> TypeId {
+        self.0.type_id()
+    }
+    fn asset_type_name(&self) -> Option<&'static str> {
+        self.0.asset_type_name()
+    }
+    fn asset_type_id(&self) -> Option<TypeId> {
+        self.0.asset_type_id()
     }
 }
 
