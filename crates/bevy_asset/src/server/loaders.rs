@@ -65,37 +65,39 @@ impl AssetLoaders {
             };
 
         if is_new {
-            // XXX TODO: Is it ok if loader_asset_type or loader_asset_type_name are None? Means they won't be
-            // added to type_name_to_loader and type_id_to_loaders.
-            if let Some(loader_asset_type) = loader_asset_type
-                && let Some(loader_asset_type_name) = loader_asset_type_name
-            {
-                let existing_loaders_for_type_id = self.type_id_to_loaders.get(&loader_asset_type);
-                let mut duplicate_extensions = Vec::new();
-                for extension in loader.extensions() {
-                    let list = self
-                        .extension_to_loaders
-                        .entry((*extension).into())
-                        .or_default();
+            // XXX TODO: Review this. Is awkward due to loader_asset_type and loader_asset_type_name being Option.
+            let existing_loaders_for_type_id = loader_asset_type
+                .and_then(|loader_asset_type| self.type_id_to_loaders.get(&loader_asset_type));
+            let mut duplicate_extensions = Vec::new();
+            for extension in loader.extensions() {
+                let list = self
+                    .extension_to_loaders
+                    .entry((*extension).into())
+                    .or_default();
 
-                    if !list.is_empty()
-                        && let Some(existing_loaders_for_type_id) = existing_loaders_for_type_id
-                        && list
-                            .iter()
-                            .any(|index| existing_loaders_for_type_id.contains(index))
-                    {
-                        duplicate_extensions.push(extension);
-                    }
-
-                    list.push(loader_index);
+                if !list.is_empty()
+                    && let Some(existing_loaders_for_type_id) = existing_loaders_for_type_id
+                    && list
+                        .iter()
+                        .any(|index| existing_loaders_for_type_id.contains(index))
+                {
+                    duplicate_extensions.push(extension);
                 }
-                if !duplicate_extensions.is_empty() {
-                    warn!("Duplicate AssetLoader registered for Asset type `{loader_asset_type_name}` with extensions `{duplicate_extensions:?}`. \
+
+                list.push(loader_index);
+            }
+            if !duplicate_extensions.is_empty() {
+                // XXX TODO: Avoid awkward unwrap.
+                let loader_asset_type_name = loader_asset_type_name.unwrap_or("TODO");
+                warn!("Duplicate AssetLoader registered for Asset type `{loader_asset_type_name}` with extensions `{duplicate_extensions:?}`. \
                     Loader must be specified in a .meta file in order to load assets of this type with these extensions.");
-                }
+            }
 
-                self.type_name_to_loader.insert(type_name, loader_index);
+            self.type_name_to_loader.insert(type_name, loader_index);
 
+            // XXX TODO: Review implications of loader_asset_type being Option, which
+            // means we can't update type_id_to_loaders.
+            if let Some(loader_asset_type) = loader_asset_type {
                 self.type_id_to_loaders
                     .entry(loader_asset_type)
                     .or_default()
@@ -190,6 +192,11 @@ impl AssetLoaders {
             return self.get_by_name(type_name);
         }
 
+        // XXX TODO: Looking up the loader by type id is a problem. It means
+        // `load::<XyzAsset>("foo.basset")` will try to use XysAsset's loader
+        // instead of the basset loader. Arguably it should prefer the extension
+        // if one is present? Review rationale in https://github.com/bevyengine/bevy/pull/11644.
+        /*
         // The presence of a label will affect loader choice
         let label = asset_path.as_ref().and_then(|path| path.label());
 
@@ -203,6 +210,8 @@ impl AssetLoaders {
         } else {
             None
         };
+        */
+        let candidates: Option<&Vec<usize>> = None;
 
         if let Some(candidates) = candidates {
             if candidates.is_empty() {
