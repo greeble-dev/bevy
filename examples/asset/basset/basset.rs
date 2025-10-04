@@ -10,6 +10,7 @@ use bevy_asset::{
     meta::{AssetAction, AssetMeta, AssetMetaDyn},
     AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset,
 };
+use serde::{Deserialize, Serialize};
 
 fn main() {
     App::new()
@@ -114,6 +115,55 @@ impl AssetLoader for FakeAssetLoader {
     }
 }
 
+#[derive(Serialize, Deserialize, Default)]
+struct SerializableLoader {
+    #[serde(default)]
+    name: Option<String>,
+
+    #[serde(default)]
+    settings: Option<Box<ron::value::RawValue>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SerializableTransformer {
+    name: String,
+    settings: Box<ron::value::RawValue>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SerializableSaver {
+    name: String,
+    settings: Box<ron::value::RawValue>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SerializableInput {
+    path: AssetPath<'static>,
+
+    #[serde(default)]
+    loader: SerializableLoader,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SerializableOutput {
+    saver: SerializableSaver,
+
+    // TODO: Decide if specifying the output's loader is good.
+    loader: Option<SerializableLoader>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Basset {
+    // TODO: Versioning? Equivalent of `AssetMeta::meta_format_version`.
+    input: SerializableInput,
+
+    #[serde(default)]
+    transforms: Vec<SerializableTransformer>,
+
+    #[serde(default)]
+    output: Option<SerializableOutput>,
+}
+
 struct BassetLoader;
 
 impl ErasedAssetLoader for BassetLoader {
@@ -127,8 +177,12 @@ impl ErasedAssetLoader for BassetLoader {
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
 
+            let basset = ron::de::from_bytes::<Basset>(&bytes)?;
+            dbg!(ron::ser::to_string(&basset)?);
+
             // TODO: Error handling.
-            let path = AssetPath::from(String::from_utf8(bytes).unwrap());
+            let path = basset.input.path;
+            dbg!(&path);
 
             Ok(load_context
                 .loader()
