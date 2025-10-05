@@ -39,6 +39,7 @@ impl Plugin for BassetPlugin {
 }
 
 #[derive(Asset, TypePath, Debug)]
+#[expect(dead_code, reason = "TODO")]
 struct StringAsset(String);
 
 #[derive(Serialize, Deserialize, Default)]
@@ -79,6 +80,7 @@ impl AssetLoader for StringAssetLoader {
 }
 
 #[derive(Asset, TypePath, Debug)]
+#[expect(dead_code, reason = "TODO")]
 struct IntAsset(i64);
 
 #[derive(Default)]
@@ -217,7 +219,7 @@ impl ErasedAssetLoader for BassetLoader {
                 .loader()
                 .with_unknown_type()
                 .with_transform(move |meta| {
-                    apply_settings(meta.loader_settings_mut(), &basset.input.loader.settings)
+                    apply_settings(meta.loader_settings_mut(), &basset.input.loader.settings);
                 })
                 .immediate()
                 .load(path)
@@ -276,6 +278,22 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     ]));
 }
 
+fn print_events<T: Asset + std::fmt::Debug>(
+    asset_server: &AssetServer,
+    assets: &Assets<T>,
+    events: &mut MessageReader<AssetEvent<T>>,
+) {
+    for event in events.read() {
+        if let AssetEvent::Added { id } = *event {
+            println!(
+                "{:?}: {:?}",
+                asset_server.get_path(id).unwrap(),
+                assets.get(id).unwrap()
+            );
+        }
+    }
+}
+
 fn print(
     asset_server: Res<AssetServer>,
     string_assets: Res<Assets<StringAsset>>,
@@ -283,23 +301,6 @@ fn print(
     mut string_events: MessageReader<AssetEvent<StringAsset>>,
     mut int_events: MessageReader<AssetEvent<IntAsset>>,
 ) {
-    for event in string_events.read() {
-        if let AssetEvent::Added { id } = *event {
-            println!(
-                "{:?}: {:?}",
-                asset_server.get_path(id).unwrap(),
-                string_assets.get(id).unwrap().0
-            );
-        }
-    }
-
-    for event in int_events.read() {
-        if let AssetEvent::Added { id } = *event {
-            println!(
-                "{:?}: {:?}",
-                asset_server.get_path(id).unwrap(),
-                int_assets.get(id).unwrap().0
-            );
-        }
-    }
+    print_events(&asset_server, &string_assets, &mut string_events);
+    print_events(&asset_server, &int_assets, &mut int_events);
 }
