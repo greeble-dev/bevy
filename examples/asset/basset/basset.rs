@@ -7,7 +7,7 @@ use bevy::{
     tasks::BoxedFuture,
 };
 use bevy_asset::{
-    meta::{AssetAction, AssetMeta, AssetMetaDyn},
+    meta::{AssetAction, AssetMeta, AssetMetaDyn, Settings},
     AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset,
 };
 use serde::{Deserialize, Serialize};
@@ -41,24 +41,36 @@ impl Plugin for BassetPlugin {
 #[derive(Asset, TypePath, Debug)]
 struct StringAsset(String);
 
+#[derive(Serialize, Deserialize, Default)]
+struct StringAssetSettings {
+    uppercase: bool,
+}
+
 #[derive(Default)]
 struct StringAssetLoader;
 
 impl AssetLoader for StringAssetLoader {
     type Asset = StringAsset;
-    type Settings = ();
+    type Settings = StringAssetSettings;
     type Error = std::io::Error;
 
     async fn load(
         &self,
         reader: &mut dyn Reader,
-        _: &Self::Settings,
+        settings: &Self::Settings,
         _load_context: &mut LoadContext<'_>,
     ) -> Result<StringAsset, Self::Error> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
+
         // TODO: Error handling.
-        Ok(StringAsset(String::from_utf8(bytes).unwrap()))
+        let mut string = String::from_utf8(bytes).unwrap();
+
+        if settings.uppercase {
+            string = string.to_uppercase();
+        }
+
+        Ok(StringAsset(string))
     }
 
     fn extensions(&self) -> &[&str] {
@@ -166,6 +178,23 @@ struct Basset {
 
 struct BassetLoader;
 
+fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::value::RawValue>>) {
+    let Some(settings) = settings else {
+        return;
+    };
+
+    let Some(ron) = ron else {
+        return;
+    };
+
+    if let Some(settings) = settings.downcast_mut::<StringAssetSettings>() {
+        *settings = ron
+            .clone()
+            .into_rust::<StringAssetSettings>()
+            .expect("TODO");
+    }
+}
+
 impl ErasedAssetLoader for BassetLoader {
     fn load<'a>(
         &'a self,
@@ -187,6 +216,9 @@ impl ErasedAssetLoader for BassetLoader {
             Ok(load_context
                 .loader()
                 .with_unknown_type()
+                .with_transform(move |meta| {
+                    apply_settings(meta.loader_settings_mut(), &basset.input.loader.settings)
+                })
                 .immediate()
                 .load(path)
                 .await?)
@@ -238,6 +270,9 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
         assets.load::<IntAsset>("1234.int").untyped(),
         assets.load::<IntAsset>("int.basset").untyped(),
         assets.load::<StringAsset>("string.basset").untyped(),
+        assets
+            .load::<StringAsset>("string_loader_uppercase.basset")
+            .untyped(),
     ]));
 }
 

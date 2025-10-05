@@ -176,7 +176,8 @@ impl<'ctx, 'builder> NestedLoader<'ctx, 'builder, StaticTyped, Deferred> {
 }
 
 impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'builder, T, M> {
-    fn with_transform(
+    // XXX TODO: Review if this can be pub.
+    pub fn with_transform(
         mut self,
         transform: impl Fn(&mut dyn AssetMetaDyn) + Send + Sync + 'static,
     ) -> Self {
