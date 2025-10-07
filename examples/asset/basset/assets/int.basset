@@ -1,1 +1,1 @@
-(input: (path: "1234.int"))
+(input: Path(path: "1234.int"))
