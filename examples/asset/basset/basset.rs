@@ -190,7 +190,7 @@ trait BassetAction: Send + Sync + 'static {
     fn apply(
         &self,
         loader: &BassetLoader,
-        params: Self::Params,
+        params: &Self::Params,
         asset_server: &AssetServer,
     ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, Self::Error>>;
 }
@@ -199,7 +199,7 @@ trait ErasedBassetAction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
         loader: &'a BassetLoader,
-        params: Option<Box<ron::value::RawValue>>,
+        params: &'a Option<Box<ron::value::RawValue>>,
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 }
@@ -211,7 +211,7 @@ where
     fn apply<'a>(
         &'a self,
         loader: &'a BassetLoader,
-        params: Option<Box<ron::value::RawValue>>,
+        params: &'a Option<Box<ron::value::RawValue>>,
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         // TODO: Check that we're correctly using BoxedFuture and Box::pin.
@@ -221,7 +221,7 @@ where
                 .map(|p| p.into_rust::<T::Params>().expect("TODO"))
                 .unwrap_or_default();
 
-            <T as BassetAction>::apply(self, loader, params, asset_server)
+            <T as BassetAction>::apply(self, loader, &params, asset_server)
                 .await
                 .map_err(Into::into)
         })
@@ -282,7 +282,7 @@ impl ErasedAssetLoader for BassetLoader {
             let action = self.action(&basset.root.name).expect("TODO");
 
             action
-                .apply(self, basset.root.params, load_context.server())
+                .apply(self, &basset.root.params, load_context.server())
                 .await
 
             // TODO: Should load_context.finish()?
@@ -342,7 +342,7 @@ impl BassetAction for LoadPathAction {
     async fn apply(
         &self,
         _loader: &BassetLoader,
-        params: Self::Params,
+        params: &Self::Params,
         asset_server: &AssetServer,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
         let path = AssetPath::parse(&params.path);
@@ -356,8 +356,7 @@ struct JoinStringsAction;
 #[derive(Serialize, Deserialize, Default)]
 struct JoinStringsActionParams {
     separator: String,
-    asset1: Option<SerializableAction>,
-    asset2: Option<SerializableAction>,
+    strings: Vec<SerializableAction>,
 }
 
 impl BassetAction for JoinStringsAction {
@@ -367,31 +366,28 @@ impl BassetAction for JoinStringsAction {
     async fn apply<'a>(
         &self,
         loader: &'a BassetLoader,
-        params: Self::Params,
+        params: &Self::Params,
         asset_server: &AssetServer,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
-        let action1 = loader
-            .action(&params.asset1.as_ref().unwrap().name)
-            .expect("TODO");
+        let mut acc = String::new();
 
-        let asset1 = action1
-            .apply(loader, params.asset1.unwrap().params, asset_server)
-            .await?;
+        for (index, string) in params.strings.iter().enumerate() {
+            let asset = loader
+                .action(&string.name)
+                .expect("TODO")
+                .apply(loader, &string.params, asset_server)
+                .await?
+                .take::<StringAsset>()
+                .expect("TODO");
 
-        let action2 = loader
-            .action(&params.asset2.as_ref().unwrap().name)
-            .expect("TODO");
+            if index == 0 {
+                acc = asset.0;
+            } else {
+                acc = acc + &params.separator + &asset.0;
+            }
+        }
 
-        let asset2 = action2
-            .apply(loader, params.asset2.unwrap().params, asset_server)
-            .await?;
-
-        let asset1 = asset1.take::<StringAsset>().expect("TODO");
-        let asset2 = asset2.take::<StringAsset>().expect("TODO");
-
-        let joined = StringAsset(asset1.0 + &params.separator + &asset2.0);
-
-        Ok(LoadedAsset::<StringAsset>::new_with_dependencies(joined).into())
+        Ok(LoadedAsset::<StringAsset>::new_with_dependencies(StringAsset(acc)).into())
     }
 }
 
