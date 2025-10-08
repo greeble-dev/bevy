@@ -1,1 +1,1 @@
-(root: (name: "basset::LoadPathAction", params: Some((path: "asdf.string", loader_settings: Some((uppercase: true))))))
+(root: (name: "basset::LoadPathAction", params: Some((path: "hello.string", loader_settings: Some((uppercase: true))))))

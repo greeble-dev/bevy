@@ -1355,7 +1355,8 @@ impl AssetServer {
             .0
     }
 
-    pub(crate) async fn get_meta_loader_and_reader<'a>(
+    // XXX TODO: Review change from pub(crate) -> pub.
+    pub async fn get_meta_loader_and_reader<'a>(
         &'a self,
         asset_path: &'a AssetPath<'_>,
         asset_type_id: Option<TypeId>,
@@ -1462,7 +1463,8 @@ impl AssetServer {
         }
     }
 
-    pub(crate) async fn load_with_meta_loader_and_reader(
+    // XXX TODO: Review change from pub(crate) -> pub.
+    pub async fn load_with_meta_loader_and_reader(
         &self,
         asset_path: &AssetPath<'_>,
         meta: &dyn AssetMetaDyn,

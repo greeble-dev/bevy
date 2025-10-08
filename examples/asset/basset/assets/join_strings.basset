@@ -1,0 +1,16 @@
+(
+	root: (
+		name: "basset::JoinStringsAction",
+		params: Some((
+			separator: ", ",
+			asset1: Some((
+				name: "basset::LoadPathAction",
+				params: Some((path: "hello.string")),
+			)),
+			asset2: Some((
+				name: "basset::LoadPathAction",
+				params: Some((path: "world.string")),
+			)),
+		))
+	)
+)

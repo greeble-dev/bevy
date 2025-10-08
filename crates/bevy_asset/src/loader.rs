@@ -569,6 +569,11 @@ impl<'a> LoadContext<'a> {
     pub fn load<'b, A: Asset>(&mut self, path: impl Into<AssetPath<'b>>) -> Handle<A> {
         self.loader().load(path)
     }
+
+    // XXX TODO: Review.
+    pub fn server(&self) -> &AssetServer {
+        self.asset_server
+    }
 }
 
 /// An error produced when calling [`LoadContext::read_asset_bytes`]

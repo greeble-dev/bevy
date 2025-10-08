@@ -10,7 +10,7 @@ use bevy::{
 };
 use bevy_asset::{
     meta::{AssetAction, AssetMeta, AssetMetaDyn, Settings},
-    AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset,
+    AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset, LoadedAsset,
 };
 use core::result::Result;
 use serde::{Deserialize, Serialize};
@@ -39,13 +39,60 @@ impl Plugin for BassetPlugin {
             .register_asset_loader(StringAssetLoader)
             .register_asset_loader(IntAssetLoader)
             .register_erased_asset_loader(Box::new(
-                BassetLoader::default().with_action(LoadPathAction),
+                BassetLoader::default()
+                    .with_action(LoadPathAction)
+                    .with_action(JoinStringsAction),
             ));
     }
 }
 
+fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::value::RawValue>>) {
+    let Some(settings) = settings else {
+        return;
+    };
+
+    let Some(ron) = ron else {
+        return;
+    };
+
+    // XXX TODO: Error handling?
+    if let Some(settings) = settings.downcast_mut::<StringAssetSettings>() {
+        *settings = ron
+            .clone()
+            .into_rust::<StringAssetSettings>()
+            .expect("TODO");
+    }
+}
+
+async fn load_asset(
+    asset_server: &AssetServer,
+    path: &AssetPath<'_>,
+    settings: &Option<Box<ron::value::RawValue>>,
+) -> Result<ErasedLoadedAsset, BevyError> {
+    let (mut meta, loader, mut reader) = asset_server
+        .get_meta_loader_and_reader(path, None)
+        .await
+        .map_err(Into::<BevyError>::into)?;
+
+    apply_settings(meta.loader_settings_mut(), settings);
+
+    let load_dependencies = false;
+    let populate_hashes = false;
+
+    asset_server
+        .load_with_meta_loader_and_reader(
+            path,
+            &*meta,
+            &*loader,
+            &mut *reader,
+            load_dependencies,
+            populate_hashes,
+        )
+        .await
+        .map_err(Into::into)
+}
+
 #[derive(Asset, TypePath, Debug)]
-#[expect(dead_code, reason = "TODO")]
 struct StringAsset(String);
 
 #[derive(Serialize, Deserialize, Default)]
@@ -142,16 +189,18 @@ trait BassetAction: Send + Sync + 'static {
 
     fn apply(
         &self,
+        loader: &BassetLoader,
         params: Self::Params,
-        load_context: &mut LoadContext,
+        asset_server: &AssetServer,
     ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, Self::Error>>;
 }
 
 trait ErasedBassetAction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
-        params: &'a Option<Box<ron::value::RawValue>>,
-        load_context: &'a mut LoadContext<'a>,
+        loader: &'a BassetLoader,
+        params: Option<Box<ron::value::RawValue>>,
+        asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 }
 
@@ -161,8 +210,9 @@ where
 {
     fn apply<'a>(
         &'a self,
-        params: &'a Option<Box<ron::value::RawValue>>,
-        load_context: &'a mut LoadContext<'a>,
+        loader: &'a BassetLoader,
+        params: Option<Box<ron::value::RawValue>>,
+        asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         // TODO: Check that we're correctly using BoxedFuture and Box::pin.
         Box::pin(async move {
@@ -171,7 +221,7 @@ where
                 .map(|p| p.into_rust::<T::Params>().expect("TODO"))
                 .unwrap_or_default();
 
-            <T as BassetAction>::apply(self, params, load_context)
+            <T as BassetAction>::apply(self, loader, params, asset_server)
                 .await
                 .map_err(Into::into)
         })
@@ -207,25 +257,10 @@ impl BassetLoader {
         self
     }
 
-    fn action(&self, type_name: &str) -> Option<Arc<dyn ErasedBassetAction>> {
-        self.type_name_to_action.get(type_name).cloned()
-    }
-}
-
-fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::value::RawValue>>) {
-    let Some(settings) = settings else {
-        return;
-    };
-
-    let Some(ron) = ron else {
-        return;
-    };
-
-    if let Some(settings) = settings.downcast_mut::<StringAssetSettings>() {
-        *settings = ron
-            .clone()
-            .into_rust::<StringAssetSettings>()
-            .expect("TODO");
+    fn action<'a>(&'a self, type_name: &str) -> Option<&'a dyn ErasedBassetAction> {
+        // TODO: Review this. Can't decide if we should return Arc here or avoid
+        // storing Arc in the first place.
+        self.type_name_to_action.get(type_name).map(move |a| &**a)
     }
 }
 
@@ -238,9 +273,6 @@ impl ErasedAssetLoader for BassetLoader {
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         // TODO: Check that we're correctly using BoxedFuture and Box::pin.
         Box::pin(async move {
-            // Move load_context so that it can be referenced as &mut later.
-            let mut load_context = load_context;
-
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
 
@@ -249,7 +281,11 @@ impl ErasedAssetLoader for BassetLoader {
 
             let action = self.action(&basset.root.name).expect("TODO");
 
-            action.apply(&basset.root.params, &mut load_context).await
+            action
+                .apply(self, basset.root.params, load_context.server())
+                .await
+
+            // TODO: Should load_context.finish()?
         })
     }
 
@@ -295,9 +331,7 @@ struct LoadPathActionParams {
     path: String, // TODO: Should be AssetPath. Avoiding for now to simplify lifetimes.
     #[serde(default)]
     loader_settings: Option<Box<ron::value::RawValue>>,
-    // TODO: Requires some faff to implement. NestedLoader doesn't have a way
-    // to choose the loader by name, although it does have a way to choose by type
-    // id. So we should either extend NestedLoader, or get the type id from AssetServer.
+    // TODO
     //loader_name: Option<String>,
 }
 
@@ -307,20 +341,57 @@ impl BassetAction for LoadPathAction {
 
     async fn apply(
         &self,
+        _loader: &BassetLoader,
         params: Self::Params,
-        load_context: &mut LoadContext<'_>,
+        asset_server: &AssetServer,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
         let path = AssetPath::parse(&params.path);
 
-        Ok(load_context
-            .loader()
-            .with_unknown_type()
-            .with_transform(move |meta| {
-                apply_settings(meta.loader_settings_mut(), &params.loader_settings);
-            })
-            .immediate()
-            .load(path)
-            .await?)
+        load_asset(asset_server, &path, &params.loader_settings).await
+    }
+}
+
+struct JoinStringsAction;
+
+#[derive(Serialize, Deserialize, Default)]
+struct JoinStringsActionParams {
+    separator: String,
+    asset1: Option<SerializableAction>,
+    asset2: Option<SerializableAction>,
+}
+
+impl BassetAction for JoinStringsAction {
+    type Params = JoinStringsActionParams;
+    type Error = BevyError; // XXX TODO: What should this be?
+
+    async fn apply<'a>(
+        &self,
+        loader: &'a BassetLoader,
+        params: Self::Params,
+        asset_server: &AssetServer,
+    ) -> Result<ErasedLoadedAsset, Self::Error> {
+        let action1 = loader
+            .action(&params.asset1.as_ref().unwrap().name)
+            .expect("TODO");
+
+        let asset1 = action1
+            .apply(loader, params.asset1.unwrap().params, asset_server)
+            .await?;
+
+        let action2 = loader
+            .action(&params.asset2.as_ref().unwrap().name)
+            .expect("TODO");
+
+        let asset2 = action2
+            .apply(loader, params.asset2.unwrap().params, asset_server)
+            .await?;
+
+        let asset1 = asset1.take::<StringAsset>().expect("TODO");
+        let asset2 = asset2.take::<StringAsset>().expect("TODO");
+
+        let joined = StringAsset(asset1.0 + &params.separator + &asset2.0);
+
+        Ok(LoadedAsset::<StringAsset>::new_with_dependencies(joined).into())
     }
 }
 
@@ -330,13 +401,15 @@ struct Handles(Vec<UntypedHandle>);
 
 fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     commands.insert_resource(Handles(vec![
-        assets.load::<StringAsset>("asdf.string").untyped(),
+        assets.load::<StringAsset>("hello.string").untyped(),
+        assets.load::<StringAsset>("world.string").untyped(),
         assets.load::<IntAsset>("1234.int").untyped(),
         assets.load::<IntAsset>("int.basset").untyped(),
         assets.load::<StringAsset>("string.basset").untyped(),
         assets
             .load::<StringAsset>("string_loader_uppercase.basset")
             .untyped(),
+        assets.load::<StringAsset>("join_strings.basset").untyped(),
     ]));
 }
 
