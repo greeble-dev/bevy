@@ -34,13 +34,13 @@ struct BassetPlugin;
 
 impl Plugin for BassetPlugin {
     fn build(&self, app: &mut App) {
-        let basset_loader = BassetLoader::default().with_transformer(LoadBassetTransformer);
-
         app.init_asset::<StringAsset>()
             .init_asset::<IntAsset>()
             .register_asset_loader(StringAssetLoader)
             .register_asset_loader(IntAssetLoader)
-            .register_erased_asset_loader(Box::new(basset_loader));
+            .register_erased_asset_loader(Box::new(
+                BassetLoader::default().with_action(LoadPathAction),
+            ));
     }
 }
 
@@ -135,124 +135,80 @@ impl AssetLoader for FakeAssetLoader {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-enum SerializableInput {
-    Path {
-        path: String,
-
-        #[serde(default)]
-        loader: SerializableLoader,
-    },
-}
-
-#[derive(Serialize, Deserialize, Default)]
-struct SerializableLoader {
-    #[serde(default)]
-    name: Option<String>,
-
-    #[serde(default)]
-    settings: Option<Box<ron::value::RawValue>>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SerializableTransformer {
-    name: String,
-
-    #[serde(default)]
-    settings: Option<Box<ron::value::RawValue>>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SerializableSaver {
-    name: String,
-    settings: Box<ron::value::RawValue>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SerializableOutput {
-    saver: SerializableSaver,
-
-    // TODO: Decide if specifying the output's loader is good.
-    loader: Option<SerializableLoader>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Basset {
-    input: SerializableInput,
-
-    #[serde(default)]
-    transformers: Vec<SerializableTransformer>,
-
-    #[serde(default)]
-    output: Option<SerializableOutput>,
-}
-
-trait BassetTransformer: Send + Sync + 'static {
-    type Settings: Settings + Default + Serialize + for<'a> Deserialize<'a>;
+trait BassetAction: Send + Sync + 'static {
+    // TODO: Should this use `Settings`?
+    type Params: Settings + Default + Serialize + for<'a> Deserialize<'a>;
     type Error: Into<BevyError>;
 
-    #[expect(dead_code, reason = "TODO")]
-    fn transform(
+    fn apply(
         &self,
-        input: Option<ErasedLoadedAsset>,
-        settings: Self::Settings,
+        params: Self::Params,
         load_context: &mut LoadContext,
     ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, Self::Error>>;
 }
 
-trait ErasedBassetTransformer: Send + Sync + 'static {
-    #[expect(dead_code, reason = "TODO")]
-    fn transform<'a>(
+trait ErasedBassetAction: Send + Sync + 'static {
+    fn apply<'a>(
         &'a self,
-        input: Option<ErasedLoadedAsset>,
-        settings: Option<Box<ron::value::RawValue>>,
-        load_context: LoadContext<'a>,
+        params: &'a Option<Box<ron::value::RawValue>>,
+        load_context: &'a mut LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 }
 
-impl<T> ErasedBassetTransformer for T
+impl<T> ErasedBassetAction for T
 where
-    T: BassetTransformer + Send + Sync,
+    T: BassetAction + Send + Sync,
 {
-    fn transform<'a>(
+    fn apply<'a>(
         &'a self,
-        input: Option<ErasedLoadedAsset>,
-        settings: Option<Box<ron::value::RawValue>>,
-        mut load_context: LoadContext<'a>,
+        params: &'a Option<Box<ron::value::RawValue>>,
+        load_context: &'a mut LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+        // TODO: Check that we're correctly using BoxedFuture and Box::pin.
         Box::pin(async move {
-            let settings = settings
-                .map(|settings| settings.into_rust::<T::Settings>().expect("TODO"))
+            let params = params
+                .as_ref()
+                .map(|p| p.into_rust::<T::Params>().expect("TODO"))
                 .unwrap_or_default();
 
-            <T as BassetTransformer>::transform(self, input, settings, &mut load_context)
+            <T as BassetAction>::apply(self, params, load_context)
                 .await
                 .map_err(Into::into)
         })
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct SerializableAction {
+    name: String,
+    params: Option<Box<ron::value::RawValue>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Basset {
+    root: SerializableAction,
+}
+
 #[derive(Default)]
 struct BassetLoader {
-    type_name_to_transformer: HashMap<&'static str, Arc<dyn ErasedBassetTransformer>>,
+    type_name_to_action: HashMap<&'static str, Arc<dyn ErasedBassetAction>>,
 }
 
 impl BassetLoader {
-    fn with_transformer<T: BassetTransformer>(mut self, transformer: T) -> Self {
+    fn with_action<T: BassetAction>(mut self, action: T) -> Self {
         let type_name = core::any::type_name::<T>();
 
         // XXX TODO: Clean up.
-        let transformer: Box<dyn ErasedBassetTransformer> = Box::new(transformer);
-        let transformer: Arc<dyn ErasedBassetTransformer> = transformer.into();
+        let action: Box<dyn ErasedBassetAction> = Box::new(action);
+        let action: Arc<dyn ErasedBassetAction> = action.into();
 
-        self.type_name_to_transformer.insert(type_name, transformer);
+        self.type_name_to_action.insert(type_name, action);
 
         self
     }
 
-    #[expect(dead_code, reason = "TODO")]
-    fn transformer(&self, type_name: &str) -> Option<Arc<dyn ErasedBassetTransformer>> {
-        self.type_name_to_transformer.get(type_name).cloned()
+    fn action(&self, type_name: &str) -> Option<Arc<dyn ErasedBassetAction>> {
+        self.type_name_to_action.get(type_name).cloned()
     }
 }
 
@@ -278,45 +234,22 @@ impl ErasedAssetLoader for BassetLoader {
         &'a self,
         reader: &'a mut dyn Reader,
         _meta: &'a dyn AssetMetaDyn,
-        mut load_context: LoadContext<'a>,
+        load_context: LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+        // TODO: Check that we're correctly using BoxedFuture and Box::pin.
         Box::pin(async move {
+            // Move load_context so that it can be referenced as &mut later.
+            let mut load_context = load_context;
+
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
 
             let basset = ron::de::from_bytes::<Basset>(&bytes)?;
             dbg!(ron::ser::to_string(&basset)?);
 
-            match basset.input {
-                SerializableInput::Path { path, loader } => {
-                    let path = AssetPath::try_parse(&path).expect("TODO");
+            let action = self.action(&basset.root.name).expect("TODO");
 
-                    // TODO: Find loader by name.
-
-                    Ok(load_context
-                        .loader()
-                        .with_unknown_type()
-                        .with_transform(move |meta| {
-                            apply_settings(meta.loader_settings_mut(), &loader.settings);
-                        })
-                        .immediate()
-                        .load(path)
-                        .await?)
-                }
-            }
-
-            // TODO: Needs work. load_context can't be moved.
-            /*
-            for transformer in basset.transformers {
-                let transformer_instance = self.transformer(&transformer.name).expect("TODO");
-
-                let transformer_settings = transformer.settings.clone();
-
-                asset = transformer_instance
-                    .transform(None, transformer_settings, load_context)
-                    .await
-            }
-            */
+            action.apply(&basset.root.params, &mut load_context).await
         })
     }
 
@@ -355,35 +288,35 @@ impl ErasedAssetLoader for BassetLoader {
     }
 }
 
-struct LoadBassetTransformer;
+struct LoadPathAction;
 
 #[derive(Serialize, Deserialize, Default)]
-struct LoadBassetTransformerSettings {
-    path: String, // TODO: Should be AssetPath, avoiding for now to simplify lifetimes.
+struct LoadPathActionParams {
+    path: String, // TODO: Should be AssetPath. Avoiding for now to simplify lifetimes.
     #[serde(default)]
     loader_settings: Option<Box<ron::value::RawValue>>,
-    // XXX TODO: Loader type?
+    // TODO: Requires some faff to implement. NestedLoader doesn't have a way
+    // to choose the loader by name, although it does have a way to choose by type
+    // id. So we should either extend NestedLoader, or get the type id from AssetServer.
+    //loader_name: Option<String>,
 }
 
-impl BassetTransformer for LoadBassetTransformer {
-    type Settings = LoadBassetTransformerSettings;
+impl BassetAction for LoadPathAction {
+    type Params = LoadPathActionParams;
     type Error = BevyError; // XXX TODO: What should this be?
 
-    async fn transform(
+    async fn apply(
         &self,
-        input: Option<ErasedLoadedAsset>,
-        settings: Self::Settings,
+        params: Self::Params,
         load_context: &mut LoadContext<'_>,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
-        assert!(input.is_none());
-
-        let path = AssetPath::parse(&settings.path);
+        let path = AssetPath::parse(&params.path);
 
         Ok(load_context
             .loader()
             .with_unknown_type()
             .with_transform(move |meta| {
-                apply_settings(meta.loader_settings_mut(), &settings.loader_settings);
+                apply_settings(meta.loader_settings_mut(), &params.loader_settings);
             })
             .immediate()
             .load(path)
@@ -400,12 +333,10 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
         assets.load::<StringAsset>("asdf.string").untyped(),
         assets.load::<IntAsset>("1234.int").untyped(),
         assets.load::<IntAsset>("int.basset").untyped(),
-        /*
         assets.load::<StringAsset>("string.basset").untyped(),
         assets
             .load::<StringAsset>("string_loader_uppercase.basset")
             .untyped(),
-        */
     ]));
 }
 

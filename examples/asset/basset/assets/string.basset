@@ -1,1 +1,1 @@
-(input: (path: "asdf.string"))
+(root: (name: "basset::LoadPathAction", params: Some((path: "asdf.string"))))
