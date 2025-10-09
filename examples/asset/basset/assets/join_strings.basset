@@ -1,18 +1,18 @@
 (
 	root: (
 		name: "basset::JoinStringsAction",
-		params: Some((
+		params: (
 			separator: ", ",
 			strings: [
 				(
 					name: "basset::LoadPathAction",
-					params: Some((path: "hello.string")),
+					params: (path: "hello.string"),
 				),
 				(
 					name: "basset::LoadPathAction",
-					params: Some((path: "world.string")),
+					params: (path: "world.string"),
 				),
 			],
-		))
+		)
 	)
 )

@@ -199,7 +199,7 @@ trait ErasedBassetAction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
         loader: &'a BassetLoader,
-        params: &'a Option<Box<ron::value::RawValue>>,
+        params: &'a Box<ron::value::RawValue>,
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 }
@@ -211,17 +211,14 @@ where
     fn apply<'a>(
         &'a self,
         loader: &'a BassetLoader,
-        params: &'a Option<Box<ron::value::RawValue>>,
+        params: &'a Box<ron::value::RawValue>,
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         // TODO: Check that we're correctly using BoxedFuture and Box::pin.
         Box::pin(async move {
-            let params = params
-                .as_ref()
-                .map(|p| p.into_rust::<T::Params>().expect("TODO"))
-                .unwrap_or_default();
+            let params = params.into_rust::<T::Params>().expect("TODO");
 
-            <T as BassetAction>::apply(self, loader, &params, asset_server)
+            T::apply(self, loader, &params, asset_server)
                 .await
                 .map_err(Into::into)
         })
@@ -231,7 +228,7 @@ where
 #[derive(Serialize, Deserialize)]
 struct SerializableAction {
     name: String,
-    params: Option<Box<ron::value::RawValue>>,
+    params: Box<ron::value::RawValue>,
 }
 
 #[derive(Serialize, Deserialize)]
