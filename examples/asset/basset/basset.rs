@@ -231,6 +231,32 @@ struct SerializableAction {
     params: Box<ron::value::RawValue>,
 }
 
+impl SerializableAction {
+    async fn apply<T: Asset>(
+        &self,
+        loader: &BassetLoader,
+        asset_server: &AssetServer,
+    ) -> Result<T, BevyError> {
+        Ok(self
+            .erased_apply(loader, asset_server)
+            .await?
+            .take::<T>()
+            .expect("TODO"))
+    }
+
+    async fn erased_apply(
+        &self,
+        loader: &BassetLoader,
+        asset_server: &AssetServer,
+    ) -> Result<ErasedLoadedAsset, BevyError> {
+        loader
+            .action(&self.name)
+            .expect("TODO")
+            .apply(loader, &self.params, asset_server)
+            .await
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct Basset {
     root: SerializableAction,
@@ -276,11 +302,7 @@ impl ErasedAssetLoader for BassetLoader {
             let basset = ron::de::from_bytes::<Basset>(&bytes)?;
             dbg!(ron::ser::to_string(&basset)?);
 
-            let action = self.action(&basset.root.name).expect("TODO");
-
-            action
-                .apply(self, &basset.root.params, load_context.server())
-                .await
+            basset.root.erased_apply(self, load_context.server()).await
 
             // TODO: Should load_context.finish()?
         })
@@ -369,13 +391,7 @@ impl BassetAction for JoinStringsAction {
         let mut acc = String::new();
 
         for (index, string) in params.strings.iter().enumerate() {
-            let asset = loader
-                .action(&string.name)
-                .expect("TODO")
-                .apply(loader, &string.params, asset_server)
-                .await?
-                .take::<StringAsset>()
-                .expect("TODO");
+            let asset = string.apply::<StringAsset>(loader, asset_server).await?;
 
             if index == 0 {
                 acc = asset.0;
