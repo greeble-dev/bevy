@@ -199,6 +199,23 @@ trait BassetAction: Send + Sync + 'static {
     ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, Self::Error>>;
 }
 
+impl BassetActionContext<'_> {
+    async fn apply<T: Asset>(&self, action: &SerializableAction) -> Result<T, BevyError> {
+        Ok(self.erased_apply(action).await?.take::<T>().expect("TODO"))
+    }
+
+    async fn erased_apply(
+        &self,
+        action: &SerializableAction,
+    ) -> Result<ErasedLoadedAsset, BevyError> {
+        self.loader
+            .action(&action.name)
+            .expect("TODO")
+            .apply(self, &action.params)
+            .await
+    }
+}
+
 trait ErasedBassetAction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
@@ -229,24 +246,6 @@ where
 struct SerializableAction {
     name: String,
     params: Box<ron::value::RawValue>,
-}
-
-impl SerializableAction {
-    async fn apply<T: Asset>(&self, context: &BassetActionContext<'_>) -> Result<T, BevyError> {
-        Ok(self.erased_apply(context).await?.take::<T>().expect("TODO"))
-    }
-
-    async fn erased_apply(
-        &self,
-        context: &BassetActionContext<'_>,
-    ) -> Result<ErasedLoadedAsset, BevyError> {
-        context
-            .loader
-            .action(&self.name)
-            .expect("TODO")
-            .apply(context, &self.params)
-            .await
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -299,7 +298,7 @@ impl ErasedAssetLoader for BassetLoader {
                 asset_server: load_context.server(),
             };
 
-            basset.root.erased_apply(&context).await
+            context.erased_apply(&basset.root).await
 
             // TODO: Should load_context.finish()?
         })
@@ -387,7 +386,7 @@ impl BassetAction for JoinStringsAction {
         let mut acc = String::new();
 
         for (index, string) in params.strings.iter().enumerate() {
-            let asset = string.apply::<StringAsset>(context).await?;
+            let asset = context.apply::<StringAsset>(string).await?;
 
             if index == 0 {
                 acc = asset.0;
