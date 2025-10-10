@@ -5,8 +5,13 @@
 			separator: ", ",
 			strings: [
 				(
-					name: "basset::LoadPathAction",
-					params: (path: "hello.string"),
+					name: "basset::UppercaseStringAction",
+					params: (
+						string: (
+							name: "basset::LoadPathAction",
+							params: (path: "hello.string"),
+						),
+					)
 				),
 				(
 					name: "basset::LoadPathAction",

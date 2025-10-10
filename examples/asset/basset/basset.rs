@@ -44,7 +44,8 @@ impl Plugin for BassetPlugin {
             .register_erased_asset_loader(Box::new(
                 BassetLoader::default()
                     .with_action(LoadPathAction)
-                    .with_action(JoinStringsAction),
+                    .with_action(JoinStringsAction)
+                    .with_action(UppercaseStringAction),
             ));
     }
 }
@@ -271,6 +272,30 @@ struct SerializableAction {
     params: Box<ron::value::RawValue>,
 }
 
+impl Default for SerializableAction {
+    fn default() -> Self {
+        // TODO: Urgh? Surely a better way to get a Box<str>?
+        let blargh: Box<str> = (*Box::new("()")).into();
+
+        Self {
+            name: Default::default(),
+
+            // TODO: This is ugly. The goal is to let action params include
+            // a sub-action via SerializableAction, e.g. `struct MyParams { my_sub_asset: SerializableAction }`.
+            // But that means SerializableAction must implement Default. And I
+            // can't work out a cheap way to make a default RawValue.
+            //
+            // Alternatively, could make `SerializableAction::params` an
+            // `Option<RawValue>`. But that makes the RON messy unless we allow
+            // implicit Some.
+            //
+            // Maybe we can make a new type that contains an optional RawValue but
+            // still serializes as if it's non-optional.
+            params: ron::value::RawValue::from_boxed_ron(blargh).expect("TODO"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct Basset {
     root: SerializableAction,
@@ -435,6 +460,35 @@ impl BassetAction for JoinStringsAction {
         }
 
         Ok(LoadedAsset::new_with_dependencies(StringAsset(acc)).into())
+    }
+}
+
+struct UppercaseStringAction;
+
+#[derive(Serialize, Deserialize, Default)]
+struct UppercaseStringActionParams {
+    string: SerializableAction,
+}
+
+impl BassetAction for UppercaseStringAction {
+    type Params = UppercaseStringActionParams;
+    type Error = BevyError; // XXX TODO: What should this be?
+
+    // TODO: Review lifetimes.
+    async fn apply<'a>(
+        &self,
+        context: &'a mut BassetActionContext<'_>,
+        params: &Self::Params,
+    ) -> Result<ErasedLoadedAsset, Self::Error> {
+        let string = StringAsset(
+            context
+                .apply::<StringAsset>(&params.string)
+                .await?
+                .0
+                .to_uppercase(),
+        );
+
+        Ok(LoadedAsset::new_with_dependencies(string).into())
     }
 }
 
