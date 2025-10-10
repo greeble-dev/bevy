@@ -395,7 +395,7 @@ impl BassetAction for JoinStringsAction {
             }
         }
 
-        Ok(LoadedAsset::<StringAsset>::new_with_dependencies(StringAsset(acc)).into())
+        Ok(LoadedAsset::new_with_dependencies(StringAsset(acc)).into())
     }
 }
 
