@@ -348,17 +348,18 @@ impl ErasedAssetLoader for BassetLoader {
 
             let asset = context.erased_apply(&basset.root).await?;
 
-            // TODO: Better way to dump info without mutex and without it getting
-            // mixed up due to threading.
+            // XXX TODO: At this point we should replace `asset.loader_dependencies`
+            // with our own `context.loader_dependencies`.
+
+            // TODO: Better way to dump temporary debug without it getting mixed
+            // up due to threading.
             {
                 static MUTEX: Mutex<()> = Mutex::new(());
-
                 let _lock = MUTEX.lock();
 
                 dbg!(load_context.path());
                 dbg!(ron::ser::to_string(&basset)?);
 
-                // XXX TODO: Decide what to do with dependencies.
                 for (dependency, _) in context.loader_dependencies {
                     dbg!(dependency);
                 }
