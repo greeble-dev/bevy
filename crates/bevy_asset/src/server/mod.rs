@@ -753,7 +753,7 @@ impl AssetServer {
                 return Err(AssetLoadError::RequestedHandleTypeMismatch {
                     path: path.into_owned(),
                     requested: asset_type_id,
-                    actual_asset_name: loader.asset_type_name().unwrap(), // XXX TODO: This is assumung that asset_type_name is Some if asset_type_id is Some - see condition above.
+                    actual_asset_name: loader.asset_type_name().unwrap(), // XXX TODO: This is assuming that asset_type_name is Some if asset_type_id is Some - see condition above.
                     loader_name: loader.type_name(),
                 });
             }
