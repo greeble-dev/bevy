@@ -9,12 +9,15 @@ use bevy::{
     tasks::{BoxedFuture, ConditionalSendFuture},
 };
 use bevy_asset::{
-    meta::{AssetAction, AssetMeta, AssetMetaDyn, Settings},
+    meta::{AssetAction, AssetHash, AssetMeta, AssetMetaDyn, Settings},
     AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset, LoadedAsset,
 };
 use core::result::Result;
 use serde::{Deserialize, Serialize};
-use std::{boxed::Box, sync::Arc};
+use std::{
+    boxed::Box,
+    sync::{Arc, Mutex},
+};
 
 fn main() {
     App::new()
@@ -64,24 +67,26 @@ fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::val
     }
 }
 
-async fn load_asset(
+async fn load_direct(
     asset_server: &AssetServer,
-    path: &AssetPath<'_>,
+    path: &AssetPath<'static>,
     settings: &Option<Box<ron::value::RawValue>>,
-) -> Result<ErasedLoadedAsset, BevyError> {
+) -> Result<(ErasedLoadedAsset, AssetHash), BevyError> {
     let (mut meta, loader, mut reader) = asset_server
-        .get_meta_loader_and_reader(path, None)
+        .get_meta_loader_and_reader(&path, None)
         .await
         .map_err(Into::<BevyError>::into)?;
 
     apply_settings(meta.loader_settings_mut(), settings);
 
+    // Roughly the same as LoadContext::load_direct_internal.
+
     let load_dependencies = false;
     let populate_hashes = false;
 
-    asset_server
+    let asset = asset_server
         .load_with_meta_loader_and_reader(
-            path,
+            &path,
             &*meta,
             &*loader,
             &mut *reader,
@@ -89,7 +94,12 @@ async fn load_asset(
             populate_hashes,
         )
         .await
-        .map_err(Into::into)
+        .map_err(Into::<BevyError>::into)?;
+
+    let info = meta.processed_info().as_ref();
+    let hash = info.map(|i| i.full_hash).unwrap_or_default();
+
+    Ok((asset, hash))
 }
 
 #[derive(Asset, TypePath, Debug)]
@@ -185,6 +195,7 @@ impl AssetLoader for FakeAssetLoader {
 struct BassetActionContext<'a> {
     loader: &'a BassetLoader,
     asset_server: &'a AssetServer,
+    loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
 }
 
 trait BassetAction: Send + Sync + 'static {
@@ -194,18 +205,18 @@ trait BassetAction: Send + Sync + 'static {
 
     fn apply(
         &self,
-        context: &BassetActionContext<'_>,
+        context: &mut BassetActionContext<'_>,
         params: &Self::Params,
     ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, Self::Error>>;
 }
 
 impl BassetActionContext<'_> {
-    async fn apply<T: Asset>(&self, action: &SerializableAction) -> Result<T, BevyError> {
+    async fn apply<T: Asset>(&mut self, action: &SerializableAction) -> Result<T, BevyError> {
         Ok(self.erased_apply(action).await?.take::<T>().expect("TODO"))
     }
 
     async fn erased_apply(
-        &self,
+        &mut self,
         action: &SerializableAction,
     ) -> Result<ErasedLoadedAsset, BevyError> {
         self.loader
@@ -214,12 +225,24 @@ impl BassetActionContext<'_> {
             .apply(self, &action.params)
             .await
     }
+
+    async fn erased_load(
+        &mut self,
+        path: AssetPath<'static>,
+        settings: &Option<Box<ron::value::RawValue>>,
+    ) -> Result<ErasedLoadedAsset, BevyError> {
+        let (asset, hash) = load_direct(self.asset_server, &path, settings).await?;
+
+        self.loader_dependencies.insert(path, hash);
+
+        Ok(asset)
+    }
 }
 
 trait ErasedBassetAction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
-        context: &'a BassetActionContext,
+        context: &'a mut BassetActionContext,
         params: &'a Box<ron::value::RawValue>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 }
@@ -230,7 +253,7 @@ where
 {
     fn apply<'a>(
         &'a self,
-        context: &'a BassetActionContext,
+        context: &'a mut BassetActionContext,
         params: &'a Box<ron::value::RawValue>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         // TODO: Check that we're correctly using BoxedFuture and Box::pin.
@@ -291,16 +314,32 @@ impl ErasedAssetLoader for BassetLoader {
             reader.read_to_end(&mut bytes).await?;
 
             let basset = ron::de::from_bytes::<Basset>(&bytes)?;
-            dbg!(ron::ser::to_string(&basset)?);
 
-            let context = BassetActionContext {
+            let mut context = BassetActionContext {
                 loader: self,
                 asset_server: load_context.server(),
+                loader_dependencies: HashMap::default(),
             };
 
-            context.erased_apply(&basset.root).await
+            let asset = context.erased_apply(&basset.root).await?;
 
-            // TODO: Should load_context.finish()?
+            // TODO: Better way to dump info without mutex and without it getting
+            // mixed up due to threading.
+            {
+                static MUTEX: Mutex<()> = Mutex::new(());
+
+                let _lock = MUTEX.lock();
+
+                dbg!(load_context.path());
+                dbg!(ron::ser::to_string(&basset)?);
+
+                // XXX TODO: Decide what to do with dependencies.
+                for (dependency, _) in context.loader_dependencies {
+                    dbg!(dependency);
+                }
+            }
+
+            Ok(asset)
         })
     }
 
@@ -356,12 +395,12 @@ impl BassetAction for LoadPathAction {
 
     async fn apply(
         &self,
-        context: &BassetActionContext<'_>,
+        context: &mut BassetActionContext<'_>,
         params: &Self::Params,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
-        let path = AssetPath::parse(&params.path);
+        let path = AssetPath::parse(&params.path).into_owned();
 
-        load_asset(context.asset_server, &path, &params.loader_settings).await
+        context.erased_load(path, &params.loader_settings).await
     }
 }
 
@@ -380,7 +419,7 @@ impl BassetAction for JoinStringsAction {
     // TODO: Review lifetimes.
     async fn apply<'a>(
         &self,
-        context: &'a BassetActionContext<'_>,
+        context: &'a mut BassetActionContext<'_>,
         params: &Self::Params,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
         let mut acc = String::new();
