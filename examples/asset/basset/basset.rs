@@ -448,19 +448,18 @@ impl BassetAction for JoinStringsAction {
         context: &'a mut BassetActionContext<'_>,
         params: &Self::Params,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
-        let mut acc = String::new();
+        let mut strings = Vec::new();
 
-        for (index, string) in params.strings.iter().enumerate() {
-            let asset = context.apply::<StringAsset>(string).await?;
-
-            if index == 0 {
-                acc = asset.0;
-            } else {
-                acc = acc + &params.separator + &asset.0;
-            }
+        for action in &params.strings {
+            strings.push(context.apply::<StringAsset>(&action).await?.0);
         }
 
-        Ok(LoadedAsset::new_with_dependencies(StringAsset(acc)).into())
+        let joined = strings
+            .into_iter()
+            .reduce(|l, r| l + &params.separator + &r)
+            .unwrap_or("".to_owned());
+
+        Ok(LoadedAsset::new_with_dependencies(StringAsset(joined)).into())
     }
 }
 
