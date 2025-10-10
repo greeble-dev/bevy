@@ -182,6 +182,11 @@ impl AssetLoader for FakeAssetLoader {
     }
 }
 
+struct BassetActionContext<'a> {
+    loader: &'a BassetLoader,
+    asset_server: &'a AssetServer,
+}
+
 trait BassetAction: Send + Sync + 'static {
     // TODO: Should this use `Settings`?
     type Params: Settings + Default + Serialize + for<'a> Deserialize<'a>;
@@ -189,18 +194,16 @@ trait BassetAction: Send + Sync + 'static {
 
     fn apply(
         &self,
-        loader: &BassetLoader,
+        context: &BassetActionContext<'_>,
         params: &Self::Params,
-        asset_server: &AssetServer,
     ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, Self::Error>>;
 }
 
 trait ErasedBassetAction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
-        loader: &'a BassetLoader,
+        context: &'a BassetActionContext,
         params: &'a Box<ron::value::RawValue>,
-        asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 }
 
@@ -210,17 +213,14 @@ where
 {
     fn apply<'a>(
         &'a self,
-        loader: &'a BassetLoader,
+        context: &'a BassetActionContext,
         params: &'a Box<ron::value::RawValue>,
-        asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         // TODO: Check that we're correctly using BoxedFuture and Box::pin.
         Box::pin(async move {
             let params = params.into_rust::<T::Params>().expect("TODO");
 
-            T::apply(self, loader, &params, asset_server)
-                .await
-                .map_err(Into::into)
+            T::apply(self, context, &params).await.map_err(Into::into)
         })
     }
 }
@@ -232,27 +232,19 @@ struct SerializableAction {
 }
 
 impl SerializableAction {
-    async fn apply<T: Asset>(
-        &self,
-        loader: &BassetLoader,
-        asset_server: &AssetServer,
-    ) -> Result<T, BevyError> {
-        Ok(self
-            .erased_apply(loader, asset_server)
-            .await?
-            .take::<T>()
-            .expect("TODO"))
+    async fn apply<T: Asset>(&self, context: &BassetActionContext<'_>) -> Result<T, BevyError> {
+        Ok(self.erased_apply(context).await?.take::<T>().expect("TODO"))
     }
 
     async fn erased_apply(
         &self,
-        loader: &BassetLoader,
-        asset_server: &AssetServer,
+        context: &BassetActionContext<'_>,
     ) -> Result<ErasedLoadedAsset, BevyError> {
-        loader
+        context
+            .loader
             .action(&self.name)
             .expect("TODO")
-            .apply(loader, &self.params, asset_server)
+            .apply(context, &self.params)
             .await
     }
 }
@@ -302,7 +294,12 @@ impl ErasedAssetLoader for BassetLoader {
             let basset = ron::de::from_bytes::<Basset>(&bytes)?;
             dbg!(ron::ser::to_string(&basset)?);
 
-            basset.root.erased_apply(self, load_context.server()).await
+            let context = BassetActionContext {
+                loader: self,
+                asset_server: load_context.server(),
+            };
+
+            basset.root.erased_apply(&context).await
 
             // TODO: Should load_context.finish()?
         })
@@ -360,13 +357,12 @@ impl BassetAction for LoadPathAction {
 
     async fn apply(
         &self,
-        _loader: &BassetLoader,
+        context: &BassetActionContext<'_>,
         params: &Self::Params,
-        asset_server: &AssetServer,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
         let path = AssetPath::parse(&params.path);
 
-        load_asset(asset_server, &path, &params.loader_settings).await
+        load_asset(context.asset_server, &path, &params.loader_settings).await
     }
 }
 
@@ -382,16 +378,16 @@ impl BassetAction for JoinStringsAction {
     type Params = JoinStringsActionParams;
     type Error = BevyError; // XXX TODO: What should this be?
 
+    // TODO: Review lifetimes.
     async fn apply<'a>(
         &self,
-        loader: &'a BassetLoader,
+        context: &'a BassetActionContext<'_>,
         params: &Self::Params,
-        asset_server: &AssetServer,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
         let mut acc = String::new();
 
         for (index, string) in params.strings.iter().enumerate() {
-            let asset = string.apply::<StringAsset>(loader, asset_server).await?;
+            let asset = string.apply::<StringAsset>(context).await?;
 
             if index == 0 {
                 acc = asset.0;
