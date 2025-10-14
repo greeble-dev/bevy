@@ -286,24 +286,21 @@ impl SerializableAction {
 
 impl Default for SerializableAction {
     fn default() -> Self {
-        // TODO: Urgh? Surely a better way to get a Box<str>?
-        let blargh: Box<str> = (*Box::new("()")).into();
+        // TODO: This is ugly. Can't see an efficient way to support Default for
+        // a Box<ron::RawValue>.
+        //
+        // Could make `SerializableAction::params` an `Option<RawValue>`. But
+        // that makes the RON messy unless we allow implicit Some.
+        //
+        // Maybe we can make a new type that contains an optional RawValue but
+        // still serializes as if it's non-optional?
+        let empty_struct =
+            ron::value::RawValue::from_boxed_ron(Box::<str>::from("()")).expect("TODO");
 
         Self {
             name: Default::default(),
 
-            // TODO: This is ugly. The goal is to let action params include
-            // a sub-action via SerializableAction, e.g. `struct MyParams { my_sub_asset: SerializableAction }`.
-            // But that means SerializableAction must implement Default. And I
-            // can't work out a cheap way to make a default RawValue.
-            //
-            // Alternatively, could make `SerializableAction::params` an
-            // `Option<RawValue>`. But that makes the RON messy unless we allow
-            // implicit Some.
-            //
-            // Maybe we can make a new type that contains an optional RawValue but
-            // still serializes as if it's non-optional.
-            params: ron::value::RawValue::from_boxed_ron(blargh).expect("TODO"),
+            params: empty_struct,
         }
     }
 }
@@ -322,11 +319,11 @@ impl BassetLoader {
     fn with_action<T: BassetAction>(mut self, action: T) -> Self {
         let type_name = core::any::type_name::<T>();
 
-        // XXX TODO: Clean up.
+        // XXX TODO: Feels like a roundabout way to get to an Arc<dyn ErasedBassetAction>. Review?
         let action: Box<dyn ErasedBassetAction> = Box::new(action);
-        let action: Arc<dyn ErasedBassetAction> = action.into();
 
-        self.type_name_to_action.insert(type_name, action);
+        self.type_name_to_action
+            .insert(type_name, Arc::from(action));
 
         self
     }
