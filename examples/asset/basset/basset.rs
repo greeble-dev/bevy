@@ -62,7 +62,6 @@ fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::val
         return;
     };
 
-    // XXX TODO: Error handling?
     if let Some(settings) = settings.downcast_mut::<StringAssetSettings>() {
         *settings = ron
             .clone()
@@ -430,7 +429,7 @@ struct LoadPathActionParams {
 
 impl BassetAction for LoadPathAction {
     type Params = LoadPathActionParams;
-    type Error = BevyError; // XXX TODO: What should this be?
+    type Error = BevyError;
 
     async fn apply(
         &self,
@@ -453,7 +452,7 @@ struct JoinStringsActionParams {
 
 impl BassetAction for JoinStringsAction {
     type Params = JoinStringsActionParams;
-    type Error = BevyError; // XXX TODO: What should this be?
+    type Error = BevyError;
 
     async fn apply(
         &self,
@@ -484,9 +483,8 @@ struct UppercaseStringActionParams {
 
 impl BassetAction for UppercaseStringAction {
     type Params = UppercaseStringActionParams;
-    type Error = BevyError; // XXX TODO: What should this be?
+    type Error = BevyError;
 
-    // TODO: Review lifetimes.
     async fn apply(
         &self,
         context: &mut BassetActionContext<'_>,
@@ -566,15 +564,6 @@ mod acme {
             .expect("TODO")
             .label_cow()
             .expect("TODO");
-
-        // XXX TODO: Awkward borrowing. Review.
-        /*
-        let label = label.into_owned();
-
-        let sub_asset: &'a ErasedLoadedAsset = asset.get_labeled(label).expect("TODO");
-
-        sub_asset
-        */
 
         asset
             .get_labeled(label.into_owned())
@@ -683,9 +672,8 @@ struct SceneFromGltfActionParams {
 
 impl BassetAction for SceneFromGltfAction {
     type Params = SceneFromGltfActionParams;
-    type Error = BevyError; // XXX TODO: What should this be?
+    type Error = BevyError;
 
-    // TODO: Review lifetimes.
     async fn apply(
         &self,
         context: &mut BassetActionContext<'_>,
@@ -699,11 +687,9 @@ impl BassetAction for SceneFromGltfAction {
         .await?
         .0;
 
-        dbg!("start");
-
         let scene = acme::from_gltf(&gltf, context.asset_server);
 
-        dbg!(ron::ser::to_string(&scene)?);
+        // XXX TODO: What about dependencies?
 
         Ok(LoadedAsset::new_with_dependencies(scene).into())
     }
