@@ -3,6 +3,7 @@
 use bevy::{
     asset::{io::Reader, AssetLoader, LoadContext},
     ecs::error::BevyError,
+    light::CascadeShadowConfigBuilder,
     platform::collections::HashMap,
     prelude::*,
     reflect::TypePath,
@@ -29,7 +30,7 @@ fn main() {
             BassetPlugin,
         ))
         .add_systems(Startup, setup)
-        .add_systems(Update, print)
+        .add_systems(Update, (print, spawn))
         .run();
 }
 
@@ -39,13 +40,15 @@ impl Plugin for BassetPlugin {
     fn build(&self, app: &mut App) {
         app.init_asset::<StringAsset>()
             .init_asset::<IntAsset>()
+            .init_asset::<acme::AcmeScene>()
             .register_asset_loader(StringAssetLoader)
             .register_asset_loader(IntAssetLoader)
             .register_erased_asset_loader(Box::new(
                 BassetLoader::default()
                     .with_action(LoadPathAction)
                     .with_action(JoinStringsAction)
-                    .with_action(UppercaseStringAction),
+                    .with_action(UppercaseStringAction)
+                    .with_action(SceneFromGltfAction),
             ));
     }
 }
@@ -266,10 +269,20 @@ where
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct SerializableAction {
     name: String,
     params: Box<ron::value::RawValue>,
+}
+
+impl SerializableAction {
+    #[expect(dead_code, reason = "TODO")]
+    fn new<Type, ParamsType: Serialize>(params: &ParamsType) -> Self {
+        Self {
+            name: core::any::type_name::<Type>().into(),
+            params: ron::value::RawValue::from_rust(params).expect("TODO"),
+        }
+    }
 }
 
 impl Default for SerializableAction {
@@ -296,7 +309,7 @@ impl Default for SerializableAction {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Basset {
     root: SerializableAction,
 }
@@ -492,22 +505,261 @@ impl BassetAction for UppercaseStringAction {
     }
 }
 
+mod acme {
+    use super::*;
+
+    #[derive(Serialize, Deserialize, Default, Debug)]
+    pub struct AcmeHandle {
+        path: String,
+    }
+
+    impl AcmeHandle {
+        fn new(asset_server: &AssetServer, handle: &UntypedHandle) -> Self {
+            Self {
+                path: asset_server
+                    .get_path(handle.id())
+                    .expect("TODO")
+                    .to_string(),
+            }
+        }
+    }
+
+    impl<'a> From<&'a AcmeHandle> for AssetPath<'a> {
+        fn from(handle: &'a AcmeHandle) -> Self {
+            AssetPath::parse(&handle.path)
+        }
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    pub struct AcmeMesh {
+        asset: AcmeHandle,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    pub struct AcmeMaterial {
+        base_color_texture: Option<AcmeHandle>,
+    }
+
+    #[derive(Serialize, Deserialize, Default, Debug)]
+    pub struct AcmeEntity {
+        #[serde(default)]
+        transform: Transform,
+
+        #[serde(default)]
+        mesh: Option<AcmeMesh>,
+
+        #[serde(default)]
+        material: Option<AcmeMaterial>,
+    }
+
+    #[derive(Asset, TypePath, Serialize, Deserialize, Default, Debug)]
+    pub struct AcmeScene {
+        entities: Vec<AcmeEntity>,
+    }
+
+    fn get_sub_asset<'a, T: Asset>(
+        asset: &'a ErasedLoadedAsset,
+        sub_asset_handle: &Handle<T>,
+        asset_server: &'a AssetServer,
+    ) -> &'a T {
+        let label = asset_server
+            .get_path(sub_asset_handle.id().untyped())
+            .expect("TODO")
+            .label_cow()
+            .expect("TODO");
+
+        // XXX TODO: Awkward borrowing. Review.
+        /*
+        let label = label.into_owned();
+
+        let sub_asset: &'a ErasedLoadedAsset = asset.get_labeled(label).expect("TODO");
+
+        sub_asset
+        */
+
+        asset
+            .get_labeled(label.into_owned())
+            .expect("TODO")
+            .get::<T>()
+            .expect("TODO")
+    }
+
+    pub fn from_gltf(asset: &ErasedLoadedAsset, asset_server: &AssetServer) -> AcmeScene {
+        let mut entities = Vec::<AcmeEntity>::new();
+
+        let gltf = asset.get::<Gltf>().expect("TODO");
+
+        let mut stack = gltf
+            .nodes
+            .iter()
+            .map(|node_handle| {
+                let node = get_sub_asset(asset, node_handle, asset_server);
+
+                (node, node.transform)
+            })
+            .collect::<Vec<_>>();
+
+        loop {
+            let Some((node, transform)) = stack.pop() else {
+                break;
+            };
+
+            if let Some(mesh) = node
+                .mesh
+                .as_ref()
+                .map(|mesh_handle| get_sub_asset(asset, mesh_handle, asset_server))
+            {
+                for primitive in mesh.primitives.iter() {
+                    let mesh = Some(AcmeMesh {
+                        asset: AcmeHandle::new(asset_server, &primitive.mesh.clone().untyped()),
+                    });
+
+                    let standard_material = get_sub_asset(
+                        asset,
+                        primitive.material.as_ref().expect("TODO"),
+                        asset_server,
+                    );
+
+                    let material = Some(AcmeMaterial {
+                        base_color_texture: standard_material
+                            .base_color_texture
+                            .clone()
+                            .map(|p| AcmeHandle::new(asset_server, &p.untyped())),
+                    });
+
+                    entities.push(AcmeEntity {
+                        transform,
+                        mesh,
+                        material,
+                    });
+                }
+            }
+
+            for child in node
+                .children
+                .iter()
+                .map(|child_handle| get_sub_asset(asset, child_handle, asset_server))
+            {
+                stack.push((child, transform * child.transform));
+            }
+        }
+
+        AcmeScene { entities }
+    }
+
+    pub fn spawn(
+        commands: &mut Commands,
+        scene: &AcmeScene,
+        asset_server: &AssetServer,
+        material_assets: &mut Assets<StandardMaterial>,
+    ) {
+        for scene_entity in &scene.entities {
+            let mut world_entity = commands.spawn(scene_entity.transform);
+
+            if let Some(material) = &scene_entity.material {
+                let standard_material = StandardMaterial {
+                    base_color_texture: material
+                        .base_color_texture
+                        .as_ref()
+                        .map(|p| asset_server.load::<Image>(p)),
+                    ..Default::default()
+                };
+
+                world_entity.insert(MeshMaterial3d(material_assets.add(standard_material)));
+            }
+
+            if let Some(mesh) = &scene_entity.mesh {
+                world_entity.insert(Mesh3d(asset_server.load::<Mesh>(&mesh.asset)));
+            }
+        }
+    }
+}
+
+struct SceneFromGltfAction;
+
+#[derive(Serialize, Deserialize, Default)]
+struct SceneFromGltfActionParams {
+    path: String,
+}
+
+impl BassetAction for SceneFromGltfAction {
+    type Params = SceneFromGltfActionParams;
+    type Error = BevyError; // XXX TODO: What should this be?
+
+    // TODO: Review lifetimes.
+    async fn apply<'a>(
+        &self,
+        context: &'a mut BassetActionContext<'_>,
+        params: &Self::Params,
+    ) -> Result<ErasedLoadedAsset, Self::Error> {
+        let gltf = load_direct(
+            context.asset_server,
+            &AssetPath::parse(&params.path).into_owned(),
+            &None,
+        )
+        .await?
+        .0;
+
+        dbg!("start");
+
+        let scene = acme::from_gltf(&gltf, context.asset_server);
+
+        dbg!(ron::ser::to_string(&scene)?);
+
+        Ok(LoadedAsset::new_with_dependencies(scene).into())
+    }
+}
+
 #[derive(Resource)]
 #[expect(dead_code, reason = "Needed to keep handles live")]
 struct Handles(Vec<UntypedHandle>);
 
-fn setup(mut commands: Commands, assets: Res<AssetServer>) {
+fn setup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     commands.insert_resource(Handles(vec![
-        assets.load::<StringAsset>("hello.string").untyped(),
-        assets.load::<StringAsset>("world.string").untyped(),
-        assets.load::<IntAsset>("1234.int").untyped(),
-        assets.load::<IntAsset>("int.basset").untyped(),
-        assets.load::<StringAsset>("string.basset").untyped(),
-        assets
+        asset_server.load::<StringAsset>("hello.string").untyped(),
+        asset_server.load::<StringAsset>("world.string").untyped(),
+        asset_server.load::<IntAsset>("1234.int").untyped(),
+        asset_server.load::<IntAsset>("int.basset").untyped(),
+        asset_server.load::<StringAsset>("string.basset").untyped(),
+        asset_server
             .load::<StringAsset>("string_loader_uppercase.basset")
             .untyped(),
-        assets.load::<StringAsset>("join_strings.basset").untyped(),
+        asset_server
+            .load::<StringAsset>("join_strings.basset")
+            .untyped(),
+        asset_server
+            .load::<acme::AcmeScene>("scene_from_gltf.basset")
+            .untyped(),
     ]));
+
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(200.0, 200.0, 200.0).looking_at(Vec3::new(0.0, 75.0, 0.0), Vec3::Y),
+    ));
+
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(500000.0, 500000.0))),
+        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+    ));
+
+    commands.spawn((
+        Transform::from_xyz(100.0, 200.0, 200.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
+        DirectionalLight {
+            shadows_enabled: true,
+            ..default()
+        },
+        CascadeShadowConfigBuilder {
+            num_cascades: 1,
+            maximum_distance: 600.0,
+            ..default()
+        }
+        .build(),
+    ));
 }
 
 fn print_events<T: Asset + std::fmt::Debug>(
@@ -530,9 +782,28 @@ fn print(
     asset_server: Res<AssetServer>,
     string_assets: Res<Assets<StringAsset>>,
     int_assets: Res<Assets<IntAsset>>,
+    scene_assets: Res<Assets<acme::AcmeScene>>,
     mut string_events: MessageReader<AssetEvent<StringAsset>>,
     mut int_events: MessageReader<AssetEvent<IntAsset>>,
+    mut scene_events: MessageReader<AssetEvent<acme::AcmeScene>>,
 ) {
     print_events(&asset_server, &string_assets, &mut string_events);
     print_events(&asset_server, &int_assets, &mut int_events);
+    print_events(&asset_server, &scene_assets, &mut scene_events);
+}
+
+fn spawn(
+    mut commands: Commands,
+    scene_assets: Res<Assets<acme::AcmeScene>>,
+    mut scene_events: MessageReader<AssetEvent<acme::AcmeScene>>,
+    asset_server: Res<AssetServer>,
+    mut material_assets: ResMut<Assets<StandardMaterial>>,
+) {
+    for event in scene_events.read() {
+        if let AssetEvent::Added { id } = *event {
+            let scene = scene_assets.get(id).unwrap();
+
+            acme::spawn(&mut commands, scene, &asset_server, &mut material_assets);
+        }
+    }
 }
