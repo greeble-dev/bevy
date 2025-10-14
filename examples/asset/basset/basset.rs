@@ -455,10 +455,9 @@ impl BassetAction for JoinStringsAction {
     type Params = JoinStringsActionParams;
     type Error = BevyError; // XXX TODO: What should this be?
 
-    // TODO: Review lifetimes.
-    async fn apply<'a>(
+    async fn apply(
         &self,
-        context: &'a mut BassetActionContext<'_>,
+        context: &mut BassetActionContext<'_>,
         params: &Self::Params,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
         let mut strings = Vec::new();
@@ -488,9 +487,9 @@ impl BassetAction for UppercaseStringAction {
     type Error = BevyError; // XXX TODO: What should this be?
 
     // TODO: Review lifetimes.
-    async fn apply<'a>(
+    async fn apply(
         &self,
-        context: &'a mut BassetActionContext<'_>,
+        context: &mut BassetActionContext<'_>,
         params: &Self::Params,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
         let string = StringAsset(
@@ -687,9 +686,9 @@ impl BassetAction for SceneFromGltfAction {
     type Error = BevyError; // XXX TODO: What should this be?
 
     // TODO: Review lifetimes.
-    async fn apply<'a>(
+    async fn apply(
         &self,
-        context: &'a mut BassetActionContext<'_>,
+        context: &mut BassetActionContext<'_>,
         params: &Self::Params,
     ) -> Result<ErasedLoadedAsset, Self::Error> {
         let gltf = load_direct(
