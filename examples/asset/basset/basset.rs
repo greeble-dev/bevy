@@ -77,7 +77,7 @@ async fn load_direct(
     settings: &Option<Box<ron::value::RawValue>>,
 ) -> Result<(ErasedLoadedAsset, AssetHash), BevyError> {
     let (mut meta, loader, mut reader) = asset_server
-        .get_meta_loader_and_reader(&path, None)
+        .get_meta_loader_and_reader(path, None)
         .await
         .map_err(Into::<BevyError>::into)?;
 
@@ -90,7 +90,7 @@ async fn load_direct(
 
     let asset = asset_server
         .load_with_meta_loader_and_reader(
-            &path,
+            path,
             &*meta,
             &*loader,
             &mut *reader,
@@ -247,7 +247,7 @@ trait ErasedBassetAction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
         context: &'a mut BassetActionContext,
-        params: &'a Box<ron::value::RawValue>,
+        params: &'a ron::value::RawValue,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 }
 
@@ -258,7 +258,7 @@ where
     fn apply<'a>(
         &'a self,
         context: &'a mut BassetActionContext,
-        params: &'a Box<ron::value::RawValue>,
+        params: &'a ron::value::RawValue,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         // TODO: Check that we're correctly using BoxedFuture and Box::pin.
         Box::pin(async move {
@@ -464,7 +464,7 @@ impl BassetAction for JoinStringsAction {
         let mut strings = Vec::new();
 
         for action in &params.strings {
-            strings.push(context.apply::<StringAsset>(&action).await?.0);
+            strings.push(context.apply::<StringAsset>(action).await?.0);
         }
 
         let joined = strings
