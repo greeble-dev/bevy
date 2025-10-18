@@ -1,18 +1,54 @@
-use crate::io::AssetSourceId;
+use crate::{
+    io::AssetSourceId,
+    meta::{get_asset_hash, AssetHash},
+};
 use alloc::{
     borrow::ToOwned,
+    boxed::Box,
     string::{String, ToString},
+    sync::Arc,
 };
 use atomicow::CowArc;
 use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
 use core::{
     fmt::{Debug, Display},
-    hash::Hash,
+    hash::{Hash, Hasher},
     ops::Deref,
 };
 use serde::{de::Visitor, Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+pub struct InlineBasset {
+    value: Box<str>,
+    hash: AssetHash,
+}
+
+impl InlineBasset {
+    pub fn new(value: Box<str>) -> Self {
+        let hash = get_asset_hash(&[], value.as_bytes());
+
+        Self { value, hash }
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+}
+
+impl Hash for InlineBasset {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
+    }
+}
+
+impl PartialEq for InlineBasset {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+
+impl Eq for InlineBasset {}
 
 /// Represents a path to an asset in a "virtual filesystem".
 ///
@@ -58,6 +94,8 @@ pub struct AssetPath<'a> {
     source: AssetSourceId<'a>,
     path: CowArc<'a, Path>,
     label: Option<CowArc<'a, str>>,
+    // XXX TODO: Document.
+    inline_basset: Option<Arc<InlineBasset>>,
 }
 
 impl<'a> Debug for AssetPath<'a> {
@@ -131,6 +169,7 @@ impl<'a> AssetPath<'a> {
             },
             path: CowArc::Borrowed(path),
             label: label.map(CowArc::Borrowed),
+            inline_basset: None,
         })
     }
 
@@ -230,6 +269,7 @@ impl<'a> AssetPath<'a> {
             path: CowArc::Owned(path_buf.into()),
             source: AssetSourceId::Default,
             label: None,
+            inline_basset: None,
         }
     }
 
@@ -240,6 +280,7 @@ impl<'a> AssetPath<'a> {
             path: CowArc::Borrowed(path),
             source: AssetSourceId::Default,
             label: None,
+            inline_basset: None,
         }
     }
 
@@ -268,6 +309,10 @@ impl<'a> AssetPath<'a> {
         self.path.deref()
     }
 
+    pub fn inline_basset(&self) -> Option<&Arc<InlineBasset>> {
+        self.inline_basset.as_ref()
+    }
+
     /// Gets the path to the asset in the "virtual filesystem" without a label (if a label is currently set).
     #[inline]
     pub fn without_label(&self) -> AssetPath<'_> {
@@ -275,6 +320,7 @@ impl<'a> AssetPath<'a> {
             source: self.source.clone(),
             path: self.path.clone(),
             label: None,
+            inline_basset: self.inline_basset.clone(),
         }
     }
 
@@ -298,6 +344,7 @@ impl<'a> AssetPath<'a> {
             source: self.source,
             path: self.path,
             label: Some(label.into()),
+            inline_basset: self.inline_basset,
         }
     }
 
@@ -309,6 +356,7 @@ impl<'a> AssetPath<'a> {
             source: source.into(),
             path: self.path,
             label: self.label,
+            inline_basset: self.inline_basset,
         }
     }
 
@@ -323,6 +371,7 @@ impl<'a> AssetPath<'a> {
             source: self.source.clone(),
             label: None,
             path,
+            inline_basset: None,
         })
     }
 
@@ -336,6 +385,7 @@ impl<'a> AssetPath<'a> {
             source: self.source.into_owned(),
             path: self.path.into_owned(),
             label: self.label.map(CowArc::into_owned),
+            inline_basset: self.inline_basset.clone(),
         }
     }
 
@@ -457,6 +507,7 @@ impl<'a> AssetPath<'a> {
                 },
                 path: CowArc::Owned(result_path.into()),
                 label: rlabel.map(|l| CowArc::Owned(l.into())),
+                inline_basset: None,
             })
         }
     }
@@ -533,6 +584,22 @@ impl<'a> AssetPath<'a> {
 
         false
     }
+
+    pub fn from_basset(basset: &str) -> Self {
+        let basset = InlineBasset::new(basset.into());
+
+        // Set the path to the basset's hash in hex. This is a hack to make sure
+        // that anything using the path as an identifier still kinda works. The
+        // long-term solution is unclear.
+        let path = String::from_iter(basset.hash.iter().map(|b| alloc::format!("{:x}", b)));
+
+        Self {
+            source: AssetSourceId::Default,
+            path: CowArc::Owned(Path::new(&path).into()),
+            label: None,
+            inline_basset: Some(Arc::new(basset)),
+        }
+    }
 }
 
 // This is only implemented for static lifetimes to ensure `Path::clone` does not allocate
@@ -546,6 +613,7 @@ impl From<&'static str> for AssetPath<'static> {
             source: source.into(),
             path: CowArc::Static(path),
             label: label.map(CowArc::Static),
+            inline_basset: None,
         }
     }
 }
@@ -571,6 +639,7 @@ impl From<&'static Path> for AssetPath<'static> {
             source: AssetSourceId::Default,
             path: CowArc::Static(path),
             label: None,
+            inline_basset: None,
         }
     }
 }
@@ -582,6 +651,7 @@ impl From<PathBuf> for AssetPath<'static> {
             source: AssetSourceId::Default,
             path: path.into(),
             label: None,
+            inline_basset: None,
         }
     }
 }

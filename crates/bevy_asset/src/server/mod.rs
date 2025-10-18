@@ -1368,6 +1368,22 @@ impl AssetServer {
         ),
         AssetLoadError,
     > {
+        // If there's an inline basset then return the basset loader and a reader
+        // that produces the inline basset's string.
+        if let Some(basset) = asset_path.inline_basset().as_ref() {
+            let loader = self
+                .get_asset_loader_with_type_name("basset::BassetLoader")
+                .await?;
+
+            let meta = loader.default_meta();
+
+            // TODO: Avoid the copy? AssetPath lifetime is the same as the reader,
+            // so could make a slice reader.
+            let reader = Box::new(crate::io::VecReader::new(basset.value().into()));
+
+            return Ok((meta, loader, reader));
+        }
+
         let source = self.get_source(asset_path.source())?;
         // NOTE: We grab the asset byte reader first to ensure this is transactional for AssetReaders like ProcessorGatedReader
         // The asset byte reader will "lock" the processed asset, preventing writes for the duration of the lock.

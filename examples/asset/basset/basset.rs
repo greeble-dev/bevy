@@ -702,6 +702,10 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let inline_path = AssetPath::from_basset(
+        "(root: (name: \"basset::LoadPathAction\", params: (path: \"1234.int\")))",
+    );
+
     commands.insert_resource(Handles(vec![
         asset_server.load::<StringAsset>("hello.string").untyped(),
         asset_server.load::<StringAsset>("world.string").untyped(),
@@ -717,6 +721,7 @@ fn setup(
         asset_server
             .load::<acme::AcmeScene>("scene_from_gltf.basset")
             .untyped(),
+        asset_server.load::<IntAsset>(inline_path).untyped(),
     ]));
 
     commands.spawn((
