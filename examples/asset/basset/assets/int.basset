@@ -1,1 +1,1 @@
-(root: (name: "basset::LoadPathAction", params: (path: "1234.int")))
+(root: (name: "basset::action::LoadPath", params: (path: "1234.int")))

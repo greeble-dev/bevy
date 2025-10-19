@@ -21,17 +21,17 @@ struct BassetPlugin;
 
 impl Plugin for BassetPlugin {
     fn build(&self, app: &mut App) {
-        app.init_asset::<StringAsset>()
-            .init_asset::<IntAsset>()
+        app.init_asset::<demo::StringAsset>()
+            .init_asset::<demo::IntAsset>()
             .init_asset::<acme::AcmeScene>()
-            .register_asset_loader(StringAssetLoader)
-            .register_asset_loader(IntAssetLoader)
+            .register_asset_loader(demo::StringAssetLoader)
+            .register_asset_loader(demo::IntAssetLoader)
             .register_erased_asset_loader(Box::new(
                 BassetLoader::default()
-                    .with_action(LoadPathAction)
-                    .with_action(JoinStringsAction)
-                    .with_action(UppercaseStringAction)
-                    .with_action(SceneFromGltfAction),
+                    .with_action(action::LoadPath)
+                    .with_action(action::JoinStrings)
+                    .with_action(action::UppercaseString)
+                    .with_action(action::SceneFromGltf),
             ));
     }
 }
@@ -265,10 +265,11 @@ fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::val
         return;
     };
 
-    if let Some(settings) = settings.downcast_mut::<StringAssetSettings>() {
+    // XXX TODO: Need some way to apply a dyn Settings without knowing the type.
+    if let Some(settings) = settings.downcast_mut::<demo::StringAssetSettings>() {
         *settings = ron
             .clone()
-            .into_rust::<StringAssetSettings>()
+            .into_rust::<demo::StringAssetSettings>()
             .expect("TODO");
     }
 }
@@ -308,192 +309,202 @@ async fn load_direct(
     Ok((asset, hash))
 }
 
-struct LoadPathAction;
+mod action {
+    use super::*;
 
-#[derive(Serialize, Deserialize, Default)]
-struct LoadPathActionParams {
-    path: String, // TODO: Should be AssetPath. Avoiding for now to simplify lifetimes.
-    #[serde(default)]
-    loader_settings: Option<Box<ron::value::RawValue>>,
-    // TODO
-    //loader_name: Option<String>,
-}
+    pub struct LoadPath;
 
-impl BassetAction for LoadPathAction {
-    type Params = LoadPathActionParams;
-    type Error = BevyError;
+    #[derive(Serialize, Deserialize, Default)]
+    pub struct LoadPathParams {
+        path: String, // TODO: Should be AssetPath. Avoiding for now to simplify lifetimes.
+        #[serde(default)]
+        loader_settings: Option<Box<ron::value::RawValue>>,
+        // TODO
+        //loader_name: Option<String>,
+    }
 
-    async fn apply(
-        &self,
-        context: &mut BassetActionContext<'_>,
-        params: &Self::Params,
-    ) -> Result<ErasedLoadedAsset, Self::Error> {
-        let path = AssetPath::parse(&params.path).into_owned();
+    impl BassetAction for LoadPath {
+        type Params = LoadPathParams;
+        type Error = BevyError;
 
-        context.erased_load(path, &params.loader_settings).await
+        async fn apply(
+            &self,
+            context: &mut BassetActionContext<'_>,
+            params: &Self::Params,
+        ) -> Result<ErasedLoadedAsset, Self::Error> {
+            let path = AssetPath::parse(&params.path).into_owned();
+
+            context.erased_load(path, &params.loader_settings).await
+        }
+    }
+
+    pub struct JoinStrings;
+
+    #[derive(Serialize, Deserialize, Default)]
+    pub struct JoinStringsParams {
+        separator: String,
+        strings: Vec<SerializableAction>,
+    }
+
+    impl BassetAction for JoinStrings {
+        type Params = JoinStringsParams;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            context: &mut BassetActionContext<'_>,
+            params: &Self::Params,
+        ) -> Result<ErasedLoadedAsset, Self::Error> {
+            let mut strings = Vec::new();
+
+            for action in &params.strings {
+                strings.push(context.apply::<demo::StringAsset>(action).await?.0);
+            }
+
+            let joined = strings
+                .into_iter()
+                .reduce(|l, r| l + &params.separator + &r)
+                .unwrap_or("".to_owned());
+
+            Ok(LoadedAsset::new_with_dependencies(demo::StringAsset(joined)).into())
+        }
+    }
+
+    pub struct UppercaseString;
+
+    #[derive(Serialize, Deserialize, Default)]
+    pub struct UppercaseStringParams {
+        string: SerializableAction,
+    }
+
+    impl BassetAction for UppercaseString {
+        type Params = UppercaseStringParams;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            context: &mut BassetActionContext<'_>,
+            params: &Self::Params,
+        ) -> Result<ErasedLoadedAsset, Self::Error> {
+            let string = demo::StringAsset(
+                context
+                    .apply::<demo::StringAsset>(&params.string)
+                    .await?
+                    .0
+                    .to_uppercase(),
+            );
+
+            Ok(LoadedAsset::new_with_dependencies(string).into())
+        }
+    }
+
+    pub struct SceneFromGltf;
+
+    #[derive(Serialize, Deserialize, Default)]
+    pub struct SceneFromGltfParams {
+        path: String,
+    }
+
+    impl BassetAction for SceneFromGltf {
+        type Params = SceneFromGltfParams;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            context: &mut BassetActionContext<'_>,
+            params: &Self::Params,
+        ) -> Result<ErasedLoadedAsset, Self::Error> {
+            let gltf = load_direct(
+                context.asset_server,
+                &AssetPath::parse(&params.path).into_owned(),
+                &None,
+            )
+            .await?
+            .0;
+
+            let scene = acme::from_gltf(&gltf, context.asset_server);
+
+            // XXX TODO: What about dependencies?
+
+            Ok(LoadedAsset::new_with_dependencies(scene).into())
+        }
     }
 }
 
-struct JoinStringsAction;
+mod demo {
+    use super::*;
 
-#[derive(Serialize, Deserialize, Default)]
-struct JoinStringsActionParams {
-    separator: String,
-    strings: Vec<SerializableAction>,
-}
+    #[derive(Asset, TypePath, Debug)]
+    pub struct StringAsset(pub String);
 
-impl BassetAction for JoinStringsAction {
-    type Params = JoinStringsActionParams;
-    type Error = BevyError;
+    // TODO: Delete? Originally used to confirm that loader settings work. Probably
+    // redundant now?
+    #[derive(Serialize, Deserialize, Default)]
+    pub struct StringAssetSettings {
+        uppercase: bool,
+    }
 
-    async fn apply(
-        &self,
-        context: &mut BassetActionContext<'_>,
-        params: &Self::Params,
-    ) -> Result<ErasedLoadedAsset, Self::Error> {
-        let mut strings = Vec::new();
+    #[derive(Default)]
+    pub struct StringAssetLoader;
 
-        for action in &params.strings {
-            strings.push(context.apply::<StringAsset>(action).await?.0);
+    impl AssetLoader for StringAssetLoader {
+        type Asset = StringAsset;
+        type Settings = StringAssetSettings;
+        type Error = std::io::Error;
+
+        async fn load(
+            &self,
+            reader: &mut dyn Reader,
+            settings: &Self::Settings,
+            _load_context: &mut LoadContext<'_>,
+        ) -> Result<StringAsset, Self::Error> {
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).await?;
+
+            // TODO: Error handling.
+            let mut string = String::from_utf8(bytes).unwrap();
+
+            if settings.uppercase {
+                string = string.to_uppercase();
+            }
+
+            Ok(StringAsset(string))
         }
 
-        let joined = strings
-            .into_iter()
-            .reduce(|l, r| l + &params.separator + &r)
-            .unwrap_or("".to_owned());
-
-        Ok(LoadedAsset::new_with_dependencies(StringAsset(joined)).into())
+        fn extensions(&self) -> &[&str] {
+            &["string"]
+        }
     }
-}
 
-struct UppercaseStringAction;
+    #[derive(Asset, TypePath, Debug)]
+    #[expect(dead_code, reason = "TODO")]
+    pub struct IntAsset(pub i64);
 
-#[derive(Serialize, Deserialize, Default)]
-struct UppercaseStringActionParams {
-    string: SerializableAction,
-}
+    #[derive(Default)]
+    pub struct IntAssetLoader;
 
-impl BassetAction for UppercaseStringAction {
-    type Params = UppercaseStringActionParams;
-    type Error = BevyError;
+    impl AssetLoader for IntAssetLoader {
+        type Asset = IntAsset;
+        type Settings = ();
+        type Error = std::io::Error;
 
-    async fn apply(
-        &self,
-        context: &mut BassetActionContext<'_>,
-        params: &Self::Params,
-    ) -> Result<ErasedLoadedAsset, Self::Error> {
-        let string = StringAsset(
-            context
-                .apply::<StringAsset>(&params.string)
-                .await?
-                .0
-                .to_uppercase(),
-        );
-
-        Ok(LoadedAsset::new_with_dependencies(string).into())
-    }
-}
-
-struct SceneFromGltfAction;
-
-#[derive(Serialize, Deserialize, Default)]
-struct SceneFromGltfActionParams {
-    path: String,
-}
-
-impl BassetAction for SceneFromGltfAction {
-    type Params = SceneFromGltfActionParams;
-    type Error = BevyError;
-
-    async fn apply(
-        &self,
-        context: &mut BassetActionContext<'_>,
-        params: &Self::Params,
-    ) -> Result<ErasedLoadedAsset, Self::Error> {
-        let gltf = load_direct(
-            context.asset_server,
-            &AssetPath::parse(&params.path).into_owned(),
-            &None,
-        )
-        .await?
-        .0;
-
-        let scene = acme::from_gltf(&gltf, context.asset_server);
-
-        // XXX TODO: What about dependencies?
-
-        Ok(LoadedAsset::new_with_dependencies(scene).into())
-    }
-}
-
-#[derive(Asset, TypePath, Debug)]
-struct StringAsset(String);
-
-#[derive(Serialize, Deserialize, Default)]
-struct StringAssetSettings {
-    uppercase: bool,
-}
-
-#[derive(Default)]
-struct StringAssetLoader;
-
-impl AssetLoader for StringAssetLoader {
-    type Asset = StringAsset;
-    type Settings = StringAssetSettings;
-    type Error = std::io::Error;
-
-    async fn load(
-        &self,
-        reader: &mut dyn Reader,
-        settings: &Self::Settings,
-        _load_context: &mut LoadContext<'_>,
-    ) -> Result<StringAsset, Self::Error> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).await?;
-
-        // TODO: Error handling.
-        let mut string = String::from_utf8(bytes).unwrap();
-
-        if settings.uppercase {
-            string = string.to_uppercase();
+        async fn load(
+            &self,
+            reader: &mut dyn Reader,
+            _: &Self::Settings,
+            _load_context: &mut LoadContext<'_>,
+        ) -> Result<IntAsset, Self::Error> {
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).await?;
+            // TODO: Error handling.
+            Ok(IntAsset(
+                String::from_utf8(bytes).unwrap().parse::<i64>().unwrap(),
+            ))
         }
 
-        Ok(StringAsset(string))
-    }
-
-    fn extensions(&self) -> &[&str] {
-        &["string"]
-    }
-}
-
-#[derive(Asset, TypePath, Debug)]
-#[expect(dead_code, reason = "TODO")]
-struct IntAsset(i64);
-
-#[derive(Default)]
-struct IntAssetLoader;
-
-impl AssetLoader for IntAssetLoader {
-    type Asset = IntAsset;
-    type Settings = ();
-    type Error = std::io::Error;
-
-    async fn load(
-        &self,
-        reader: &mut dyn Reader,
-        _: &Self::Settings,
-        _load_context: &mut LoadContext<'_>,
-    ) -> Result<IntAsset, Self::Error> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).await?;
-        // TODO: Error handling.
-        Ok(IntAsset(
-            String::from_utf8(bytes).unwrap().parse::<i64>().unwrap(),
-        ))
-    }
-
-    fn extensions(&self) -> &[&str] {
-        &["int"]
+        fn extensions(&self) -> &[&str] {
+            &["int"]
+        }
     }
 }
 
@@ -688,25 +699,31 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let inline_path = AssetPath::from_basset(
-        "(root: (name: \"basset::LoadPathAction\", params: (path: \"1234.int\")))",
+        "(root: (name: \"basset::action::LoadPath\", params: (path: \"1234.int\")))",
     );
 
     commands.insert_resource(Handles(vec![
-        asset_server.load::<StringAsset>("hello.string").untyped(),
-        asset_server.load::<StringAsset>("world.string").untyped(),
-        asset_server.load::<IntAsset>("1234.int").untyped(),
-        asset_server.load::<IntAsset>("int.basset").untyped(),
-        asset_server.load::<StringAsset>("string.basset").untyped(),
         asset_server
-            .load::<StringAsset>("string_loader_uppercase.basset")
+            .load::<demo::StringAsset>("hello.string")
             .untyped(),
         asset_server
-            .load::<StringAsset>("join_strings.basset")
+            .load::<demo::StringAsset>("world.string")
+            .untyped(),
+        asset_server.load::<demo::IntAsset>("1234.int").untyped(),
+        asset_server.load::<demo::IntAsset>("int.basset").untyped(),
+        asset_server
+            .load::<demo::StringAsset>("string.basset")
+            .untyped(),
+        asset_server
+            .load::<demo::StringAsset>("string_loader_uppercase.basset")
+            .untyped(),
+        asset_server
+            .load::<demo::StringAsset>("join_strings.basset")
             .untyped(),
         asset_server
             .load::<acme::AcmeScene>("scene_from_gltf.basset")
             .untyped(),
-        asset_server.load::<IntAsset>(inline_path).untyped(),
+        asset_server.load::<demo::IntAsset>(inline_path).untyped(),
     ]));
 
     commands.spawn((
@@ -752,11 +769,11 @@ fn print_events<T: Asset + std::fmt::Debug>(
 
 fn print(
     asset_server: Res<AssetServer>,
-    string_assets: Res<Assets<StringAsset>>,
-    int_assets: Res<Assets<IntAsset>>,
+    string_assets: Res<Assets<demo::StringAsset>>,
+    int_assets: Res<Assets<demo::IntAsset>>,
     scene_assets: Res<Assets<acme::AcmeScene>>,
-    mut string_events: MessageReader<AssetEvent<StringAsset>>,
-    mut int_events: MessageReader<AssetEvent<IntAsset>>,
+    mut string_events: MessageReader<AssetEvent<demo::StringAsset>>,
+    mut int_events: MessageReader<AssetEvent<demo::IntAsset>>,
     mut scene_events: MessageReader<AssetEvent<acme::AcmeScene>>,
 ) {
     print_events(&asset_server, &string_assets, &mut string_events);

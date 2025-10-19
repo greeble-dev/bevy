@@ -1,1 +1,1 @@
-(root: (name: "basset::SceneFromGltfAction", params: (path: "Duck.glb")))
+(root: (name: "basset::action::SceneFromGltf", params: (path: "Duck.glb")))

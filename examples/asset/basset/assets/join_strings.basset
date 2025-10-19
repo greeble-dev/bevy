@@ -1,20 +1,20 @@
 (
 	root: (
-		name: "basset::JoinStringsAction",
+		name: "basset::action::JoinStrings",
 		params: (
 			separator: ", ",
 			strings: [
 				(
-					name: "basset::UppercaseStringAction",
+					name: "basset::action::UppercaseString",
 					params: (
 						string: (
-							name: "basset::LoadPathAction",
+							name: "basset::action::LoadPath",
 							params: (path: "hello.string"),
 						),
 					)
 				),
 				(
-					name: "basset::LoadPathAction",
+					name: "basset::action::LoadPath",
 					params: (path: "world.string"),
 				),
 			],
