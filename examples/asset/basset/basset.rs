@@ -20,20 +20,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins.set(AssetPlugin {
-                file_path: "examples/asset/basset/assets".to_string(),
-                ..default()
-            }),
-            BassetPlugin,
-        ))
-        .add_systems(Startup, setup)
-        .add_systems(Update, (print, spawn))
-        .run();
-}
-
 struct BassetPlugin;
 
 impl Plugin for BassetPlugin {
@@ -50,148 +36,6 @@ impl Plugin for BassetPlugin {
                     .with_action(UppercaseStringAction)
                     .with_action(SceneFromGltfAction),
             ));
-    }
-}
-
-fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::value::RawValue>>) {
-    let Some(settings) = settings else {
-        return;
-    };
-
-    let Some(ron) = ron else {
-        return;
-    };
-
-    if let Some(settings) = settings.downcast_mut::<StringAssetSettings>() {
-        *settings = ron
-            .clone()
-            .into_rust::<StringAssetSettings>()
-            .expect("TODO");
-    }
-}
-
-async fn load_direct(
-    asset_server: &AssetServer,
-    path: &AssetPath<'static>,
-    settings: &Option<Box<ron::value::RawValue>>,
-) -> Result<(ErasedLoadedAsset, AssetHash), BevyError> {
-    let (mut meta, loader, mut reader) = asset_server
-        .get_meta_loader_and_reader(path, None)
-        .await
-        .map_err(Into::<BevyError>::into)?;
-
-    apply_settings(meta.loader_settings_mut(), settings);
-
-    // Roughly the same as LoadContext::load_direct_internal.
-
-    let load_dependencies = false;
-    let populate_hashes = false;
-
-    let asset = asset_server
-        .load_with_meta_loader_and_reader(
-            path,
-            &*meta,
-            &*loader,
-            &mut *reader,
-            load_dependencies,
-            populate_hashes,
-        )
-        .await
-        .map_err(Into::<BevyError>::into)?;
-
-    let info = meta.processed_info().as_ref();
-    let hash = info.map(|i| i.full_hash).unwrap_or_default();
-
-    Ok((asset, hash))
-}
-
-#[derive(Asset, TypePath, Debug)]
-struct StringAsset(String);
-
-#[derive(Serialize, Deserialize, Default)]
-struct StringAssetSettings {
-    uppercase: bool,
-}
-
-#[derive(Default)]
-struct StringAssetLoader;
-
-impl AssetLoader for StringAssetLoader {
-    type Asset = StringAsset;
-    type Settings = StringAssetSettings;
-    type Error = std::io::Error;
-
-    async fn load(
-        &self,
-        reader: &mut dyn Reader,
-        settings: &Self::Settings,
-        _load_context: &mut LoadContext<'_>,
-    ) -> Result<StringAsset, Self::Error> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).await?;
-
-        // TODO: Error handling.
-        let mut string = String::from_utf8(bytes).unwrap();
-
-        if settings.uppercase {
-            string = string.to_uppercase();
-        }
-
-        Ok(StringAsset(string))
-    }
-
-    fn extensions(&self) -> &[&str] {
-        &["string"]
-    }
-}
-
-#[derive(Asset, TypePath, Debug)]
-#[expect(dead_code, reason = "TODO")]
-struct IntAsset(i64);
-
-#[derive(Default)]
-struct IntAssetLoader;
-
-impl AssetLoader for IntAssetLoader {
-    type Asset = IntAsset;
-    type Settings = ();
-    type Error = std::io::Error;
-
-    async fn load(
-        &self,
-        reader: &mut dyn Reader,
-        _: &Self::Settings,
-        _load_context: &mut LoadContext<'_>,
-    ) -> Result<IntAsset, Self::Error> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).await?;
-        // TODO: Error handling.
-        Ok(IntAsset(
-            String::from_utf8(bytes).unwrap().parse::<i64>().unwrap(),
-        ))
-    }
-
-    fn extensions(&self) -> &[&str] {
-        &["int"]
-    }
-}
-
-// TODO: Review this. Awkward hack so that `BassetLoader::default_meta` and
-// `BassetLoader::deserialize_meta` can return a meta even if it's wrong.
-struct FakeAssetLoader;
-
-impl AssetLoader for FakeAssetLoader {
-    type Asset = ();
-    type Settings = ();
-    type Error = std::io::Error;
-
-    async fn load(
-        &self,
-        _reader: &mut dyn Reader,
-        _settings: &Self::Settings,
-        _load_context: &mut LoadContext<'_>,
-    ) -> Result<Self::Asset, Self::Error> {
-        Ok(())
     }
 }
 
@@ -413,6 +257,58 @@ impl ErasedAssetLoader for BassetLoader {
     }
 }
 
+fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::value::RawValue>>) {
+    let Some(settings) = settings else {
+        return;
+    };
+
+    let Some(ron) = ron else {
+        return;
+    };
+
+    if let Some(settings) = settings.downcast_mut::<StringAssetSettings>() {
+        *settings = ron
+            .clone()
+            .into_rust::<StringAssetSettings>()
+            .expect("TODO");
+    }
+}
+
+async fn load_direct(
+    asset_server: &AssetServer,
+    path: &AssetPath<'static>,
+    settings: &Option<Box<ron::value::RawValue>>,
+) -> Result<(ErasedLoadedAsset, AssetHash), BevyError> {
+    let (mut meta, loader, mut reader) = asset_server
+        .get_meta_loader_and_reader(path, None)
+        .await
+        .map_err(Into::<BevyError>::into)?;
+
+    apply_settings(meta.loader_settings_mut(), settings);
+
+    // Roughly the same as LoadContext::load_direct_internal.
+
+    let load_dependencies = false;
+    let populate_hashes = false;
+
+    let asset = asset_server
+        .load_with_meta_loader_and_reader(
+            path,
+            &*meta,
+            &*loader,
+            &mut *reader,
+            load_dependencies,
+            populate_hashes,
+        )
+        .await
+        .map_err(Into::<BevyError>::into)?;
+
+    let info = meta.processed_info().as_ref();
+    let hash = info.map(|i| i.full_hash).unwrap_or_default();
+
+    Ok((asset, hash))
+}
+
 struct LoadPathAction;
 
 #[derive(Serialize, Deserialize, Default)]
@@ -496,6 +392,128 @@ impl BassetAction for UppercaseStringAction {
         );
 
         Ok(LoadedAsset::new_with_dependencies(string).into())
+    }
+}
+
+struct SceneFromGltfAction;
+
+#[derive(Serialize, Deserialize, Default)]
+struct SceneFromGltfActionParams {
+    path: String,
+}
+
+impl BassetAction for SceneFromGltfAction {
+    type Params = SceneFromGltfActionParams;
+    type Error = BevyError;
+
+    async fn apply(
+        &self,
+        context: &mut BassetActionContext<'_>,
+        params: &Self::Params,
+    ) -> Result<ErasedLoadedAsset, Self::Error> {
+        let gltf = load_direct(
+            context.asset_server,
+            &AssetPath::parse(&params.path).into_owned(),
+            &None,
+        )
+        .await?
+        .0;
+
+        let scene = acme::from_gltf(&gltf, context.asset_server);
+
+        // XXX TODO: What about dependencies?
+
+        Ok(LoadedAsset::new_with_dependencies(scene).into())
+    }
+}
+
+#[derive(Asset, TypePath, Debug)]
+struct StringAsset(String);
+
+#[derive(Serialize, Deserialize, Default)]
+struct StringAssetSettings {
+    uppercase: bool,
+}
+
+#[derive(Default)]
+struct StringAssetLoader;
+
+impl AssetLoader for StringAssetLoader {
+    type Asset = StringAsset;
+    type Settings = StringAssetSettings;
+    type Error = std::io::Error;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        settings: &Self::Settings,
+        _load_context: &mut LoadContext<'_>,
+    ) -> Result<StringAsset, Self::Error> {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+
+        // TODO: Error handling.
+        let mut string = String::from_utf8(bytes).unwrap();
+
+        if settings.uppercase {
+            string = string.to_uppercase();
+        }
+
+        Ok(StringAsset(string))
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["string"]
+    }
+}
+
+#[derive(Asset, TypePath, Debug)]
+#[expect(dead_code, reason = "TODO")]
+struct IntAsset(i64);
+
+#[derive(Default)]
+struct IntAssetLoader;
+
+impl AssetLoader for IntAssetLoader {
+    type Asset = IntAsset;
+    type Settings = ();
+    type Error = std::io::Error;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _: &Self::Settings,
+        _load_context: &mut LoadContext<'_>,
+    ) -> Result<IntAsset, Self::Error> {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+        // TODO: Error handling.
+        Ok(IntAsset(
+            String::from_utf8(bytes).unwrap().parse::<i64>().unwrap(),
+        ))
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["int"]
+    }
+}
+
+// TODO: Review this. Awkward hack so that `BassetLoader::default_meta` and
+// `BassetLoader::deserialize_meta` can return a meta even if it's wrong.
+struct FakeAssetLoader;
+
+impl AssetLoader for FakeAssetLoader {
+    type Asset = ();
+    type Settings = ();
+    type Error = std::io::Error;
+
+    async fn load(
+        &self,
+        _reader: &mut dyn Reader,
+        _settings: &Self::Settings,
+        _load_context: &mut LoadContext<'_>,
+    ) -> Result<Self::Asset, Self::Error> {
+        Ok(())
     }
 }
 
@@ -660,38 +678,6 @@ mod acme {
     }
 }
 
-struct SceneFromGltfAction;
-
-#[derive(Serialize, Deserialize, Default)]
-struct SceneFromGltfActionParams {
-    path: String,
-}
-
-impl BassetAction for SceneFromGltfAction {
-    type Params = SceneFromGltfActionParams;
-    type Error = BevyError;
-
-    async fn apply(
-        &self,
-        context: &mut BassetActionContext<'_>,
-        params: &Self::Params,
-    ) -> Result<ErasedLoadedAsset, Self::Error> {
-        let gltf = load_direct(
-            context.asset_server,
-            &AssetPath::parse(&params.path).into_owned(),
-            &None,
-        )
-        .await?
-        .0;
-
-        let scene = acme::from_gltf(&gltf, context.asset_server);
-
-        // XXX TODO: What about dependencies?
-
-        Ok(LoadedAsset::new_with_dependencies(scene).into())
-    }
-}
-
 #[derive(Resource)]
 #[expect(dead_code, reason = "Needed to keep handles live")]
 struct Handles(Vec<UntypedHandle>);
@@ -793,4 +779,18 @@ fn spawn(
             acme::spawn(&mut commands, scene, &asset_server, &mut material_assets);
         }
     }
+}
+
+fn main() {
+    App::new()
+        .add_plugins((
+            DefaultPlugins.set(AssetPlugin {
+                file_path: "examples/asset/basset/assets".to_string(),
+                ..default()
+            }),
+            BassetPlugin,
+        ))
+        .add_systems(Startup, setup)
+        .add_systems(Update, (print, spawn))
+        .run();
 }
