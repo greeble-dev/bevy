@@ -31,7 +31,7 @@ impl Plugin for BassetPlugin {
                     .with_action(action::LoadPath)
                     .with_action(action::JoinStrings)
                     .with_action(action::UppercaseString)
-                    .with_action(action::SceneFromGltf),
+                    .with_action(action::AcmeSceneFromGltf),
             ));
     }
 }
@@ -398,15 +398,17 @@ mod action {
         }
     }
 
-    pub struct SceneFromGltf;
+    /// Creates an `AcmeScene` from a `Gltf`. This does not respect the glTF's
+    /// scenes list - it just takes every node.
+    pub struct AcmeSceneFromGltf;
 
     #[derive(Serialize, Deserialize, Default)]
-    pub struct SceneFromGltfParams {
+    pub struct AcmeSceneFromGltfParams {
         path: String,
     }
 
-    impl BassetAction for SceneFromGltf {
-        type Params = SceneFromGltfParams;
+    impl BassetAction for AcmeSceneFromGltf {
+        type Params = AcmeSceneFromGltfParams;
         type Error = BevyError;
 
         async fn apply(
