@@ -115,6 +115,9 @@ where
 #[derive(Serialize, Deserialize, Debug)]
 struct SerializableAction {
     name: String,
+    // TODO: If we split this into SerializableAction and DeserializableAction
+    // then the DeserializableAction can replace the box with a reference. See
+    // serde_json RawValue example.
     params: Box<ron::value::RawValue>,
 }
 
@@ -138,6 +141,9 @@ impl Default for SerializableAction {
         //
         // Maybe we can make a new type that contains an optional RawValue but
         // still serializes as if it's non-optional?
+        //
+        // Also consider splitting off a DeserializableAction (which doesn't
+        // need a boxed ron), and then SerializableAction doesn't need default.
         let empty_struct =
             ron::value::RawValue::from_boxed_ron(Box::<str>::from("()")).expect("TODO");
 
@@ -163,7 +169,8 @@ impl BassetLoader {
     fn with_action<T: BassetAction>(mut self, action: T) -> Self {
         let type_name = core::any::type_name::<T>();
 
-        // XXX TODO: Feels like a roundabout way to get to an Arc<dyn ErasedBassetAction>. Review?
+        // XXX TODO: This conversion from action to Box and later to Arc feels
+        // too boilerplate-y. Simpler way?
         let action: Box<dyn ErasedBassetAction> = Box::new(action);
 
         self.type_name_to_action
