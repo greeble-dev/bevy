@@ -15,10 +15,7 @@ use bevy_asset::{
 };
 use core::result::Result;
 use serde::{Deserialize, Serialize};
-use std::{
-    boxed::Box,
-    sync::{Arc, Mutex},
-};
+use std::{boxed::Box, sync::Mutex};
 
 struct BassetPlugin;
 
@@ -162,19 +159,14 @@ struct Basset {
 
 #[derive(Default)]
 struct BassetLoader {
-    type_name_to_action: HashMap<&'static str, Arc<dyn ErasedBassetAction>>,
+    type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
 }
 
 impl BassetLoader {
     fn with_action<T: BassetAction>(mut self, action: T) -> Self {
         let type_name = core::any::type_name::<T>();
 
-        // XXX TODO: This conversion from action to Box and later to Arc feels
-        // too boilerplate-y. Simpler way?
-        let action: Box<dyn ErasedBassetAction> = Box::new(action);
-
-        self.type_name_to_action
-            .insert(type_name, Arc::from(action));
+        self.type_name_to_action.insert(type_name, Box::new(action));
 
         self
     }
