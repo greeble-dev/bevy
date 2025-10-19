@@ -533,25 +533,34 @@ impl AssetLoader for FakeAssetLoader {
 mod acme {
     use super::*;
 
-    #[derive(Serialize, Deserialize, Default, Debug)]
-    pub struct AcmeHandle {
-        path: String,
+    #[derive(Serialize, Deserialize, Debug)]
+    pub enum AcmeHandle {
+        Path(String),
+        Basset(String),
     }
 
     impl AcmeHandle {
-        fn new(asset_server: &AssetServer, handle: &UntypedHandle) -> Self {
-            Self {
-                path: asset_server
+        fn from_handle(asset_server: &AssetServer, handle: &UntypedHandle) -> Self {
+            Self::Path(
+                asset_server
                     .get_path(handle.id())
                     .expect("TODO")
                     .to_string(),
-            }
+            )
+        }
+
+        #[expect(dead_code, reason = "TODO")]
+        fn from_basset(basset: &str) -> Self {
+            Self::Basset(basset.into())
         }
     }
 
     impl<'a> From<&'a AcmeHandle> for AssetPath<'a> {
         fn from(handle: &'a AcmeHandle) -> Self {
-            AssetPath::parse(&handle.path)
+            match handle {
+                AcmeHandle::Path(path) => AssetPath::parse(path),
+                AcmeHandle::Basset(basset) => AssetPath::from_basset(&basset),
+            }
         }
     }
 
@@ -627,7 +636,10 @@ mod acme {
             {
                 for primitive in mesh.primitives.iter() {
                     let mesh = Some(AcmeMesh {
-                        asset: AcmeHandle::new(asset_server, &primitive.mesh.clone().untyped()),
+                        asset: AcmeHandle::from_handle(
+                            asset_server,
+                            &primitive.mesh.clone().untyped(),
+                        ),
                     });
 
                     let standard_material = get_sub_asset(
@@ -640,7 +652,7 @@ mod acme {
                         base_color_texture: standard_material
                             .base_color_texture
                             .clone()
-                            .map(|p| AcmeHandle::new(asset_server, &p.untyped())),
+                            .map(|p| AcmeHandle::from_handle(asset_server, &p.untyped())),
                     });
 
                     entities.push(AcmeEntity {
