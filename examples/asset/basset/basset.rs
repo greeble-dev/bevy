@@ -32,7 +32,8 @@ impl Plugin for BassetPlugin {
                     .with_action(action::JoinStrings)
                     .with_action(action::UppercaseString)
                     .with_action(action::AcmeSceneFromGltf),
-            ));
+            ))
+            .add_systems(Update, acme::tick_scene_spawners);
     }
 }
 
@@ -665,6 +666,7 @@ mod acme {
     pub fn spawn(
         commands: &mut Commands,
         scene: &AcmeScene,
+        parent_entity: Option<Entity>,
         asset_server: &AssetServer,
         material_assets: &mut Assets<StandardMaterial>,
     ) {
@@ -686,6 +688,35 @@ mod acme {
             if let Some(mesh) = &scene_entity.mesh {
                 world_entity.insert(Mesh3d(asset_server.load::<Mesh>(&mesh.asset)));
             }
+
+            if let Some(parent_entity) = parent_entity {
+                world_entity.insert(ChildOf(parent_entity));
+            }
+        }
+    }
+
+    #[derive(Component)]
+    pub struct AcmeSceneSpawner(pub Handle<AcmeScene>);
+
+    pub fn tick_scene_spawners(
+        mut commands: Commands,
+        spawners: Query<(Entity, &AcmeSceneSpawner)>,
+        scene_assets: Res<Assets<AcmeScene>>,
+        asset_server: Res<AssetServer>,
+        mut material_assets: ResMut<Assets<StandardMaterial>>,
+    ) {
+        for (entity, spawner) in spawners {
+            let Some(scene_asset) = scene_assets.get(&spawner.0) else {
+                continue;
+            };
+
+            spawn(
+                &mut commands,
+                &scene_asset,
+                Some(entity),
+                &asset_server,
+                &mut material_assets,
+            );
         }
     }
 }
@@ -722,11 +753,13 @@ fn setup(
         asset_server
             .load::<demo::StringAsset>("join_strings.basset")
             .untyped(),
-        asset_server
-            .load::<acme::AcmeScene>("scene_from_gltf.basset")
-            .untyped(),
         asset_server.load::<demo::IntAsset>(inline_path).untyped(),
     ]));
+
+    commands.spawn((
+        acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("scene_from_gltf.basset")),
+        Transform::IDENTITY,
+    ));
 
     commands.spawn((
         Camera3d::default(),
@@ -783,22 +816,6 @@ fn print(
     print_events(&asset_server, &scene_assets, &mut scene_events);
 }
 
-fn spawn(
-    mut commands: Commands,
-    scene_assets: Res<Assets<acme::AcmeScene>>,
-    mut scene_events: MessageReader<AssetEvent<acme::AcmeScene>>,
-    asset_server: Res<AssetServer>,
-    mut material_assets: ResMut<Assets<StandardMaterial>>,
-) {
-    for event in scene_events.read() {
-        if let AssetEvent::Added { id } = *event {
-            let scene = scene_assets.get(id).unwrap();
-
-            acme::spawn(&mut commands, scene, &asset_server, &mut material_assets);
-        }
-    }
-}
-
 fn main() {
     App::new()
         .add_plugins((
@@ -809,6 +826,6 @@ fn main() {
             BassetPlugin,
         ))
         .add_systems(Startup, setup)
-        .add_systems(Update, (print, spawn))
+        .add_systems(Update, print)
         .run();
 }
