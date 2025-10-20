@@ -245,6 +245,17 @@ impl ErasedLoadedAsset {
         self.labeled_assets.get(&label.into()).map(|a| &a.asset)
     }
 
+    /// XXX TODO: Document
+    pub fn take_labeled(
+        mut self,
+        label: impl Into<CowArc<'static, str>>,
+    ) -> Result<ErasedLoadedAsset, ErasedLoadedAsset> {
+        match self.labeled_assets.remove(&label.into()) {
+            Some(labeled_asset) => Ok(labeled_asset.asset),
+            None => Err(self),
+        }
+    }
+
     /// Iterate over all labels for "labeled assets" in the loaded asset
     pub fn iter_labels(&self) -> impl Iterator<Item = &str> {
         self.labeled_assets.keys().map(|s| &**s)

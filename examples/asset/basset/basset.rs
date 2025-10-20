@@ -1,18 +1,26 @@
 //! Basset proof of concept.
 
+#[path = "../../helpers/camera_controller.rs"]
+mod camera_controller;
+
 use bevy::{
     asset::{io::Reader, AssetLoader, LoadContext},
+    asset::{
+        meta::{AssetAction, AssetHash, AssetMeta, AssetMetaDyn, Settings},
+        AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset, LoadedAsset,
+    },
     ecs::error::BevyError,
     light::CascadeShadowConfigBuilder,
+    pbr::experimental::meshlet::{
+        MeshletMesh, MeshletPlugin, MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR,
+    },
     platform::collections::HashMap,
     prelude::*,
     reflect::TypePath,
+    render::render_resource::AsBindGroup,
     tasks::{BoxedFuture, ConditionalSendFuture},
 };
-use bevy_asset::{
-    meta::{AssetAction, AssetHash, AssetMeta, AssetMetaDyn, Settings},
-    AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset, LoadedAsset,
-};
+use camera_controller::{CameraController, CameraControllerPlugin};
 use core::result::Result;
 use serde::{Deserialize, Serialize};
 use std::{boxed::Box, sync::Mutex};
@@ -31,7 +39,9 @@ impl Plugin for BassetPlugin {
                     .with_action(action::LoadPath)
                     .with_action(action::JoinStrings)
                     .with_action(action::UppercaseString)
-                    .with_action(action::AcmeSceneFromGltf),
+                    .with_action(action::AcmeSceneFromGltf)
+                    .with_action(action::MeshletFromMesh)
+                    .with_action(action::ConvertSceneMeshesToMeshlets),
             ))
             .add_systems(Update, acme::tick_scene_spawners);
     }
@@ -57,7 +67,15 @@ trait BassetAction: Send + Sync + 'static {
 
 impl BassetActionContext<'_> {
     async fn apply<T: Asset>(&mut self, action: &SerializableAction) -> Result<T, BevyError> {
-        Ok(self.erased_apply(action).await?.take::<T>().expect("TODO"))
+        match self.erased_apply(action).await?.downcast::<T>() {
+            Ok(result) => Ok(result.take()),
+            Err(original) => panic!(
+                "Should have made type {}, actually made type {}. Action: {:?}",
+                core::any::type_name::<T>(),
+                original.asset_type_name(),
+                action,
+            ),
+        }
     }
 
     async fn erased_apply(
@@ -110,8 +128,9 @@ where
     }
 }
 
+/// XXX TODO: Document.
 #[derive(Serialize, Deserialize, Debug)]
-struct SerializableAction {
+pub struct SerializableAction {
     name: String,
     // TODO: If we split this into SerializableAction and DeserializableAction
     // then the DeserializableAction can replace the box with a reference. See
@@ -120,10 +139,9 @@ struct SerializableAction {
 }
 
 impl SerializableAction {
-    #[expect(dead_code, reason = "TODO")]
-    fn new<Type, ParamsType: Serialize>(params: &ParamsType) -> Self {
+    fn new<Action: BassetAction>(params: &<Action as BassetAction>::Params) -> Self {
         Self {
-            name: core::any::type_name::<Type>().into(),
+            name: core::any::type_name::<Action>().into(),
             params: ron::value::RawValue::from_rust(params).expect("TODO"),
         }
     }
@@ -317,9 +335,9 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct LoadPathParams {
-        path: String, // TODO: Should be AssetPath. Avoiding for now to simplify lifetimes.
+        pub path: String, // TODO: Should be AssetPath. Avoiding for now to simplify lifetimes.
         #[serde(default)]
-        loader_settings: Option<Box<ron::value::RawValue>>,
+        pub loader_settings: Option<Box<ron::value::RawValue>>,
         // TODO
         //loader_name: Option<String>,
     }
@@ -333,9 +351,22 @@ mod action {
             context: &mut BassetActionContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
+            // TODO: Try to avoid clones.
+
             let path = AssetPath::parse(&params.path).into_owned();
 
-            context.erased_load(path, &params.loader_settings).await
+            let asset = context
+                .erased_load(path.clone(), &params.loader_settings)
+                .await?;
+
+            if let Some(label) = path.label_cow() {
+                match asset.take_labeled(label.clone()) {
+                    Ok(labeled_asset) => Ok(labeled_asset),
+                    Err(_) => panic!("Couldn't find label \"{}\" in \"{}\".", label, path),
+                }
+            } else {
+                Ok(asset)
+            }
         }
     }
 
@@ -428,6 +459,75 @@ mod action {
             let scene = acme::from_gltf(&gltf, context.asset_server);
 
             // XXX TODO: What about dependencies?
+
+            Ok(LoadedAsset::new_with_dependencies(scene).into())
+        }
+    }
+
+    pub struct MeshletFromMesh;
+
+    #[derive(Serialize, Deserialize, Default)]
+    pub struct MeshletFromMeshParams {
+        mesh: SerializableAction,
+    }
+
+    impl BassetAction for MeshletFromMesh {
+        type Params = MeshletFromMeshParams;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            context: &mut BassetActionContext<'_>,
+            params: &Self::Params,
+        ) -> Result<ErasedLoadedAsset, Self::Error> {
+            // TODO: Should we check if `MeshletPlugin` is registered so we can
+            // return a sensible error?
+
+            let mesh = context.apply::<Mesh>(&params.mesh).await?;
+
+            let meshlet =
+                MeshletMesh::from_mesh(&mesh, MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR)?;
+
+            Ok(LoadedAsset::new_with_dependencies(meshlet).into())
+        }
+    }
+
+    pub struct ConvertSceneMeshesToMeshlets;
+
+    #[derive(Serialize, Deserialize, Default)]
+    pub struct ConvertSceneMeshesToMeshletsParams {
+        scene: SerializableAction,
+    }
+
+    impl BassetAction for ConvertSceneMeshesToMeshlets {
+        type Params = ConvertSceneMeshesToMeshletsParams;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            context: &mut BassetActionContext<'_>,
+            params: &Self::Params,
+        ) -> Result<ErasedLoadedAsset, Self::Error> {
+            // TODO: Should we check if `MeshletPlugin` is registered so we can
+            // return a sensible error?
+
+            let mut scene = context.apply::<acme::AcmeScene>(&params.scene).await?;
+
+            for entity in &mut scene.entities {
+                if let Some(mesh) = entity.mesh.take() {
+                    let basset = Basset {
+                        root: SerializableAction::new::<MeshletFromMesh>(&MeshletFromMeshParams {
+                            mesh: mesh.asset.to_action(),
+                        }),
+                    };
+
+                    let basset = ron::ser::to_string(&basset).expect("TODO");
+
+                    entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
+                        asset: acme::AcmeHandle::Basset(basset),
+                    });
+                }
+            }
 
             Ok(LoadedAsset::new_with_dependencies(scene).into())
         }
@@ -532,6 +632,7 @@ impl AssetLoader for FakeAssetLoader {
 
 mod acme {
     use super::*;
+    use bevy::pbr::experimental::meshlet::MeshletMesh3d;
 
     #[derive(Serialize, Deserialize, Debug)]
     pub enum AcmeHandle {
@@ -540,7 +641,7 @@ mod acme {
     }
 
     impl AcmeHandle {
-        fn from_handle(asset_server: &AssetServer, handle: &UntypedHandle) -> Self {
+        pub fn from_handle(asset_server: &AssetServer, handle: &UntypedHandle) -> Self {
             Self::Path(
                 asset_server
                     .get_path(handle.id())
@@ -549,9 +650,22 @@ mod acme {
             )
         }
 
-        #[expect(dead_code, reason = "TODO")]
-        fn from_basset(basset: &str) -> Self {
+        pub fn from_basset(basset: &str) -> Self {
             Self::Basset(basset.into())
+        }
+
+        pub fn to_action(&self) -> SerializableAction {
+            match self {
+                Self::Path(path) => {
+                    SerializableAction::new::<action::LoadPath>(&action::LoadPathParams {
+                        path: path.to_string(),
+                        ..Default::default()
+                    })
+                }
+                Self::Basset(_) => {
+                    todo!();
+                }
+            }
         }
     }
 
@@ -559,36 +673,44 @@ mod acme {
         fn from(handle: &'a AcmeHandle) -> Self {
             match handle {
                 AcmeHandle::Path(path) => AssetPath::parse(path),
-                AcmeHandle::Basset(basset) => AssetPath::from_basset(&basset),
+                AcmeHandle::Basset(basset) => AssetPath::from_basset(basset),
             }
         }
     }
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMesh {
-        asset: AcmeHandle,
+        pub asset: AcmeHandle,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    pub struct AcmeMeshletMesh {
+        pub asset: AcmeHandle,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMaterial {
-        base_color_texture: Option<AcmeHandle>,
+        pub base_color_texture: Option<AcmeHandle>,
     }
 
     #[derive(Serialize, Deserialize, Default, Debug)]
     pub struct AcmeEntity {
         #[serde(default)]
-        transform: Transform,
+        pub transform: Transform,
 
         #[serde(default)]
-        mesh: Option<AcmeMesh>,
+        pub mesh: Option<AcmeMesh>,
 
         #[serde(default)]
-        material: Option<AcmeMaterial>,
+        pub meshlet_mesh: Option<AcmeMeshletMesh>,
+
+        #[serde(default)]
+        pub material: Option<AcmeMaterial>,
     }
 
     #[derive(Asset, TypePath, Serialize, Deserialize, Default, Debug)]
     pub struct AcmeScene {
-        entities: Vec<AcmeEntity>,
+        pub entities: Vec<AcmeEntity>,
     }
 
     fn get_sub_asset<'a, T: Asset>(
@@ -659,6 +781,7 @@ mod acme {
                         transform,
                         mesh,
                         material,
+                        ..Default::default()
                     });
                 }
             }
@@ -680,12 +803,21 @@ mod acme {
         scene: &AcmeScene,
         parent_entity: Option<Entity>,
         asset_server: &AssetServer,
-        material_assets: &mut Assets<StandardMaterial>,
+        standard_material_assets: &mut Assets<StandardMaterial>,
+        meshlet_debug_material_assets: &mut Assets<MeshletDebugMaterial>,
     ) {
         for scene_entity in &scene.entities {
             let mut world_entity = commands.spawn(scene_entity.transform);
 
-            if let Some(material) = &scene_entity.material {
+            // XXX TODO: Currently this forces the debug material for meshlets.
+            // Should change that to be a scene conversion action. AcmeMaterial
+            // will become an enum of standard/debug materials.
+
+            if scene_entity.meshlet_mesh.is_some() {
+                world_entity.insert(MeshMaterial3d(
+                    meshlet_debug_material_assets.add(MeshletDebugMaterial::default()),
+                ));
+            } else if let Some(material) = &scene_entity.material {
                 let standard_material = StandardMaterial {
                     base_color_texture: material
                         .base_color_texture
@@ -694,11 +826,19 @@ mod acme {
                     ..Default::default()
                 };
 
-                world_entity.insert(MeshMaterial3d(material_assets.add(standard_material)));
+                world_entity.insert(MeshMaterial3d(
+                    standard_material_assets.add(standard_material),
+                ));
             }
 
             if let Some(mesh) = &scene_entity.mesh {
                 world_entity.insert(Mesh3d(asset_server.load::<Mesh>(&mesh.asset)));
+            }
+
+            if let Some(meshlet_mesh) = &scene_entity.meshlet_mesh {
+                world_entity.insert(MeshletMesh3d(
+                    asset_server.load::<MeshletMesh>(&meshlet_mesh.asset),
+                ));
             }
 
             if let Some(parent_entity) = parent_entity {
@@ -710,28 +850,49 @@ mod acme {
     #[derive(Component)]
     pub struct AcmeSceneSpawner(pub Handle<AcmeScene>);
 
+    // XXX TODO: This is currently used to keep the handle alive long enough that
+    // the asset loaded events can be printed. Rethink?
+    #[derive(Component)]
+    #[expect(dead_code, reason = "TODO")]
+    pub struct AcmeSceneInstance(pub Handle<AcmeScene>);
+
     pub fn tick_scene_spawners(
         mut commands: Commands,
         spawners: Query<(Entity, &AcmeSceneSpawner)>,
         scene_assets: Res<Assets<AcmeScene>>,
         asset_server: Res<AssetServer>,
-        mut material_assets: ResMut<Assets<StandardMaterial>>,
+        mut standard_material_assets: ResMut<Assets<StandardMaterial>>,
+        mut meshlet_debug_material_assets: ResMut<Assets<MeshletDebugMaterial>>,
     ) {
         for (entity, spawner) in spawners {
             let Some(scene_asset) = scene_assets.get(&spawner.0) else {
                 continue;
             };
 
+            commands
+                .entity(entity)
+                .insert(AcmeSceneInstance(spawner.0.clone()));
+
+            commands.entity(entity).remove::<AcmeSceneSpawner>();
+
             spawn(
                 &mut commands,
-                &scene_asset,
+                scene_asset,
                 Some(entity),
                 &asset_server,
-                &mut material_assets,
+                &mut standard_material_assets,
+                &mut meshlet_debug_material_assets,
             );
         }
     }
 }
+
+#[derive(Asset, TypePath, AsBindGroup, Clone, Default)]
+struct MeshletDebugMaterial {
+    _dummy: (),
+}
+
+impl Material for MeshletDebugMaterial {}
 
 #[derive(Resource)]
 #[expect(dead_code, reason = "Needed to keep handles live")]
@@ -770,12 +931,26 @@ fn setup(
 
     commands.spawn((
         acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("scene_from_gltf.basset")),
-        Transform::IDENTITY,
+        Transform::from_xyz(-100.0, 0.0, 0.0)
+            .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+    ));
+
+    commands.spawn((
+        acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("meshlet_scene.basset")),
+        Transform::from_xyz(100.0, 0.0, 0.0)
+            .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
     ));
 
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(200.0, 200.0, 200.0).looking_at(Vec3::new(0.0, 75.0, 0.0), Vec3::Y),
+        Transform::from_xyz(-30.0, 200.0, 300.0).looking_at(Vec3::new(-30.0, 75.0, 0.0), Vec3::Y),
+        CameraController {
+            walk_speed: 100.0,
+            ..Default::default()
+        },
+        // Meshlets are incompatible with MSAA.
+        #[cfg(feature = "meshlet")]
+        Msaa::Off,
     ));
 
     commands.spawn((
@@ -836,6 +1011,11 @@ fn main() {
                 ..default()
             }),
             BassetPlugin,
+            MaterialPlugin::<MeshletDebugMaterial>::default(),
+            CameraControllerPlugin,
+            MeshletPlugin {
+                cluster_buffer_slots: 1 << 14,
+            },
         ))
         .add_systems(Startup, setup)
         .add_systems(Update, print)

@@ -1883,7 +1883,7 @@ wasm = false
 name = "basset"
 path = "examples/asset/basset/basset.rs"
 doc-scrape-examples = true
-required-features = ["serialize"]
+required-features = ["serialize", "meshlet", "meshlet_processor"]
 
 [package.metadata.example.basset]
 name = "Basset"

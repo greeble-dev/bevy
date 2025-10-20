@@ -1,0 +1,1 @@
+(root: (name: "basset::action::ConvertSceneMeshesToMeshlets", params: (scene: (name: "basset::action::LoadPath", params: (path: "scene_from_gltf.basset")))))
