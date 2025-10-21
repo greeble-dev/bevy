@@ -95,6 +95,7 @@ pub struct AssetPath<'a> {
     path: CowArc<'a, Path>,
     label: Option<CowArc<'a, str>>,
     // XXX TODO: Document.
+    // XXX TODO: Doesn't work with serialization.
     inline_basset: Option<Arc<InlineBasset>>,
 }
 
@@ -585,12 +586,12 @@ impl<'a> AssetPath<'a> {
         false
     }
 
-    pub fn from_basset(basset: &str) -> Self {
-        let basset = InlineBasset::new(basset.into());
-
+    pub fn from_basset(basset: InlineBasset) -> Self {
         // Set the path to the basset's hash in hex. This is a hack to make sure
-        // that anything using the path as an identifier still kinda works. The
-        // long-term solution is unclear.
+        // that anything using the path as an identifier still kinda works.
+        //
+        // The long-term solution is unclear. Arguably an inline basset and a regular
+        // path are mutually exclusive, but that will be controversial.
         let path = String::from_iter(basset.hash.iter().map(|b| alloc::format!("{:x}", b)));
 
         Self {

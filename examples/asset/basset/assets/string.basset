@@ -1,1 +1,1 @@
-(root: (name: "basset::action::LoadPath", params: (path: "hello.string")))
+(root: Path("hello.string"))

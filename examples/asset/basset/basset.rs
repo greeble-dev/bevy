@@ -4,7 +4,7 @@
 mod camera_controller;
 
 use bevy::{
-    asset::{io::Reader, AssetLoader, LoadContext},
+    asset::{io::Reader, AssetLoader, InlineBasset, LoadContext},
     asset::{
         meta::{AssetAction, AssetHash, AssetMeta, AssetMetaDyn, Settings},
         AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset, LoadedAsset,
@@ -47,17 +47,23 @@ impl Plugin for BassetPlugin {
     }
 }
 
-struct BassetActionContext<'a> {
+/// XXX TODO: Document.
+pub struct BassetActionContext<'a> {
     loader: &'a BassetLoader,
     asset_server: &'a AssetServer,
     loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
 }
 
-trait BassetAction: Send + Sync + 'static {
-    // TODO: Should this use `Settings`?
+/// XXX TODO: Document.
+pub trait BassetAction: Send + Sync + 'static {
+    /// XXX TODO: This shouldn't use `Settings` any more?
+    /// XXX TODO: Document.
     type Params: Settings + Default + Serialize + for<'a> Deserialize<'a>;
+
+    /// XXX TODO: Document.
     type Error: Into<BevyError>;
 
+    /// XXX TODO: Document.
     fn apply(
         &self,
         context: &mut BassetActionContext<'_>,
@@ -66,7 +72,7 @@ trait BassetAction: Send + Sync + 'static {
 }
 
 impl BassetActionContext<'_> {
-    async fn apply<T: Asset>(&mut self, action: &SerializableAction) -> Result<T, BevyError> {
+    async fn apply<T: Asset>(&mut self, action: &BassetPathSerializable) -> Result<T, BevyError> {
         match self.erased_apply(action).await?.downcast::<T>() {
             Ok(result) => Ok(result.take()),
             Err(original) => panic!(
@@ -80,13 +86,21 @@ impl BassetActionContext<'_> {
 
     async fn erased_apply(
         &mut self,
-        action: &SerializableAction,
+        action: &BassetPathSerializable,
     ) -> Result<ErasedLoadedAsset, BevyError> {
-        self.loader
-            .action(&action.name)
-            .expect("TODO")
-            .apply(self, &action.params)
-            .await
+        match action {
+            BassetPathSerializable::Path(path) => {
+                self.erased_load(AssetPath::parse(path).into_owned(), &None)
+                    .await
+            }
+            BassetPathSerializable::Action { name, params } => {
+                self.loader
+                    .action(name)
+                    .expect("TODO")
+                    .apply(self, params)
+                    .await
+            }
+        }
     }
 
     async fn erased_load(
@@ -129,51 +143,85 @@ where
 }
 
 /// XXX TODO: Document.
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SerializableAction {
-    name: String,
-    // TODO: If we split this into SerializableAction and DeserializableAction
-    // then the DeserializableAction can replace the box with a reference. See
-    // serde_json RawValue example.
-    params: Box<ron::value::RawValue>,
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum BassetPathSerializable {
+    /// XXX TODO: Document.
+    Path(String),
+
+    /// XXX TODO: Document.
+    Action {
+        /// XXX TODO: Document.
+        name: String,
+
+        /// XXX TODO: Document.
+        /// XXX TODO: If we split this into serializable and deserializable forms
+        /// then the deserializable can use a reference instead of a box. See
+        /// `serde_json::RawValue` example. But that's awkward for action params -
+        /// don't want to make them split types too. Maybe can do an enum with
+        /// a custom serialize?
+        params: Box<ron::value::RawValue>,
+    },
 }
 
-impl SerializableAction {
-    fn new<Action: BassetAction>(params: &<Action as BassetAction>::Params) -> Self {
-        Self {
-            name: core::any::type_name::<Action>().into(),
+// TODO: Would prefer to avoid Default, but might be necessary for serialization?
+impl Default for BassetPathSerializable {
+    fn default() -> Self {
+        Self::Path("".into())
+    }
+}
+
+impl BassetPathSerializable {
+    /// XXX TODO: Document.
+    pub fn from_action<A: BassetAction>(params: &<A as BassetAction>::Params) -> Self {
+        Self::Action {
+            name: core::any::type_name::<A>().into(),
             params: ron::value::RawValue::from_rust(params).expect("TODO"),
         }
     }
-}
 
-impl Default for SerializableAction {
-    fn default() -> Self {
-        // TODO: This is ugly. Can't see an efficient way to support Default for
-        // a Box<ron::RawValue>.
-        //
-        // Could make `SerializableAction::params` an `Option<RawValue>`. But
-        // that makes the RON messy unless we allow implicit Some.
-        //
-        // Maybe we can make a new type that contains an optional RawValue but
-        // still serializes as if it's non-optional?
-        //
-        // Also consider splitting off a DeserializableAction (which doesn't
-        // need a boxed ron), and then SerializableAction doesn't need default.
-        let empty_struct =
-            ron::value::RawValue::from_boxed_ron(Box::<str>::from("()")).expect("TODO");
+    /// XXX TODO: Document.
+    pub fn from_handle(asset_server: &AssetServer, handle: &UntypedHandle) -> Self {
+        // TODO: Avoid the `into_owned`? Not sure why skipping that causes lifetime
+        // issues for `asset_server`.
+        let path = asset_server
+            .get_path(handle.id())
+            .expect("TODO")
+            .into_owned();
 
-        Self {
-            name: Default::default(),
+        Self::from_asset_path(&path)
+    }
 
-            params: empty_struct,
+    /// XXX TODO: Document.
+    pub fn from_asset_path(asset_path: &AssetPath<'static>) -> Self {
+        if let Some(inline_basset) = asset_path.inline_basset() {
+            // XXX TODO: We're losing information here if there's something other
+            // than `basset::root`, e.g. versioning.
+
+            let basset =
+                ron::de::from_str::<BassetFileSerializable>(inline_basset.value()).expect("TODO");
+
+            basset.root
+        } else {
+            Self::Path(asset_path.to_string())
         }
+    }
+
+    /// XXX TODO: Replace with From/To impl?
+    pub fn to_asset_path(&self) -> AssetPath<'static> {
+        // XXX TODO: Versioning? Need a more robust way to deal with the difference
+        // between BassetFileSerializable and BassetPathSerializable.
+        AssetPath::from_basset(InlineBasset::new(
+            ron::ser::to_string(&BassetFileSerializable { root: self.clone() })
+                .expect("TODO")
+                .into(),
+        ))
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Basset {
-    root: SerializableAction,
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct BassetFileSerializable {
+    root: BassetPathSerializable,
+    // TODO: Versioning?
 }
 
 #[derive(Default)]
@@ -183,16 +231,13 @@ struct BassetLoader {
 
 impl BassetLoader {
     fn with_action<T: BassetAction>(mut self, action: T) -> Self {
-        let type_name = core::any::type_name::<T>();
-
-        self.type_name_to_action.insert(type_name, Box::new(action));
+        self.type_name_to_action
+            .insert(core::any::type_name::<T>(), Box::new(action));
 
         self
     }
 
     fn action<'a>(&'a self, type_name: &str) -> Option<&'a dyn ErasedBassetAction> {
-        // TODO: Review this. Can't decide if we should return Arc here or avoid
-        // storing Arc in the first place.
         self.type_name_to_action.get(type_name).map(move |a| &**a)
     }
 }
@@ -209,7 +254,7 @@ impl ErasedAssetLoader for BassetLoader {
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
 
-            let basset = ron::de::from_bytes::<Basset>(&bytes)?;
+            let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
 
             let mut context = BassetActionContext {
                 loader: self,
@@ -322,10 +367,18 @@ async fn load_direct(
         .await
         .map_err(Into::<BevyError>::into)?;
 
+    // XXX TODO: Is this correct for labeled assets?
     let info = meta.processed_info().as_ref();
     let hash = info.map(|i| i.full_hash).unwrap_or_default();
 
-    Ok((asset, hash))
+    if let Some(label) = path.label_cow() {
+        match asset.take_labeled(label.clone()) {
+            Ok(labeled_asset) => Ok((labeled_asset, hash)),
+            Err(_) => panic!("Couldn't find label \"{}\" in \"{}\".", label, path),
+        }
+    } else {
+        Ok((asset, hash))
+    }
 }
 
 mod action {
@@ -351,22 +404,12 @@ mod action {
             context: &mut BassetActionContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
-            // TODO: Try to avoid clones.
-
-            let path = AssetPath::parse(&params.path).into_owned();
-
-            let asset = context
-                .erased_load(path.clone(), &params.loader_settings)
-                .await?;
-
-            if let Some(label) = path.label_cow() {
-                match asset.take_labeled(label.clone()) {
-                    Ok(labeled_asset) => Ok(labeled_asset),
-                    Err(_) => panic!("Couldn't find label \"{}\" in \"{}\".", label, path),
-                }
-            } else {
-                Ok(asset)
-            }
+            context
+                .erased_load(
+                    AssetPath::parse(&params.path).into_owned(),
+                    &params.loader_settings,
+                )
+                .await
         }
     }
 
@@ -375,7 +418,7 @@ mod action {
     #[derive(Serialize, Deserialize, Default)]
     pub struct JoinStringsParams {
         separator: String,
-        strings: Vec<SerializableAction>,
+        strings: Vec<BassetPathSerializable>,
     }
 
     impl BassetAction for JoinStrings {
@@ -406,7 +449,7 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct UppercaseStringParams {
-        string: SerializableAction,
+        string: BassetPathSerializable,
     }
 
     impl BassetAction for UppercaseString {
@@ -436,7 +479,7 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct AcmeSceneFromGltfParams {
-        path: String,
+        gltf: BassetPathSerializable,
     }
 
     impl BassetAction for AcmeSceneFromGltf {
@@ -448,13 +491,7 @@ mod action {
             context: &mut BassetActionContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
-            let gltf = load_direct(
-                context.asset_server,
-                &AssetPath::parse(&params.path).into_owned(),
-                &None,
-            )
-            .await?
-            .0;
+            let gltf = context.erased_apply(&params.gltf).await?;
 
             let scene = acme::from_gltf(&gltf, context.asset_server);
 
@@ -468,7 +505,7 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct MeshletFromMeshParams {
-        mesh: SerializableAction,
+        mesh: BassetPathSerializable,
     }
 
     impl BassetAction for MeshletFromMesh {
@@ -496,7 +533,7 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct ConvertSceneMeshesToMeshletsParams {
-        scene: SerializableAction,
+        scene: BassetPathSerializable,
     }
 
     impl BassetAction for ConvertSceneMeshesToMeshlets {
@@ -515,16 +552,10 @@ mod action {
 
             for entity in &mut scene.entities {
                 if let Some(mesh) = entity.mesh.take() {
-                    let basset = Basset {
-                        root: SerializableAction::new::<MeshletFromMesh>(&MeshletFromMeshParams {
-                            mesh: mesh.asset.to_action(),
-                        }),
-                    };
-
-                    let basset = ron::ser::to_string(&basset).expect("TODO");
-
                     entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
-                        asset: acme::AcmeHandle::Basset(basset),
+                        asset: BassetPathSerializable::from_action::<MeshletFromMesh>(
+                            &MeshletFromMeshParams { mesh: mesh.asset },
+                        ),
                     });
                 }
             }
@@ -635,62 +666,18 @@ mod acme {
     use bevy::pbr::experimental::meshlet::MeshletMesh3d;
 
     #[derive(Serialize, Deserialize, Debug)]
-    pub enum AcmeHandle {
-        Path(String),
-        Basset(String),
-    }
-
-    impl AcmeHandle {
-        pub fn from_handle(asset_server: &AssetServer, handle: &UntypedHandle) -> Self {
-            Self::Path(
-                asset_server
-                    .get_path(handle.id())
-                    .expect("TODO")
-                    .to_string(),
-            )
-        }
-
-        pub fn from_basset(basset: &str) -> Self {
-            Self::Basset(basset.into())
-        }
-
-        pub fn to_action(&self) -> SerializableAction {
-            match self {
-                Self::Path(path) => {
-                    SerializableAction::new::<action::LoadPath>(&action::LoadPathParams {
-                        path: path.to_string(),
-                        ..Default::default()
-                    })
-                }
-                Self::Basset(_) => {
-                    todo!();
-                }
-            }
-        }
-    }
-
-    impl<'a> From<&'a AcmeHandle> for AssetPath<'a> {
-        fn from(handle: &'a AcmeHandle) -> Self {
-            match handle {
-                AcmeHandle::Path(path) => AssetPath::parse(path),
-                AcmeHandle::Basset(basset) => AssetPath::from_basset(basset),
-            }
-        }
-    }
-
-    #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMesh {
-        pub asset: AcmeHandle,
+        pub asset: BassetPathSerializable,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMeshletMesh {
-        pub asset: AcmeHandle,
+        pub asset: BassetPathSerializable,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMaterial {
-        pub base_color_texture: Option<AcmeHandle>,
+        pub base_color_texture: Option<BassetPathSerializable>,
     }
 
     #[derive(Serialize, Deserialize, Default, Debug)]
@@ -758,7 +745,7 @@ mod acme {
             {
                 for primitive in mesh.primitives.iter() {
                     let mesh = Some(AcmeMesh {
-                        asset: AcmeHandle::from_handle(
+                        asset: BassetPathSerializable::from_handle(
                             asset_server,
                             &primitive.mesh.clone().untyped(),
                         ),
@@ -771,10 +758,9 @@ mod acme {
                     );
 
                     let material = Some(AcmeMaterial {
-                        base_color_texture: standard_material
-                            .base_color_texture
-                            .clone()
-                            .map(|p| AcmeHandle::from_handle(asset_server, &p.untyped())),
+                        base_color_texture: standard_material.base_color_texture.clone().map(|p| {
+                            BassetPathSerializable::from_handle(asset_server, &p.untyped())
+                        }),
                     });
 
                     entities.push(AcmeEntity {
@@ -822,7 +808,7 @@ mod acme {
                     base_color_texture: material
                         .base_color_texture
                         .as_ref()
-                        .map(|p| asset_server.load::<Image>(p)),
+                        .map(|p| asset_server.load::<Image>(p.to_asset_path())),
                     ..Default::default()
                 };
 
@@ -832,12 +818,14 @@ mod acme {
             }
 
             if let Some(mesh) = &scene_entity.mesh {
-                world_entity.insert(Mesh3d(asset_server.load::<Mesh>(&mesh.asset)));
+                world_entity.insert(Mesh3d(
+                    asset_server.load::<Mesh>(mesh.asset.to_asset_path()),
+                ));
             }
 
             if let Some(meshlet_mesh) = &scene_entity.meshlet_mesh {
                 world_entity.insert(MeshletMesh3d(
-                    asset_server.load::<MeshletMesh>(&meshlet_mesh.asset),
+                    asset_server.load::<MeshletMesh>(meshlet_mesh.asset.to_asset_path()),
                 ));
             }
 
@@ -904,9 +892,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let inline_path = AssetPath::from_basset(
-        "(root: (name: \"basset::action::LoadPath\", params: (path: \"1234.int\")))",
-    );
+    let inline_path = BassetPathSerializable::Path("1234.int".into()).to_asset_path();
 
     commands.insert_resource(Handles(vec![
         asset_server
@@ -945,7 +931,7 @@ fn setup(
         Camera3d::default(),
         Transform::from_xyz(-30.0, 200.0, 300.0).looking_at(Vec3::new(-30.0, 75.0, 0.0), Vec3::Y),
         CameraController {
-            walk_speed: 100.0,
+            walk_speed: 200.0,
             ..Default::default()
         },
         // Meshlets are incompatible with MSAA.

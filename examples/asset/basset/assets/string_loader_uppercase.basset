@@ -1,1 +1,1 @@
-(root: (name: "basset::action::LoadPath", params: (path: "hello.string", loader_settings: Some((uppercase: true)))))
+(root: Action(name: "basset::action::LoadPath", params: (path: "hello.string", loader_settings: Some((uppercase: true)))))
