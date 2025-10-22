@@ -17,15 +17,11 @@ use core::any::TypeId;
 use thiserror::Error;
 use tracing::warn;
 
-// XXX TODO: Will return when InstrumentedAssetLoader is properly implemented.
-/*
 #[cfg(feature = "trace")]
 use {
     alloc::string::ToString,
-    bevy_tasks::ConditionalSendFuture,
     tracing::{info_span, instrument::Instrument},
 };
-*/
 
 #[derive(Default)]
 pub(crate) struct AssetLoaders {
@@ -348,15 +344,12 @@ impl ErasedAssetLoader for InstrumentedAssetLoader {
         meta: &'a dyn AssetMetaDyn,
         load_context: crate::LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
-        // XXX TODO: Implement.
-        /*
         let span = info_span!(
             "asset loading",
             loader = self.0.type_name(),
             asset = load_context.asset_path().to_string(),
         );
-        */
-        self.0.load(reader, meta, load_context) //.instrument(span)
+        Box::pin(self.0.load(reader, meta, load_context).instrument(span))
     }
 
     fn extensions(&self) -> &[&str] {
