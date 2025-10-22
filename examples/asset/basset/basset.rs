@@ -22,6 +22,7 @@ use bevy::{
 };
 use camera_controller::{CameraController, CameraControllerPlugin};
 use core::result::Result;
+use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
 use std::{boxed::Box, sync::Mutex};
 
@@ -54,11 +55,19 @@ pub struct BassetActionContext<'a> {
     loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
 }
 
+/// XXX TODO: Review this. Duplicated from bevy_asset::meta::Settings.
+pub trait BassetActionParams: Downcast + Send + Sync + 'static {}
+
+// XXX TODO: Review this. Duplicated from bevy_asset::meta::Settings.
+impl_downcast!(BassetActionParams);
+
+// XXX TODO: Review this. Duplicated from bevy_asset::meta::Settings.
+impl<T: 'static> BassetActionParams for T where T: Send + Sync {}
+
 /// XXX TODO: Document.
 pub trait BassetAction: Send + Sync + 'static {
-    /// XXX TODO: This shouldn't use `Settings` any more?
-    /// XXX TODO: Document.
-    type Params: Settings + Default + Serialize + for<'a> Deserialize<'a>;
+    /// XXX TODO: Document. Review if serialize traits should go into `BassetActionParams`.
+    type Params: BassetActionParams + Serialize + for<'a> Deserialize<'a>;
 
     /// XXX TODO: Document.
     type Error: Into<BevyError>;

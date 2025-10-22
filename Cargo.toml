@@ -622,6 +622,8 @@ event-listener = "5.3.0"
 anyhow = "1"
 accesskit = "0.21"
 nonmax = "0.5"
+# XXX TODO: Only added for basset example. Maybe removable.
+downcast-rs = { version = "2", default-features = false }
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 ureq = { version = "3.0.8", features = ["json"] }
