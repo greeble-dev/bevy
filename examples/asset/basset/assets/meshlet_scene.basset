@@ -1,1 +1,11 @@
-(root: Action(name: "basset::action::ConvertAcmeSceneMeshesToMeshlets", params: (scene: Path("scene_from_gltf.basset"))))
+(
+	root: Action(
+		name: "basset::action::ConvertAcmeSceneMeshesToMeshlets",
+		params: (
+			scene: Action(
+				name: "basset::action::AcmeSceneFromGltf",
+				params: (gltf: Path("Duck.glb"))
+			)
+		)
+	)
+)
