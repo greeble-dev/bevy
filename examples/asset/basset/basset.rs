@@ -515,6 +515,15 @@ mod action {
     #[derive(Serialize, Deserialize, Default)]
     pub struct MeshletFromMeshParams {
         mesh: BassetPathSerializable,
+        #[serde(default)]
+        vertex_position_quantization_factor: Option<u8>,
+    }
+
+    impl MeshletFromMeshParams {
+        fn vertex_position_quantization_factor(&self) -> u8 {
+            self.vertex_position_quantization_factor
+                .unwrap_or(MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR)
+        }
     }
 
     impl BassetAction for MeshletFromMesh {
@@ -532,7 +541,7 @@ mod action {
             let mesh = context.apply::<Mesh>(&params.mesh).await?;
 
             let meshlet =
-                MeshletMesh::from_mesh(&mesh, MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR)?;
+                MeshletMesh::from_mesh(&mesh, params.vertex_position_quantization_factor())?;
 
             Ok(LoadedAsset::new_with_dependencies(meshlet).into())
         }
@@ -543,6 +552,8 @@ mod action {
     #[derive(Serialize, Deserialize, Default)]
     pub struct ConvertSceneMeshesToMeshletsParams {
         scene: BassetPathSerializable,
+        #[serde(default)]
+        vertex_position_quantization_factor: Option<u8>,
     }
 
     impl BassetAction for ConvertSceneMeshesToMeshlets {
@@ -563,7 +574,12 @@ mod action {
                 if let Some(mesh) = entity.mesh.take() {
                     entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
                         asset: BassetPathSerializable::from_action::<MeshletFromMesh>(
-                            &MeshletFromMeshParams { mesh: mesh.asset },
+                            // TODO:
+                            &MeshletFromMeshParams {
+                                mesh: mesh.asset,
+                                vertex_position_quantization_factor: params
+                                    .vertex_position_quantization_factor,
+                            },
                         ),
                     });
                 }
