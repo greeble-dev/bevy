@@ -42,7 +42,7 @@ impl Plugin for BassetPlugin {
                     .with_action(action::UppercaseString)
                     .with_action(action::AcmeSceneFromGltf)
                     .with_action(action::MeshletFromMesh)
-                    .with_action(action::ConvertSceneMeshesToMeshlets),
+                    .with_action(action::ConvertAcmeSceneMeshesToMeshlets),
             ))
             .add_systems(Update, acme::tick_scene_spawners);
     }
@@ -105,7 +105,7 @@ impl BassetActionContext<'_> {
             BassetPathSerializable::Action { name, params } => {
                 self.loader
                     .action(name)
-                    .expect("TODO")
+                    .ok_or_else(|| BevyError::from(format!("Couldn't find action \"{name}\")")))?
                     .apply(self, params)
                     .await
             }
@@ -547,17 +547,17 @@ mod action {
         }
     }
 
-    pub struct ConvertSceneMeshesToMeshlets;
+    pub struct ConvertAcmeSceneMeshesToMeshlets;
 
     #[derive(Serialize, Deserialize, Default)]
-    pub struct ConvertSceneMeshesToMeshletsParams {
+    pub struct ConvertAcmeSceneMeshesToMeshletsParams {
         scene: BassetPathSerializable,
         #[serde(default)]
         vertex_position_quantization_factor: Option<u8>,
     }
 
-    impl BassetAction for ConvertSceneMeshesToMeshlets {
-        type Params = ConvertSceneMeshesToMeshletsParams;
+    impl BassetAction for ConvertAcmeSceneMeshesToMeshlets {
+        type Params = ConvertAcmeSceneMeshesToMeshletsParams;
         type Error = BevyError;
 
         async fn apply(
