@@ -189,13 +189,13 @@ impl BassetPathSerializable {
     }
 
     /// XXX TODO: Document.
-    pub fn from_handle(asset_server: &AssetServer, handle: &UntypedHandle) -> Self {
+    pub fn from_handle(handle: &UntypedHandle) -> Self {
         // TODO: Avoid the `into_owned`? Not sure why skipping that causes lifetime
         // issues for `asset_server`.
-        let path = asset_server
-            .get_path(handle.id())
-            .expect("TODO")
-            .into_owned();
+        let path = handle
+            .path()
+            .expect("TODO - there are valid cases where this can fail, e.g. uuid handles")
+            .clone();
 
         Self::from_asset_path(&path)
     }
@@ -755,7 +755,6 @@ mod acme {
                 for primitive in mesh.primitives.iter() {
                     let mesh = Some(AcmeMesh {
                         asset: BassetPathSerializable::from_handle(
-                            asset_server,
                             &primitive.mesh.clone().untyped(),
                         ),
                     });
@@ -767,9 +766,10 @@ mod acme {
                     );
 
                     let material = Some(AcmeMaterial {
-                        base_color_texture: standard_material.base_color_texture.clone().map(|p| {
-                            BassetPathSerializable::from_handle(asset_server, &p.untyped())
-                        }),
+                        base_color_texture: standard_material
+                            .base_color_texture
+                            .clone()
+                            .map(|p| BassetPathSerializable::from_handle(&p.untyped())),
                     });
 
                     entities.push(AcmeEntity {
