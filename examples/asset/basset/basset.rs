@@ -69,13 +69,13 @@ pub struct BassetActionContext<'a> {
     loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
 }
 
-/// XXX TODO: Review this. Duplicated from bevy_asset::meta::Settings.
+/// XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
 pub trait BassetActionParams: Downcast + Send + Sync + 'static {}
 
-// XXX TODO: Review this. Duplicated from bevy_asset::meta::Settings.
+// XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
 impl_downcast!(BassetActionParams);
 
-// XXX TODO: Review this. Duplicated from bevy_asset::meta::Settings.
+// XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
 impl<T: 'static> BassetActionParams for T where T: Send + Sync {}
 
 /// XXX TODO: Document.
@@ -321,7 +321,7 @@ impl ErasedAssetLoader for BassetLoader {
 
                 // XXX TODO: Are we correctly updating the loader dependencies?
                 // compare against `load_direct` and `BassetActionContext::erased_load`.
-                return read_standalone_asset(&*cached_standalone_asset, &mut context).await;
+                return read_standalone_asset(&cached_standalone_asset, &context).await;
             }
 
             info!("{:?}: Cache miss.", load_context.path());
@@ -432,6 +432,10 @@ async fn read_standalone_asset(
         return Err("TODO".into());
     }
 
+    // XXX TODO: Some awkward duplication here. We get the loader name so we can
+    // deserialize the meta, but that meta already contains the loader name.
+    // Don't see an obvious solutions.
+
     let loader_name = blob.string().expect("TODO");
     let meta_bytes = blob.bytes_sized().expect("TODO");
     let asset_bytes = blob.bytes_sized().expect("TODO");
@@ -506,7 +510,7 @@ struct BassetActionCache {
 
 impl BassetActionCache {
     fn get<'a>(&'a self, hash: &AssetHash) -> Option<Arc<[u8]>> {
-        self.hash_to_blob.get(hash).map(|b| b.clone())
+        self.hash_to_blob.get(hash).map(Clone::clone)
     }
 
     fn put(&mut self, hash: &AssetHash, blob: Box<[u8]>) {
