@@ -50,6 +50,9 @@ pub trait ErasedAssetSaver: Send + Sync + 'static {
 
     /// The type name of the [`AssetSaver`].
     fn type_name(&self) -> &'static str;
+
+    /// The type name of `AssetSaver::OutputLoader`.
+    fn loader_type_name(&self) -> &'static str;
 }
 
 impl<S: AssetSaver> ErasedAssetSaver for S {
@@ -72,6 +75,9 @@ impl<S: AssetSaver> ErasedAssetSaver for S {
     }
     fn type_name(&self) -> &'static str {
         core::any::type_name::<S>()
+    }
+    fn loader_type_name(&self) -> &'static str {
+        core::any::type_name::<S::OutputLoader>()
     }
 }
 

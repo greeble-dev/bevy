@@ -4,27 +4,39 @@
 mod camera_controller;
 
 use bevy::{
-    asset::{io::Reader, AssetLoader, InlineBasset, LoadContext},
     asset::{
+        io::Reader,
         meta::{AssetAction, AssetHash, AssetMeta, AssetMetaDyn, Settings},
-        AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset, LoadedAsset,
+        saver::{AssetSaver, ErasedAssetSaver},
+        AssetLoader, AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset,
+        InlineBasset, LoadContext, LoadedAsset,
     },
     ecs::error::BevyError,
     light::CascadeShadowConfigBuilder,
     pbr::experimental::meshlet::{
         MeshletMesh, MeshletPlugin, MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR,
     },
-    platform::collections::HashMap,
+    platform::{
+        collections::HashMap,
+        sync::{PoisonError, RwLock},
+    },
     prelude::*,
     reflect::TypePath,
     render::render_resource::AsBindGroup,
     tasks::{BoxedFuture, ConditionalSendFuture},
+    time::common_conditions::on_timer,
 };
+use bevy_asset::io::SliceReader;
 use camera_controller::{CameraController, CameraControllerPlugin};
 use core::result::Result;
 use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
-use std::{boxed::Box, sync::Mutex};
+use std::{
+    boxed::Box,
+    io::Write,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 struct BassetPlugin;
 
@@ -42,7 +54,9 @@ impl Plugin for BassetPlugin {
                     .with_action(action::UppercaseString)
                     .with_action(action::AcmeSceneFromGltf)
                     .with_action(action::MeshletFromMesh)
-                    .with_action(action::ConvertAcmeSceneMeshesToMeshlets),
+                    .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
+                    .with_saver(demo::StringAssetSaver)
+                    .with_saver(demo::IntAssetSaver),
             ))
             .add_systems(Update, acme::tick_scene_spawners);
     }
@@ -235,19 +249,43 @@ struct BassetFileSerializable {
 
 #[derive(Default)]
 struct BassetLoader {
-    type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
+    action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
+    asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
+    cache: Arc<RwLock<BassetActionCache>>,
 }
 
 impl BassetLoader {
     fn with_action<T: BassetAction>(mut self, action: T) -> Self {
-        self.type_name_to_action
+        self.action_type_name_to_action
             .insert(core::any::type_name::<T>(), Box::new(action));
 
         self
     }
 
+    fn with_saver<T: AssetSaver>(mut self, saver: T) -> Self {
+        let settings = T::Settings::default();
+
+        self.asset_type_name_to_saver.insert(
+            core::any::type_name::<T::Asset>(),
+            (Box::new(saver), Box::new(settings)),
+        );
+
+        self
+    }
+
     fn action<'a>(&'a self, type_name: &str) -> Option<&'a dyn ErasedBassetAction> {
-        self.type_name_to_action.get(type_name).map(move |a| &**a)
+        self.action_type_name_to_action
+            .get(type_name)
+            .map(move |a| &**a)
+    }
+
+    fn saver<'a>(
+        &'a self,
+        type_name: &str,
+    ) -> Option<(&'a dyn ErasedAssetSaver, &'a dyn Settings)> {
+        self.asset_type_name_to_saver
+            .get(type_name)
+            .map(move |s| (&*s.0, &*s.1))
     }
 }
 
@@ -263,13 +301,32 @@ impl ErasedAssetLoader for BassetLoader {
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
 
-            let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
+            // XXX TODO: Should include all inputs, versions etc.
+            let input_hash = hash_bytes(&bytes);
 
             let mut context = BassetActionContext {
                 loader: self,
-                asset_server: load_context.server(),
+                asset_server: load_context.asset_server(),
                 loader_dependencies: HashMap::default(),
             };
+
+            let cached_standalone_asset = self
+                .cache
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&input_hash);
+
+            if let Some(cached_standalone_asset) = cached_standalone_asset {
+                info!("{:?}: Cache hit.", load_context.path());
+
+                // XXX TODO: Are we correctly updating the loader dependencies?
+                // compare against `load_direct` and `BassetActionContext::erased_load`.
+                return read_standalone_asset(&*cached_standalone_asset, &mut context).await;
+            }
+
+            info!("{:?}: Cache miss.", load_context.path());
+
+            let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
 
             let asset = context.erased_apply(&basset.root).await?;
 
@@ -288,6 +345,31 @@ impl ErasedAssetLoader for BassetLoader {
                 for (dependency, _) in context.loader_dependencies {
                     dbg!(dependency);
                 }
+            }
+
+            if let Some((saver, settings)) = self.saver(asset.asset_type_name()) {
+                info!("{:?}: Cache put.", load_context.path());
+
+                // XXX TODO: Verify loader matches saver? Need a way to get
+                // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
+                let loader = load_context
+                    .asset_server()
+                    .get_asset_loader_with_type_name(saver.loader_type_name())
+                    .await
+                    .expect("TODO");
+
+                let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
+
+                self.cache
+                    .write()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .put(&input_hash, blob);
+            } else {
+                info!(
+                    "{:?}: Cache ineligible, no saver for \"{}\".",
+                    load_context.path(),
+                    asset.asset_type_name()
+                );
             }
 
             Ok(asset)
@@ -327,6 +409,115 @@ impl ErasedAssetLoader for BassetLoader {
     fn asset_type_id(&self) -> Option<std::any::TypeId> {
         None
     }
+}
+
+const STANDALONE_MAGIC: &[u8] = "BEVY_STANDALONE_ASSET\n".as_bytes();
+const STANDALONE_VERSION: u16 = 1;
+
+async fn read_standalone_asset(
+    blob: &[u8],
+    context: &BassetActionContext<'_>,
+) -> Result<ErasedLoadedAsset, BevyError> {
+    let mut blob = BlobReader::new(blob);
+
+    let magic = blob.bytes(STANDALONE_MAGIC.len()).expect("TODO");
+
+    if magic != STANDALONE_MAGIC {
+        return Err("TODO".into());
+    }
+
+    let version = blob.u16().expect("TODO");
+
+    if version != STANDALONE_VERSION {
+        return Err("TODO".into());
+    }
+
+    let loader_name = blob.string().expect("TODO");
+    let meta_bytes = blob.bytes_sized().expect("TODO");
+    let asset_bytes = blob.bytes_sized().expect("TODO");
+
+    let loader = context
+        .asset_server
+        .get_asset_loader_with_type_name(loader_name)
+        .await
+        .expect("TODO");
+
+    let meta = loader.deserialize_meta(meta_bytes).expect("TODO");
+
+    // XXX TODO: Argh? Need to work out how meaningful this is to the loader.
+    let fake_path = AssetPath::parse("fake_path_from_basset_read_binary_asset");
+
+    let mut reader = SliceReader::new(asset_bytes);
+
+    let load_dependencies = false;
+    let populate_hashes = false;
+
+    context
+        .asset_server
+        .load_with_meta_loader_and_reader(
+            &fake_path,
+            &*meta,
+            &*loader,
+            &mut reader,
+            load_dependencies,
+            populate_hashes,
+        )
+        .await
+        .map_err(Into::<BevyError>::into)
+}
+
+async fn write_standalone_asset(
+    asset: &ErasedLoadedAsset,
+    loader: &dyn ErasedAssetLoader,
+    saver: &dyn ErasedAssetSaver,
+    saver_settings: &dyn Settings,
+) -> Result<Box<[u8]>, BevyError> {
+    let mut asset_bytes = Vec::<u8>::new();
+
+    saver
+        .save(&mut asset_bytes, asset, saver_settings)
+        .await
+        .map_err(Into::<BevyError>::into)?;
+
+    // XXX TODO: Think through loader settings. Firstly, if the asset was loaded
+    // with certain settings then we should preserve them here? There might also
+    // be situations where a saver/loader pair are expecting certain settings?
+    // Could get messy.
+
+    let meta_bytes = loader.default_meta().serialize();
+
+    let mut writer = Vec::<u8>::new();
+
+    let mut blob = BlobWriter::new(&mut writer);
+
+    blob.bytes(STANDALONE_MAGIC);
+    blob.u16(STANDALONE_VERSION);
+    blob.string(loader.type_name());
+    blob.bytes_sized(&meta_bytes);
+    blob.bytes_sized(&asset_bytes);
+
+    Ok(writer.into())
+}
+
+#[derive(Default)]
+struct BassetActionCache {
+    hash_to_blob: HashMap<AssetHash, Arc<[u8]>>,
+}
+
+impl BassetActionCache {
+    fn get<'a>(&'a self, hash: &AssetHash) -> Option<Arc<[u8]>> {
+        self.hash_to_blob.get(hash).map(|b| b.clone())
+    }
+
+    fn put(&mut self, hash: &AssetHash, blob: Box<[u8]>) {
+        self.hash_to_blob.insert(*hash, blob.into());
+    }
+}
+
+fn hash_bytes(bytes: &[u8]) -> AssetHash {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(bytes);
+    *hasher.finalize().as_bytes()
 }
 
 fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::value::RawValue>>) {
@@ -387,6 +578,83 @@ async fn load_direct(
         }
     } else {
         Ok((asset, hash))
+    }
+}
+
+// Helper for reading things out of a byte slice.
+//
+// XXX TODO: Surely this exists somewhere as a library? Or are there better
+// approaches? Contrast with `MeshletMeshLoader` - fairly similar, but uses
+// `Reader` directly plus a few helpers.
+struct BlobReader<'a> {
+    data: &'a [u8],
+    cursor: usize,
+}
+
+impl<'a> BlobReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, cursor: 0 }
+    }
+
+    fn bytes(&mut self, num: usize) -> Option<&'a [u8]> {
+        let range = self.cursor..(self.cursor + num);
+        self.cursor = range.end;
+        self.data.get(range)
+    }
+
+    fn bytes_const<const NUM: usize>(&mut self) -> Option<&'a [u8; NUM]> {
+        <&[u8; NUM]>::try_from(self.bytes(NUM)?).ok()
+    }
+
+    fn bytes_sized(&mut self) -> Option<&'a [u8]> {
+        let len = self.u64()? as usize;
+        self.bytes(len)
+    }
+
+    fn u64(&mut self) -> Option<u64> {
+        let bytes = *self.bytes_const::<{ size_of::<u64>() }>()?;
+        Some(u64::from_le_bytes(bytes))
+    }
+
+    fn u16(&mut self) -> Option<u16> {
+        let bytes = *self.bytes_const::<{ size_of::<u16>() }>()?;
+        Some(u16::from_le_bytes(bytes))
+    }
+
+    fn string(&mut self) -> Option<&'a str> {
+        let len = self.u64()? as usize;
+        str::from_utf8(self.bytes(len)?).ok()
+    }
+}
+
+struct BlobWriter<'a> {
+    writer: &'a mut dyn Write,
+}
+
+impl<'a> BlobWriter<'a> {
+    fn new(writer: &'a mut dyn Write) -> Self {
+        Self { writer }
+    }
+
+    fn bytes(&mut self, bytes: &[u8]) {
+        self.writer.write_all(bytes).expect("TODO");
+    }
+
+    fn bytes_sized(&mut self, bytes: &[u8]) {
+        self.u64(bytes.len() as u64);
+        self.bytes(bytes);
+    }
+
+    fn u64(&mut self, value: u64) {
+        self.writer.write_all(&value.to_le_bytes()).expect("TODO");
+    }
+
+    fn u16(&mut self, value: u16) {
+        self.writer.write_all(&value.to_le_bytes()).expect("TODO");
+    }
+
+    fn string(&mut self, string: &str) {
+        self.bytes_sized(string.as_bytes());
     }
 }
 
@@ -574,7 +842,6 @@ mod action {
                 if let Some(mesh) = entity.mesh.take() {
                     entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
                         asset: BassetPathSerializable::from_action::<MeshletFromMesh>(
-                            // TODO:
                             &MeshletFromMeshParams {
                                 mesh: mesh.asset,
                                 vertex_position_quantization_factor: params
@@ -591,6 +858,8 @@ mod action {
 }
 
 mod demo {
+    use bevy_asset::{io::Writer, saver::SavedAsset, AsyncWriteExt};
+
     use super::*;
 
     #[derive(Asset, TypePath, Debug)]
@@ -620,8 +889,7 @@ mod demo {
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
 
-            // TODO: Error handling.
-            let mut string = String::from_utf8(bytes).unwrap();
+            let mut string = String::from_utf8(bytes).expect("TODO");
 
             if settings.uppercase {
                 string = string.to_uppercase();
@@ -635,8 +903,28 @@ mod demo {
         }
     }
 
+    #[derive(Default)]
+    pub struct StringAssetSaver;
+
+    impl AssetSaver for StringAssetSaver {
+        type Asset = StringAsset;
+        type Settings = ();
+        type OutputLoader = StringAssetLoader;
+        type Error = std::io::Error;
+
+        async fn save(
+            &self,
+            writer: &mut Writer,
+            asset: SavedAsset<'_, Self::Asset>,
+            _settings: &Self::Settings,
+        ) -> Result<StringAssetSettings, Self::Error> {
+            writer.write_all(asset.0.as_bytes()).await?;
+
+            Ok(StringAssetSettings::default())
+        }
+    }
+
     #[derive(Asset, TypePath, Debug)]
-    #[expect(dead_code, reason = "TODO")]
     pub struct IntAsset(pub i64);
 
     #[derive(Default)]
@@ -663,6 +951,27 @@ mod demo {
 
         fn extensions(&self) -> &[&str] {
             &["int"]
+        }
+    }
+
+    #[derive(Default)]
+    pub struct IntAssetSaver;
+
+    impl AssetSaver for IntAssetSaver {
+        type Asset = IntAsset;
+        type Settings = ();
+        type OutputLoader = IntAssetLoader;
+        type Error = std::io::Error;
+
+        async fn save(
+            &self,
+            writer: &mut Writer,
+            asset: SavedAsset<'_, Self::Asset>,
+            _settings: &Self::Settings,
+        ) -> Result<(), Self::Error> {
+            writer.write_all(asset.0.to_string().as_bytes()).await?;
+
+            Ok(())
         }
     }
 }
@@ -908,7 +1217,6 @@ struct MeshletDebugMaterial {
 impl Material for MeshletDebugMaterial {}
 
 #[derive(Resource)]
-#[expect(dead_code, reason = "Needed to keep handles live")]
 struct Handles(Vec<UntypedHandle>);
 
 fn setup(
@@ -990,12 +1298,15 @@ fn print_events<T: Asset + std::fmt::Debug>(
     events: &mut MessageReader<AssetEvent<T>>,
 ) {
     for event in events.read() {
-        if let AssetEvent::Added { id } = *event {
-            println!(
-                "{:?}: {:?}",
-                asset_server.get_path(id).unwrap(),
-                assets.get(id).unwrap()
-            );
+        match *event {
+            AssetEvent::Added { id } | AssetEvent::Modified { id } => {
+                println!(
+                    "{:?}: {:?}",
+                    asset_server.get_path(id).unwrap(),
+                    assets.get(id).unwrap()
+                );
+            }
+            _ => (),
         }
     }
 }
@@ -1014,6 +1325,20 @@ fn print(
     print_events(&asset_server, &scene_assets, &mut scene_events);
 }
 
+fn reload(asset_server: Res<AssetServer>, handles: Res<Handles>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+
+    *done = true;
+
+    info!("RELOADING");
+
+    for handle in &handles.0 {
+        asset_server.reload(handle.path().expect("TODO"));
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins((
@@ -1030,5 +1355,6 @@ fn main() {
         ))
         .add_systems(Startup, setup)
         .add_systems(Update, print)
+        .add_systems(Update, reload.run_if(on_timer(Duration::from_secs(2))))
         .run();
 }

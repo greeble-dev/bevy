@@ -581,8 +581,8 @@ impl<'a> LoadContext<'a> {
         self.loader().load(path)
     }
 
-    // XXX TODO: Review.
-    pub fn server(&self) -> &AssetServer {
+    // XXX TODO: Review, document.
+    pub fn asset_server(&self) -> &AssetServer {
         self.asset_server
     }
 }
