@@ -23,10 +23,10 @@ use bevy::{
     prelude::*,
     reflect::TypePath,
     render::render_resource::AsBindGroup,
-    tasks::{BoxedFuture, ConditionalSendFuture},
+    tasks::{BoxedFuture, ConditionalSendFuture, IoTaskPool},
     time::common_conditions::on_timer,
 };
-use bevy_asset::io::SliceReader;
+use bevy_asset::{io::SliceReader, AsyncWriteExt};
 use camera_controller::{CameraController, CameraControllerPlugin};
 use core::result::Result;
 use downcast_rs::{impl_downcast, Downcast};
@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     boxed::Box,
     io::Write,
+    path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -48,7 +49,7 @@ impl Plugin for BassetPlugin {
             .register_asset_loader(demo::StringAssetLoader)
             .register_asset_loader(demo::IntAssetLoader)
             .register_erased_asset_loader(Box::new(
-                BassetLoader::default()
+                BassetLoader::new(Some("examples/asset/basset/cache".into()))
                     .with_action(action::LoadPath)
                     .with_action(action::JoinStrings)
                     .with_action(action::UppercaseString)
@@ -247,14 +248,21 @@ struct BassetFileSerializable {
     // TODO: Versioning?
 }
 
-#[derive(Default)]
 struct BassetLoader {
     action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
-    cache: Arc<RwLock<BassetActionCache>>,
+    cache: BassetActionCache,
 }
 
 impl BassetLoader {
+    fn new(file_cache_path: Option<PathBuf>) -> Self {
+        Self {
+            cache: BassetActionCache::new(file_cache_path),
+            action_type_name_to_action: Default::default(),
+            asset_type_name_to_saver: Default::default(),
+        }
+    }
+
     fn with_action<T: BassetAction>(mut self, action: T) -> Self {
         self.action_type_name_to_action
             .insert(core::any::type_name::<T>(), Box::new(action));
@@ -310,21 +318,13 @@ impl ErasedAssetLoader for BassetLoader {
                 loader_dependencies: HashMap::default(),
             };
 
-            let cached_standalone_asset = self
-                .cache
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
-                .get(&input_hash);
-
-            if let Some(cached_standalone_asset) = cached_standalone_asset {
-                info!("{:?}: Cache hit.", load_context.path());
-
+            if let Some(cached_standalone_asset) =
+                self.cache.get(&input_hash, load_context.asset_path()).await
+            {
                 // XXX TODO: Are we correctly updating the loader dependencies?
                 // compare against `load_direct` and `BassetActionContext::erased_load`.
                 return read_standalone_asset(&cached_standalone_asset, &context).await;
             }
-
-            info!("{:?}: Cache miss.", load_context.path());
 
             let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
 
@@ -339,7 +339,7 @@ impl ErasedAssetLoader for BassetLoader {
                 static MUTEX: Mutex<()> = Mutex::new(());
                 let _lock = MUTEX.lock();
 
-                dbg!(load_context.path());
+                dbg!(load_context.asset_path());
                 dbg!(ron::ser::to_string(&basset)?);
 
                 for (dependency, _) in context.loader_dependencies {
@@ -348,7 +348,7 @@ impl ErasedAssetLoader for BassetLoader {
             }
 
             if let Some((saver, settings)) = self.saver(asset.asset_type_name()) {
-                info!("{:?}: Cache put.", load_context.path());
+                info!("{:?}: Cache put.", load_context.asset_path());
 
                 // XXX TODO: Verify loader matches saver? Need a way to get
                 // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
@@ -361,13 +361,11 @@ impl ErasedAssetLoader for BassetLoader {
                 let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
 
                 self.cache
-                    .write()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .put(&input_hash, blob);
+                    .put(&input_hash, blob.into(), load_context.asset_path());
             } else {
                 info!(
                     "{:?}: Cache ineligible, no saver for \"{}\".",
-                    load_context.path(),
+                    load_context.asset_path(),
                     asset.asset_type_name()
                 );
             }
@@ -411,7 +409,7 @@ impl ErasedAssetLoader for BassetLoader {
     }
 }
 
-const STANDALONE_MAGIC: &[u8] = "BEVY_STANDALONE_ASSET\n".as_bytes();
+const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
 const STANDALONE_VERSION: u16 = 1;
 
 async fn read_standalone_asset(
@@ -434,7 +432,7 @@ async fn read_standalone_asset(
 
     // XXX TODO: Some awkward duplication here. We get the loader name so we can
     // deserialize the meta, but that meta already contains the loader name.
-    // Don't see an obvious solutions.
+    // Don't see an obvious solution.
 
     let loader_name = blob.string().expect("TODO");
     let meta_bytes = blob.bytes_sized().expect("TODO");
@@ -504,17 +502,138 @@ async fn write_standalone_asset(
 }
 
 #[derive(Default)]
-struct BassetActionCache {
+struct BassetActionMemoryCache {
     hash_to_blob: HashMap<AssetHash, Arc<[u8]>>,
 }
 
-impl BassetActionCache {
+impl BassetActionMemoryCache {
+    // XXX TODO: Is this lifetime necessary?
     fn get<'a>(&'a self, hash: &AssetHash) -> Option<Arc<[u8]>> {
         self.hash_to_blob.get(hash).map(Clone::clone)
     }
 
-    fn put(&mut self, hash: &AssetHash, blob: Box<[u8]>) {
-        self.hash_to_blob.insert(*hash, blob.into());
+    fn put(&mut self, hash: &AssetHash, blob: Arc<[u8]>) {
+        self.hash_to_blob.insert(*hash, blob);
+    }
+}
+
+struct BassetActionFileCache {
+    path: PathBuf,
+}
+
+impl BassetActionFileCache {
+    fn hash_path(&self, hash: &AssetHash) -> PathBuf {
+        // XXX TODO: Duplicates code in `AssetPath::from_basset`.
+        let hex = String::from_iter(hash.iter().map(|b| format!("{:x}", b)));
+
+        // Spread files across multiple folders in case we're on a filesystem
+        // that doesn't like lots of files in a single folder.
+        //
+        // XXX TODO: Maybe unnecessary?
+        let hash_path = [&hex[0..7], &hex[8..15], &hex[16..23], &hex[..]]
+            .iter()
+            .collect::<PathBuf>();
+
+        self.path.join(hash_path)
+    }
+}
+
+struct BassetActionCache {
+    memory: Arc<RwLock<BassetActionMemoryCache>>,
+    file: Option<BassetActionFileCache>,
+}
+
+impl BassetActionCache {
+    fn new(file_cache_path: Option<PathBuf>) -> Self {
+        BassetActionCache {
+            memory: Default::default(),
+            file: file_cache_path.map(|path| BassetActionFileCache { path }),
+        }
+    }
+
+    // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
+    async fn get(&self, hash: &AssetHash, asset_path: &AssetPath<'static>) -> Option<Arc<[u8]>> {
+        if let Some(from_memory) = self
+            .memory
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(hash)
+        {
+            info!("{asset_path:?}: Memory cache hit.");
+
+            return Some(from_memory);
+        }
+
+        info!("{asset_path:?}: Memory cache miss.");
+
+        let Some(file_cache) = &self.file else {
+            return None;
+        };
+
+        let path = file_cache.hash_path(hash);
+
+        let Ok(from_file) = async_fs::read(path).await else {
+            info!("{asset_path:?}: File cache miss.");
+
+            return None;
+        };
+
+        info!("{asset_path:?}: File cache hit.");
+
+        let from_file = Into::<Arc<[u8]>>::into(from_file);
+
+        self.memory
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .put(hash, from_file.clone());
+
+        Some(from_file)
+    }
+
+    // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
+    fn put(&self, hash: &AssetHash, blob: Arc<[u8]>, asset_path: &AssetPath<'static>) {
+        self.memory
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .put(hash, blob.clone());
+
+        info!("{asset_path:?}: Memory cache put.");
+
+        let Some(file_cache) = &self.file else {
+            return;
+        };
+
+        let path = file_cache.hash_path(hash);
+        let asset_path = asset_path.to_owned(); // XXX TODO: Annoying clone when it's only for debugging.
+
+        IoTaskPool::get()
+            .spawn(async move {
+                async_fs::create_dir_all(path.parent().expect("TODO"))
+                    .await
+                    .expect("TODO");
+
+                let temp_path = path.with_extension("tmp");
+
+                let Ok(mut temp_file) = async_fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&temp_path)
+                    .await
+                else {
+                    // TODO: Temp files could be left behind if interrupted
+                    // during write or rename. Should we try to clean them up?
+                    return;
+                };
+
+                temp_file.write_all(&blob).await.expect("TODO");
+
+                async_fs::rename(temp_path, path)
+                    .await
+                    .expect("TODO, this is ok to fail?");
+
+                info!("{asset_path:?}: File cache put.");
+            })
+            .detach();
     }
 }
 
@@ -589,7 +708,8 @@ async fn load_direct(
 //
 // XXX TODO: Surely this exists somewhere as a library? Or are there better
 // approaches? Contrast with `MeshletMeshLoader` - fairly similar, but uses
-// `Reader` directly plus a few helpers.
+// `Reader` directly plus a few helpers. Also see `byteorder` crate
+// (https://docs.rs/byteorder/latest/byteorder/trait.ReadBytesExt.html)
 struct BlobReader<'a> {
     data: &'a [u8],
     cursor: usize,
