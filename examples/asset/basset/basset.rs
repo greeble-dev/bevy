@@ -329,14 +329,9 @@ impl ErasedAssetLoader for BassetLoader {
 
             if !context.loader_dependencies.is_empty() {
                 info!(
-                    "{:?}: Dependencies = [{}]",
+                    "{:?}: Dependencies = {:?}",
                     load_context.asset_path(),
-                    &context
-                        .loader_dependencies
-                        .keys()
-                        .map(|p| p.to_string())
-                        .reduce(|l, r| l + &", " + &r)
-                        .unwrap()
+                    context.loader_dependencies.keys().collect::<Vec<_>>(),
                 );
             }
 
