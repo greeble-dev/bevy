@@ -31,13 +31,7 @@ use camera_controller::{CameraController, CameraControllerPlugin};
 use core::result::Result;
 use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
-use std::{
-    boxed::Box,
-    io::Write,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{boxed::Box, io::Write, path::PathBuf, sync::Arc, time::Duration};
 
 struct BassetPlugin;
 
@@ -333,18 +327,17 @@ impl ErasedAssetLoader for BassetLoader {
             // XXX TODO: At this point we should replace `asset.loader_dependencies`
             // with our own `context.loader_dependencies`.
 
-            // TODO: Better way to dump temporary debug without it getting mixed
-            // up due to threading.
-            {
-                static MUTEX: Mutex<()> = Mutex::new(());
-                let _lock = MUTEX.lock();
-
-                dbg!(load_context.asset_path());
-                dbg!(ron::ser::to_string(&basset)?);
-
-                for (dependency, _) in context.loader_dependencies {
-                    dbg!(dependency);
-                }
+            if !context.loader_dependencies.is_empty() {
+                info!(
+                    "{:?}: Dependencies = [{}]",
+                    load_context.asset_path(),
+                    &context
+                        .loader_dependencies
+                        .keys()
+                        .map(|p| p.to_string())
+                        .reduce(|l, r| l + &", " + &r)
+                        .unwrap()
+                );
             }
 
             if let Some((saver, settings)) = self.saver(asset.asset_type_name()) {
@@ -1424,8 +1417,8 @@ fn print_events<T: Asset + std::fmt::Debug>(
     for event in events.read() {
         match *event {
             AssetEvent::Added { id } | AssetEvent::Modified { id } => {
-                println!(
-                    "{:?}: {:?}",
+                info!(
+                    "{:?}: Value = {:?}",
                     asset_server.get_path(id).unwrap(),
                     assets.get(id).unwrap()
                 );
