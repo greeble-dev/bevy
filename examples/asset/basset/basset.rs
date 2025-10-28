@@ -9,7 +9,7 @@ use bevy::{
         meta::{AssetAction, AssetHash, AssetMeta, AssetMetaDyn, Settings},
         saver::{AssetSaver, ErasedAssetSaver},
         AssetLoader, AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset,
-        InlineBasset, LoadContext, LoadedAsset,
+        LoadContext, LoadedAsset,
     },
     ecs::error::BevyError,
     light::CascadeShadowConfigBuilder,
@@ -210,7 +210,9 @@ impl BassetPathSerializable {
     }
 
     /// XXX TODO: Document.
-    pub fn from_asset_path(asset_path: &AssetPath<'static>) -> Self {
+    pub fn from_asset_path(_asset_path: &AssetPath<'static>) -> Self {
+        todo!()
+        /*
         if let Some(inline_basset) = asset_path.inline_basset() {
             // XXX TODO: We're losing information here if there's something other
             // than `basset::root`, e.g. versioning.
@@ -222,17 +224,21 @@ impl BassetPathSerializable {
         } else {
             Self::Path(asset_path.to_string())
         }
+        */
     }
 
     /// XXX TODO: Replace with From/To impl?
     pub fn to_asset_path(&self) -> AssetPath<'static> {
         // XXX TODO: Versioning? Need a more robust way to deal with the difference
         // between BassetFileSerializable and BassetPathSerializable.
+        todo!()
+        /*
         AssetPath::from_basset(InlineBasset::new(
             ron::ser::to_string(&BassetFileSerializable { root: self.clone() })
                 .expect("TODO")
                 .into(),
         ))
+        */
     }
 }
 
