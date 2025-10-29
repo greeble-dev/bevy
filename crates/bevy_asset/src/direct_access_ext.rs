@@ -35,7 +35,7 @@ impl DirectAssetAccessExt for World {
     /// # Panics
     /// If `self` doesn't have an [`AssetServer`] resource initialized yet.
     fn load_asset<'a, A: Asset>(&self, path: impl Into<AssetPath<'a>>) -> Handle<A> {
-        self.resource::<AssetServer>().load(path)
+        self.resource::<AssetServer>().load(path.into()) // XXX TODO: Should this function take an `AssetRef`?
     }
     /// Load an asset with settings, similarly to [`AssetServer::load_with_settings`].
     ///

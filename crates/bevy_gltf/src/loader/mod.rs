@@ -246,6 +246,9 @@ impl GltfLoader {
 
         let file_name = load_context
             .asset_path()
+            // XXX TODO: Review this. Added `.path().unwrap().`.
+            .path()
+            .unwrap()
             .path()
             .to_str()
             .ok_or(GltfError::Gltf(gltf::Error::Io(Error::new(

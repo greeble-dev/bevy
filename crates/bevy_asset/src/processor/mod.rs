@@ -1350,7 +1350,8 @@ impl ProcessorAssetInfos {
                         full_hash: AssetHash::default(),
                         process_dependencies: vec![],
                     });
-                    self.add_dependent(dependency.path(), asset_path.to_owned());
+                    // XXX TODO: Avoid unwrap.
+                    self.add_dependent(dependency.path().path().unwrap(), asset_path.to_owned());
                 }
 
                 let info = self.get_mut(&asset_path).expect("info should exist");

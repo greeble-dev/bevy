@@ -1,17 +1,17 @@
 (
-	root: Action(
+	root: Action((
 		name: "basset::action::JoinStrings",
 		params: (
 			separator: ", ",
 			strings: [
-				Action(
+				Action((
 					name: "basset::action::UppercaseString",
 					params: (
 						string: Path("hello.string"),
 					)
-				),
+				)),
 				Path("world.string"),
 			],
 		)
-	)
+	))
 )

@@ -1,6 +1,6 @@
 use crate::{
     meta::{AssetHash, MetaTransform},
-    Asset, AssetHandleProvider, AssetLoadError, AssetPath, DependencyLoadState, ErasedLoadedAsset,
+    Asset, AssetHandleProvider, AssetLoadError, AssetRef, DependencyLoadState, ErasedLoadedAsset,
     Handle, InternalAssetEvent, LoadState, RecursiveDependencyLoadState, StrongHandle,
     UntypedAssetId, UntypedHandle,
 };
@@ -23,7 +23,7 @@ use tracing::warn;
 #[derive(Debug)]
 pub(crate) struct AssetInfo {
     weak_handle: Weak<StrongHandle>,
-    pub(crate) path: Option<AssetPath<'static>>,
+    pub(crate) path: Option<AssetRef<'static>>,
     pub(crate) load_state: LoadState,
     pub(crate) dep_load_state: DependencyLoadState,
     pub(crate) rec_dep_load_state: RecursiveDependencyLoadState,
@@ -39,7 +39,7 @@ pub(crate) struct AssetInfo {
     /// save memory.
     ///
     /// [`LoadedAsset`]: crate::loader::LoadedAsset
-    loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
+    loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     /// The number of handle drops to skip for this asset.
     /// See usage (and comments) in `get_or_create_path_handle` for context.
     handle_drops_to_skip: usize,
@@ -48,7 +48,7 @@ pub(crate) struct AssetInfo {
 }
 
 impl AssetInfo {
-    fn new(weak_handle: Weak<StrongHandle>, path: Option<AssetPath<'static>>) -> Self {
+    fn new(weak_handle: Weak<StrongHandle>, path: Option<AssetRef<'static>>) -> Self {
         Self {
             weak_handle,
             path,
@@ -70,21 +70,21 @@ impl AssetInfo {
 
 #[derive(Default)]
 pub(crate) struct AssetInfos {
-    path_to_id: HashMap<AssetPath<'static>, TypeIdMap<UntypedAssetId>>,
+    path_to_id: HashMap<AssetRef<'static>, TypeIdMap<UntypedAssetId>>,
     infos: HashMap<UntypedAssetId, AssetInfo>,
     /// If set to `true`, this informs [`AssetInfos`] to track data relevant to watching for changes (such as `load_dependents`)
     /// This should only be set at startup.
     pub(crate) watching_for_changes: bool,
     /// Tracks assets that depend on the "key" asset path inside their asset loaders ("loader dependencies")
     /// This should only be set when watching for changes to avoid unnecessary work.
-    pub(crate) loader_dependents: HashMap<AssetPath<'static>, HashSet<AssetPath<'static>>>,
+    pub(crate) loader_dependents: HashMap<AssetRef<'static>, HashSet<AssetRef<'static>>>,
     /// Tracks living labeled assets for a given source asset.
     /// This should only be set when watching for changes to avoid unnecessary work.
-    pub(crate) living_labeled_assets: HashMap<AssetPath<'static>, HashSet<Box<str>>>,
+    pub(crate) living_labeled_assets: HashMap<AssetRef<'static>, HashSet<Box<str>>>,
     pub(crate) handle_providers: TypeIdMap<AssetHandleProvider>,
     pub(crate) dependency_loaded_event_sender: TypeIdMap<fn(&mut World, UntypedAssetId)>,
     pub(crate) dependency_failed_event_sender:
-        TypeIdMap<fn(&mut World, UntypedAssetId, AssetPath<'static>, AssetLoadError)>,
+        TypeIdMap<fn(&mut World, UntypedAssetId, AssetRef<'static>, AssetLoadError)>,
     pub(crate) pending_tasks: HashMap<UntypedAssetId, Task<()>>,
 }
 
@@ -122,10 +122,10 @@ impl AssetInfos {
     fn create_handle_internal(
         infos: &mut HashMap<UntypedAssetId, AssetInfo>,
         handle_providers: &TypeIdMap<AssetHandleProvider>,
-        living_labeled_assets: &mut HashMap<AssetPath<'static>, HashSet<Box<str>>>,
+        living_labeled_assets: &mut HashMap<AssetRef<'static>, HashSet<Box<str>>>,
         watching_for_changes: bool,
         type_id: TypeId,
-        path: Option<AssetPath<'static>>,
+        path: Option<AssetRef<'static>>,
         meta_transform: Option<MetaTransform>,
         loading: bool,
     ) -> Result<UntypedHandle, GetOrCreateHandleInternalError> {
@@ -133,7 +133,8 @@ impl AssetInfos {
             .get(&type_id)
             .ok_or(MissingHandleProviderError(type_id))?;
 
-        if watching_for_changes && let Some(path) = &path {
+        if watching_for_changes && let Some(path) = path.as_ref() {
+            // XXX TODO: Review. Is it ok to handle paths but not actions?
             let mut without_label = path.to_owned();
             if let Some(label) = without_label.take_label() {
                 let labels = living_labeled_assets.entry(without_label).or_default();
@@ -155,7 +156,7 @@ impl AssetInfos {
 
     pub(crate) fn get_or_create_path_handle<A: Asset>(
         &mut self,
-        path: AssetPath<'static>,
+        path: AssetRef<'static>,
         loading_mode: HandleLoadingMode,
         meta_transform: Option<MetaTransform>,
     ) -> (Handle<A>, bool) {
@@ -173,7 +174,7 @@ impl AssetInfos {
 
     pub(crate) fn get_or_create_path_handle_erased(
         &mut self,
-        path: AssetPath<'static>,
+        path: AssetRef<'static>,
         type_id: TypeId,
         type_name: Option<&str>,
         loading_mode: HandleLoadingMode,
@@ -197,7 +198,7 @@ impl AssetInfos {
     /// Returns true if an asset load should be kicked off
     pub(crate) fn get_or_create_path_handle_internal(
         &mut self,
-        path: AssetPath<'static>,
+        path: AssetRef<'static>,
         type_id: Option<TypeId>,
         loading_mode: HandleLoadingMode,
         meta_transform: Option<MetaTransform>,
@@ -291,7 +292,7 @@ impl AssetInfos {
 
     pub(crate) fn get_path_and_type_id_handle(
         &self,
-        path: &AssetPath<'_>,
+        path: &AssetRef<'_>,
         type_id: TypeId,
     ) -> Option<UntypedHandle> {
         let id = self.path_to_id.get(path)?.get(&type_id)?;
@@ -300,7 +301,7 @@ impl AssetInfos {
 
     pub(crate) fn get_path_ids<'a>(
         &'a self,
-        path: &'a AssetPath<'_>,
+        path: &'a AssetRef<'_>,
     ) -> impl Iterator<Item = UntypedAssetId> + 'a {
         /// Concrete type to allow returning an `impl Iterator` even if `self.path_to_id.get(&path)` is `None`
         enum HandlesByPathIterator<T> {
@@ -331,7 +332,7 @@ impl AssetInfos {
 
     pub(crate) fn get_path_handles<'a>(
         &'a self,
-        path: &'a AssetPath<'_>,
+        path: &'a AssetRef<'_>,
     ) -> impl Iterator<Item = UntypedHandle> + 'a {
         self.get_path_ids(path)
             .filter_map(|id| self.get_id_handle(id))
@@ -344,14 +345,14 @@ impl AssetInfos {
     }
 
     /// Returns `true` if the asset this path points to is still alive
-    pub(crate) fn is_path_alive<'a>(&self, path: impl Into<AssetPath<'a>>) -> bool {
+    pub(crate) fn is_path_alive<'a>(&self, path: impl Into<AssetRef<'a>>) -> bool {
         self.get_path_ids(&path.into())
             .filter_map(|id| self.infos.get(&id))
             .any(|info| info.weak_handle.strong_count() > 0)
     }
 
     /// Returns `true` if the asset at this path should be reloaded
-    pub(crate) fn should_reload(&self, path: &AssetPath) -> bool {
+    pub(crate) fn should_reload(&self, path: &AssetRef) -> bool {
         if self.is_path_alive(path) {
             return true;
         }
@@ -473,7 +474,7 @@ impl AssetInfos {
                     .infos
                     .get(&loaded_asset_id)
                     .expect("Asset info should always exist at this point");
-                if let Some(asset_path) = &info.path {
+                if let Some(asset_path) = info.path.as_ref() {
                     for loader_dependency in loaded_asset.loader_dependencies.keys() {
                         let dependents = self
                             .loader_dependents
@@ -642,9 +643,9 @@ impl AssetInfos {
 
     fn remove_dependents_and_labels(
         info: &AssetInfo,
-        loader_dependents: &mut HashMap<AssetPath<'static>, HashSet<AssetPath<'static>>>,
-        path: &AssetPath<'static>,
-        living_labeled_assets: &mut HashMap<AssetPath<'static>, HashSet<Box<str>>>,
+        loader_dependents: &mut HashMap<AssetRef<'static>, HashSet<AssetRef<'static>>>,
+        path: &AssetRef<'static>,
+        living_labeled_assets: &mut HashMap<AssetRef<'static>, HashSet<Box<str>>>,
     ) {
         for loader_dependency in info.loader_dependencies.keys() {
             if let Some(dependents) = loader_dependents.get_mut(loader_dependency) {
@@ -671,9 +672,9 @@ impl AssetInfos {
 
     fn process_handle_drop_internal(
         infos: &mut HashMap<UntypedAssetId, AssetInfo>,
-        path_to_id: &mut HashMap<AssetPath<'static>, TypeIdMap<UntypedAssetId>>,
-        loader_dependents: &mut HashMap<AssetPath<'static>, HashSet<AssetPath<'static>>>,
-        living_labeled_assets: &mut HashMap<AssetPath<'static>, HashSet<Box<str>>>,
+        path_to_id: &mut HashMap<AssetRef<'static>, TypeIdMap<UntypedAssetId>>,
+        loader_dependents: &mut HashMap<AssetRef<'static>, HashSet<AssetRef<'static>>>,
+        living_labeled_assets: &mut HashMap<AssetRef<'static>, HashSet<Box<str>>>,
         pending_tasks: &mut HashMap<UntypedAssetId, Task<()>>,
         watching_for_changes: bool,
         id: UntypedAssetId,

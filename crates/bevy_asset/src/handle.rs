@@ -1,5 +1,5 @@
 use crate::{
-    meta::MetaTransform, Asset, AssetId, AssetIndexAllocator, AssetPath, InternalAssetId,
+    meta::MetaTransform, Asset, AssetId, AssetIndexAllocator, AssetRef, InternalAssetId,
     UntypedAssetId,
 };
 use alloc::sync::Arc;
@@ -52,7 +52,7 @@ impl AssetHandleProvider {
         &self,
         id: InternalAssetId,
         asset_server_managed: bool,
-        path: Option<AssetPath<'static>>,
+        path: Option<AssetRef<'static>>,
         meta_transform: Option<MetaTransform>,
     ) -> Arc<StrongHandle> {
         Arc::new(StrongHandle {
@@ -67,7 +67,7 @@ impl AssetHandleProvider {
     pub(crate) fn reserve_handle_internal(
         &self,
         asset_server_managed: bool,
-        path: Option<AssetPath<'static>>,
+        path: Option<AssetRef<'static>>,
         meta_transform: Option<MetaTransform>,
     ) -> Arc<StrongHandle> {
         let index = self.allocator.reserve();
@@ -86,7 +86,7 @@ impl AssetHandleProvider {
 pub struct StrongHandle {
     pub(crate) id: UntypedAssetId,
     pub(crate) asset_server_managed: bool,
-    pub(crate) path: Option<AssetPath<'static>>,
+    pub(crate) path: Option<AssetRef<'static>>,
     /// Modifies asset meta. This is stored on the handle because it is:
     /// 1. configuration tied to the lifetime of a specific asset load
     /// 2. configuration that must be repeatable when the asset is hot-reloaded
@@ -161,8 +161,9 @@ impl<A: Asset> Handle<A> {
 
     /// Returns the path if this is (1) a strong handle and (2) the asset has a path
     #[inline]
-    pub fn path(&self) -> Option<&AssetPath<'static>> {
+    pub fn path(&self) -> Option<&AssetRef<'static>> {
         match self {
+            // XXX TODO: Should we do this or make path() return AssetRef?
             Handle::Strong(handle) => handle.path.as_ref(),
             Handle::Uuid(..) => None,
         }
@@ -301,7 +302,7 @@ impl UntypedHandle {
 
     /// Returns the path if this is (1) a strong handle and (2) the asset has a path
     #[inline]
-    pub fn path(&self) -> Option<&AssetPath<'static>> {
+    pub fn path(&self) -> Option<&AssetRef<'static>> {
         match self {
             UntypedHandle::Strong(handle) => handle.path.as_ref(),
             UntypedHandle::Uuid { .. } => None,

@@ -311,14 +311,23 @@ impl<'a> ProcessContext<'a> {
         let loader = server.get_asset_loader_with_type_name(loader_name).await?;
         let mut reader = SliceReader::new(self.asset_bytes);
         let loaded_asset = server
-            .load_with_meta_loader_and_reader(self.path, &meta, &*loader, &mut reader, false, true)
+            // XXX TODO: Avoid clone?
+            .load_with_meta_loader_and_reader(
+                &self.path.to_owned().into(),
+                &meta,
+                &*loader,
+                &mut reader,
+                false,
+                true,
+            )
             .await?;
         for (path, full_hash) in &loaded_asset.loader_dependencies {
             self.new_processed_info
                 .process_dependencies
                 .push(ProcessDependencyInfo {
                     full_hash: *full_hash,
-                    path: path.to_owned(),
+                    // XXX TODO: Don't unwrap. Decide if processing should support refs.
+                    path: path.path().unwrap().to_owned(),
                 });
         }
         Ok(loaded_asset)

@@ -420,7 +420,7 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
             let (meta, loader, reader) = self
                 .load_context
                 .asset_server
-                .get_meta_loader_and_reader(path, asset_type_id)
+                .get_meta_loader_and_reader_for_path(path, asset_type_id)
                 .await
                 .map_err(|error| LoadDirectError::LoadError {
                     dependency: path.clone(),
@@ -465,7 +465,7 @@ impl NestedLoader<'_, '_, StaticTyped, Immediate<'_, '_>> {
                     .map_err(|_| LoadDirectError::LoadError {
                         dependency: path.clone(),
                         error: AssetLoadError::RequestedHandleTypeMismatch {
-                            path,
+                            path: path.into(),
                             requested: TypeId::of::<A>(),
                             // XXX TODO: Needs work now that asset_type_name is Option. Could use untyped_asset.asset_type_name()? But needs refactoring as that's already been moved.
                             actual_asset_name: "", // loader.asset_type_name(),

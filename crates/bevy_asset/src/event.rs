@@ -1,4 +1,4 @@
-use crate::{Asset, AssetId, AssetLoadError, AssetPath, UntypedAssetId};
+use crate::{Asset, AssetId, AssetLoadError, AssetRef, UntypedAssetId};
 use bevy_ecs::message::Message;
 use bevy_reflect::Reflect;
 use core::fmt::Debug;
@@ -11,7 +11,7 @@ pub struct AssetLoadFailedEvent<A: Asset> {
     /// The stable identifier of the asset that failed to load.
     pub id: AssetId<A>,
     /// The asset path that was attempted.
-    pub path: AssetPath<'static>,
+    pub path: AssetRef<'static>,
     /// Why the asset failed to load.
     pub error: AssetLoadError,
 }
@@ -29,7 +29,7 @@ pub struct UntypedAssetLoadFailedEvent {
     /// The stable identifier of the asset that failed to load.
     pub id: UntypedAssetId,
     /// The asset path that was attempted.
-    pub path: AssetPath<'static>,
+    pub path: AssetRef<'static>,
     /// Why the asset failed to load.
     pub error: AssetLoadError,
 }

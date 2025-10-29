@@ -3,7 +3,7 @@ use crate::{
     loader_builders::{Deferred, NestedLoader, StaticTyped},
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfoMinimal, Settings},
     path::AssetPath,
-    Asset, AssetLoadError, AssetServer, AssetServerMode, Assets, Handle, UntypedAssetId,
+    Asset, AssetLoadError, AssetRef, AssetServer, AssetServerMode, Assets, Handle, UntypedAssetId,
     UntypedHandle,
 };
 use alloc::{
@@ -147,7 +147,7 @@ pub(crate) struct LabeledAsset {
 pub struct LoadedAsset<A: Asset> {
     pub(crate) value: A,
     pub(crate) dependencies: HashSet<UntypedAssetId>,
-    pub(crate) loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
+    pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     pub(crate) labeled_assets: HashMap<CowArc<'static, str>, LabeledAsset>,
 }
 
@@ -200,7 +200,7 @@ impl<A: Asset> From<A> for LoadedAsset<A> {
 pub struct ErasedLoadedAsset {
     pub(crate) value: Box<dyn AssetContainer>,
     pub(crate) dependencies: HashSet<UntypedAssetId>,
-    pub(crate) loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
+    pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     pub(crate) labeled_assets: HashMap<CowArc<'static, str>, LabeledAsset>,
 }
 
@@ -333,10 +333,10 @@ pub struct LoadContext<'a> {
     pub(crate) asset_server: &'a AssetServer,
     pub(crate) should_load_dependencies: bool,
     populate_hashes: bool,
-    asset_path: AssetPath<'static>,
+    asset_path: AssetRef<'static>,
     pub(crate) dependencies: HashSet<UntypedAssetId>,
     /// Direct dependencies used by this loader.
-    pub(crate) loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
+    pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     pub(crate) labeled_assets: HashMap<CowArc<'static, str>, LabeledAsset>,
 }
 
@@ -344,7 +344,7 @@ impl<'a> LoadContext<'a> {
     /// Creates a new [`LoadContext`] instance.
     pub(crate) fn new(
         asset_server: &'a AssetServer,
-        asset_path: AssetPath<'static>,
+        asset_path: AssetRef<'static>,
         should_load_dependencies: bool,
         populate_hashes: bool,
     ) -> Self {
@@ -477,11 +477,14 @@ impl<'a> LoadContext<'a> {
 
     /// Gets the source path for this load context.
     pub fn path(&self) -> &Path {
-        self.asset_path.path()
+        // XXX TODO: Went for an unwrap to avoid updating too much code. This function
+        // might get removed anyway: https://github.com/bevyengine/bevy/pull/21643#issuecomment-3438737640.
+        self.asset_path.path().unwrap().path()
     }
 
     /// Gets the source asset path for this load context.
-    pub fn asset_path(&self) -> &AssetPath<'static> {
+    // XXX TODO: Review, keeping `asset_path` as name for now even though it's a ref.
+    pub fn asset_path(&self) -> &AssetRef<'static> {
         &self.asset_path
     }
 
@@ -518,7 +521,8 @@ impl<'a> LoadContext<'a> {
                 path: path.path().to_path_buf(),
                 source,
             })?;
-        self.loader_dependencies.insert(path.clone_owned(), hash);
+        self.loader_dependencies
+            .insert(path.clone_owned().into(), hash);
         Ok(bytes)
     }
 
@@ -545,7 +549,7 @@ impl<'a> LoadContext<'a> {
         let loaded_asset = self
             .asset_server
             .load_with_meta_loader_and_reader(
-                &path,
+                &path.clone().into(), // XXX TODO: Review clone. Or maybe `path` becomes an `AssetRef`.
                 meta,
                 loader,
                 reader,
@@ -559,7 +563,7 @@ impl<'a> LoadContext<'a> {
             })?;
         let info = meta.processed_info().as_ref();
         let hash = info.map(|i| i.full_hash).unwrap_or_default();
-        self.loader_dependencies.insert(path, hash);
+        self.loader_dependencies.insert(path.into(), hash);
         Ok(loaded_asset)
     }
 

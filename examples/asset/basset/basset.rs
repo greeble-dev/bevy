@@ -1,4 +1,5 @@
 //! Basset proof of concept.
+#![expect(dead_code, reason = "TODO")]
 
 #[path = "../../helpers/camera_controller.rs"]
 mod camera_controller;
@@ -26,7 +27,7 @@ use bevy::{
     tasks::{BoxedFuture, ConditionalSendFuture, IoTaskPool},
     time::common_conditions::on_timer,
 };
-use bevy_asset::{io::SliceReader, AsyncWriteExt};
+use bevy_asset::{io::SliceReader, AssetAction2, AssetRef, AsyncWriteExt};
 use camera_controller::{CameraController, CameraControllerPlugin};
 use core::result::Result;
 use downcast_rs::{impl_downcast, Downcast};
@@ -37,31 +38,34 @@ struct BassetPlugin;
 
 impl Plugin for BassetPlugin {
     fn build(&self, app: &mut App) {
+        let shared = Arc::new(
+            BassetShared::new(Some("examples/asset/basset/cache".into()))
+                .with_action(action::LoadPath)
+                .with_action(action::JoinStrings)
+                .with_action(action::UppercaseString)
+                .with_action(action::AcmeSceneFromGltf)
+                .with_action(action::MeshletFromMesh)
+                .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
+                .with_saver(demo::StringAssetSaver)
+                .with_saver(demo::IntAssetSaver),
+        );
+
         app.init_asset::<demo::StringAsset>()
             .init_asset::<demo::IntAsset>()
             .init_asset::<acme::AcmeScene>()
             .register_asset_loader(demo::StringAssetLoader)
             .register_asset_loader(demo::IntAssetLoader)
-            .register_erased_asset_loader(Box::new(
-                BassetLoader::new(Some("examples/asset/basset/cache".into()))
-                    .with_action(action::LoadPath)
-                    .with_action(action::JoinStrings)
-                    .with_action(action::UppercaseString)
-                    .with_action(action::AcmeSceneFromGltf)
-                    .with_action(action::MeshletFromMesh)
-                    .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
-                    .with_saver(demo::StringAssetSaver)
-                    .with_saver(demo::IntAssetSaver),
-            ))
+            .register_erased_asset_loader(Box::new(BassetLoader::new(shared.clone())))
+            .register_erased_asset_loader(Box::new(ActionLoader::new(shared)))
             .add_systems(Update, acme::tick_scene_spawners);
     }
 }
 
 /// XXX TODO: Document.
 pub struct BassetActionContext<'a> {
-    loader: &'a BassetLoader,
+    shared: &'a BassetShared,
     asset_server: &'a AssetServer,
-    loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
+    loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
 }
 
 /// XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
@@ -90,47 +94,32 @@ pub trait BassetAction: Send + Sync + 'static {
 }
 
 impl BassetActionContext<'_> {
-    async fn apply<T: Asset>(&mut self, action: &BassetPathSerializable) -> Result<T, BevyError> {
-        match self.erased_apply(action).await?.downcast::<T>() {
-            Ok(result) => Ok(result.take()),
-            Err(original) => panic!(
-                "Should have made type {}, actually made type {}. Action: {:?}",
-                core::any::type_name::<T>(),
-                original.asset_type_name(),
-                action,
-            ),
-        }
-    }
-
-    async fn erased_apply(
-        &mut self,
-        action: &BassetPathSerializable,
-    ) -> Result<ErasedLoadedAsset, BevyError> {
-        match action {
-            BassetPathSerializable::Path(path) => {
-                self.erased_load(AssetPath::parse(path).into_owned(), &None)
-                    .await
-            }
-            BassetPathSerializable::Action { name, params } => {
-                self.loader
-                    .action(name)
-                    .ok_or_else(|| BevyError::from(format!("Couldn't find action \"{name}\")")))?
-                    .apply(self, params)
-                    .await
-            }
-        }
-    }
-
     async fn erased_load(
         &mut self,
-        path: AssetPath<'static>,
+        path: &AssetRef<'static>,
         settings: &Option<Box<ron::value::RawValue>>,
     ) -> Result<ErasedLoadedAsset, BevyError> {
-        let (asset, hash) = load_direct(self.asset_server, &path, settings).await?;
+        let (asset, hash) = load_direct(self.asset_server, path, settings).await?;
 
-        self.loader_dependencies.insert(path, hash);
+        self.loader_dependencies.insert(path.clone(), hash);
 
         Ok(asset)
+    }
+
+    async fn load<T: Asset>(
+        &mut self,
+        path: &AssetRef<'static>,
+        settings: &Option<Box<ron::value::RawValue>>,
+    ) -> Result<T, BevyError> {
+        match self.erased_load(path, settings).await?.downcast::<T>() {
+            Ok(result) => Ok(result.take()),
+            Err(original) => panic!(
+                "Should have made type {}, actually made type {}. Path: {:?}",
+                core::any::type_name::<T>(),
+                original.asset_type_name(),
+                path,
+            ),
+        }
     }
 }
 
@@ -160,101 +149,19 @@ where
     }
 }
 
-/// XXX TODO: Document.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum BassetPathSerializable {
-    /// XXX TODO: Document.
-    Path(String),
-
-    /// XXX TODO: Document.
-    Action {
-        /// XXX TODO: Document.
-        name: String,
-
-        /// XXX TODO: Document.
-        /// XXX TODO: If we split this into serializable and deserializable forms
-        /// then the deserializable can use a reference instead of a box. See
-        /// `serde_json::RawValue` example. But that's awkward for action params -
-        /// don't want to make them split types too. Maybe can do an enum with
-        /// a custom serialize?
-        params: Box<ron::value::RawValue>,
-    },
-}
-
-// TODO: Would prefer to avoid Default, but might be necessary for serialization?
-impl Default for BassetPathSerializable {
-    fn default() -> Self {
-        Self::Path("".into())
-    }
-}
-
-impl BassetPathSerializable {
-    /// XXX TODO: Document.
-    pub fn from_action<A: BassetAction>(params: &<A as BassetAction>::Params) -> Self {
-        Self::Action {
-            name: core::any::type_name::<A>().into(),
-            params: ron::value::RawValue::from_rust(params).expect("TODO"),
-        }
-    }
-
-    /// XXX TODO: Document.
-    pub fn from_handle(handle: &UntypedHandle) -> Self {
-        // TODO: Avoid the `into_owned`? Not sure why skipping that causes lifetime
-        // issues for `asset_server`.
-        let path = handle
-            .path()
-            .expect("TODO - there are valid cases where this can fail, e.g. uuid handles")
-            .clone();
-
-        Self::from_asset_path(&path)
-    }
-
-    /// XXX TODO: Document.
-    pub fn from_asset_path(_asset_path: &AssetPath<'static>) -> Self {
-        todo!()
-        /*
-        if let Some(inline_basset) = asset_path.inline_basset() {
-            // XXX TODO: We're losing information here if there's something other
-            // than `basset::root`, e.g. versioning.
-
-            let basset =
-                ron::de::from_str::<BassetFileSerializable>(inline_basset.value()).expect("TODO");
-
-            basset.root
-        } else {
-            Self::Path(asset_path.to_string())
-        }
-        */
-    }
-
-    /// XXX TODO: Replace with From/To impl?
-    pub fn to_asset_path(&self) -> AssetPath<'static> {
-        // XXX TODO: Versioning? Need a more robust way to deal with the difference
-        // between BassetFileSerializable and BassetPathSerializable.
-        todo!()
-        /*
-        AssetPath::from_basset(InlineBasset::new(
-            ron::ser::to_string(&BassetFileSerializable { root: self.clone() })
-                .expect("TODO")
-                .into(),
-        ))
-        */
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct BassetFileSerializable {
-    root: BassetPathSerializable,
+    root: AssetRef<'static>,
     // TODO: Versioning?
 }
 
-struct BassetLoader {
+struct BassetShared {
     action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
     cache: BassetActionCache,
 }
 
-impl BassetLoader {
+impl BassetShared {
     fn new(file_cache_path: Option<PathBuf>) -> Self {
         Self {
             cache: BassetActionCache::new(file_cache_path),
@@ -297,6 +204,16 @@ impl BassetLoader {
     }
 }
 
+struct BassetLoader {
+    shared: Arc<BassetShared>,
+}
+
+impl BassetLoader {
+    fn new(shared: Arc<BassetShared>) -> Self {
+        Self { shared }
+    }
+}
+
 impl ErasedAssetLoader for BassetLoader {
     fn load<'a>(
         &'a self,
@@ -310,25 +227,30 @@ impl ErasedAssetLoader for BassetLoader {
             reader.read_to_end(&mut bytes).await?;
 
             // XXX TODO: Should include all inputs, versions etc.
-            let input_hash = hash_bytes(&bytes);
+            //let input_hash = hash_bytes(&bytes);
 
             let mut context = BassetActionContext {
-                loader: self,
+                shared: &self.shared,
                 asset_server: load_context.asset_server(),
                 loader_dependencies: HashMap::default(),
             };
 
-            if let Some(cached_standalone_asset) =
-                self.cache.get(&input_hash, load_context.asset_path()).await
+            /*
+            if let Some(cached_standalone_asset) = self
+                .shared
+                .cache
+                .get(&input_hash, load_context.asset_path())
+                .await
             {
                 // XXX TODO: Are we correctly updating the loader dependencies?
                 // compare against `load_direct` and `BassetActionContext::erased_load`.
                 return read_standalone_asset(&cached_standalone_asset, &context).await;
             }
+            */
 
             let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
 
-            let asset = context.erased_apply(&basset.root).await?;
+            let asset = context.erased_load(&basset.root, &None).await?;
 
             // XXX TODO: At this point we should replace `asset.loader_dependencies`
             // with our own `context.loader_dependencies`.
@@ -341,7 +263,8 @@ impl ErasedAssetLoader for BassetLoader {
                 );
             }
 
-            if let Some((saver, settings)) = self.saver(asset.asset_type_name()) {
+            /*
+            if let Some((saver, settings)) = self.shared.saver(asset.asset_type_name()) {
                 info!("{:?}: Cache put.", load_context.asset_path());
 
                 // XXX TODO: Verify loader matches saver? Need a way to get
@@ -354,7 +277,8 @@ impl ErasedAssetLoader for BassetLoader {
 
                 let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
 
-                self.cache
+                self.shared
+                    .cache
                     .put(&input_hash, blob.into(), load_context.asset_path());
             } else {
                 info!(
@@ -363,6 +287,7 @@ impl ErasedAssetLoader for BassetLoader {
                     asset.asset_type_name()
                 );
             }
+            */
 
             Ok(asset)
         })
@@ -387,11 +312,138 @@ impl ErasedAssetLoader for BassetLoader {
     }
 
     fn type_name(&self) -> &'static str {
-        core::any::type_name::<BassetLoader>()
+        core::any::type_name::<Self>()
     }
 
     fn type_id(&self) -> std::any::TypeId {
-        core::any::TypeId::of::<BassetLoader>()
+        core::any::TypeId::of::<Self>()
+    }
+
+    fn asset_type_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn asset_type_id(&self) -> Option<std::any::TypeId> {
+        None
+    }
+}
+
+struct ActionLoader {
+    shared: Arc<BassetShared>,
+}
+
+impl ActionLoader {
+    fn new(shared: Arc<BassetShared>) -> Self {
+        Self { shared }
+    }
+}
+
+impl ErasedAssetLoader for ActionLoader {
+    fn load<'a>(
+        &'a self,
+        reader: &'a mut dyn Reader,
+        _meta: &'a dyn AssetMetaDyn,
+        load_context: LoadContext<'a>,
+    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+        // TODO: Check that we're correctly using BoxedFuture and Box::pin.
+        Box::pin(async move {
+            assert_eq!(
+                reader.read_to_end(&mut Vec::new()).await?,
+                0,
+                "Reader should have been empty, all data is in the path"
+            );
+
+            let mut context = BassetActionContext {
+                shared: &self.shared,
+                asset_server: load_context.asset_server(),
+                loader_dependencies: HashMap::default(),
+            };
+
+            /*
+            if let Some(cached_standalone_asset) =
+                self.cache.get(&input_hash, load_context.asset_path()).await
+            {
+                // XXX TODO: Are we correctly updating the loader dependencies?
+                // compare against `load_direct` and `BassetActionContext::erased_load`.
+                return read_standalone_asset(&cached_standalone_asset, &context).await;
+            }
+            */
+
+            let action = load_context.asset_path().action().expect("TODO");
+
+            let asset = self
+                .shared
+                .action(action.name())
+                .ok_or_else(|| {
+                    BevyError::from(format!("Couldn't find action \"{}\")", action.name()))
+                })?
+                .apply(&mut context, action.params())
+                .await?;
+
+            // XXX TODO: At this point we should replace `asset.loader_dependencies`
+            // with our own `context.loader_dependencies`.
+
+            if !context.loader_dependencies.is_empty() {
+                info!(
+                    "{:?}: Dependencies = {:?}",
+                    load_context.asset_path(),
+                    context.loader_dependencies.keys().collect::<Vec<_>>(),
+                );
+            }
+
+            /*
+            if let Some((saver, settings)) = self.saver(asset.asset_type_name()) {
+                info!("{:?}: Cache put.", load_context.asset_path());
+
+                // XXX TODO: Verify loader matches saver? Need a way to get
+                // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
+                let loader = load_context
+                    .asset_server()
+                    .get_asset_loader_with_type_name(saver.loader_type_name())
+                    .await
+                    .expect("TODO");
+
+                let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
+
+                self.cache
+                    .put(&input_hash, blob.into(), load_context.asset_path());
+            } else {
+                info!(
+                    "{:?}: Cache ineligible, no saver for \"{}\".",
+                    load_context.asset_path(),
+                    asset.asset_type_name()
+                );
+            }
+            */
+
+            Ok(asset)
+        })
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &[]
+    }
+
+    fn deserialize_meta(&self, meta: &[u8]) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
+        // XXX TODO: Review. Is this going to be problematic since we don't know the loader type?
+        let meta = AssetMeta::<FakeAssetLoader, ()>::deserialize(meta)?;
+        Ok(Box::new(meta))
+    }
+
+    fn default_meta(&self) -> Box<dyn AssetMetaDyn> {
+        // XXX TODO: Review. Is this going to be problematic since we don't know the loader type?
+        Box::new(AssetMeta::<FakeAssetLoader, ()>::new(AssetAction::Load {
+            loader: self.type_name().to_string(),
+            settings: <FakeAssetLoader as AssetLoader>::Settings::default(),
+        }))
+    }
+
+    fn type_name(&self) -> &'static str {
+        core::any::type_name::<Self>()
+    }
+
+    fn type_id(&self) -> std::any::TypeId {
+        core::any::TypeId::of::<Self>()
     }
 
     fn asset_type_name(&self) -> Option<&'static str> {
@@ -441,7 +493,7 @@ async fn read_standalone_asset(
     let meta = loader.deserialize_meta(meta_bytes).expect("TODO");
 
     // XXX TODO: Argh? Need to work out how meaningful this is to the loader.
-    let fake_path = AssetPath::parse("fake_path_from_basset_read_binary_asset");
+    let fake_path = AssetRef::from(AssetPath::parse("fake_path_from_basset_read_binary_asset"));
 
     let mut reader = SliceReader::new(asset_bytes);
 
@@ -546,7 +598,7 @@ impl BassetActionCache {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    async fn get(&self, hash: &AssetHash, asset_path: &AssetPath<'static>) -> Option<Arc<[u8]>> {
+    async fn get(&self, hash: &AssetHash, asset_path: &AssetRef<'static>) -> Option<Arc<[u8]>> {
         if let Some(from_memory) = self
             .memory
             .read()
@@ -585,7 +637,7 @@ impl BassetActionCache {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn put(&self, hash: &AssetHash, blob: Arc<[u8]>, asset_path: &AssetPath<'static>) {
+    fn put(&self, hash: &AssetHash, blob: Arc<[u8]>, asset_path: &AssetRef<'static>) {
         self.memory
             .write()
             .unwrap_or_else(PoisonError::into_inner)
@@ -657,11 +709,12 @@ fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::val
 
 async fn load_direct(
     asset_server: &AssetServer,
-    path: &AssetPath<'static>,
+    path: &AssetRef<'static>,
     settings: &Option<Box<ron::value::RawValue>>,
 ) -> Result<(ErasedLoadedAsset, AssetHash), BevyError> {
     let (mut meta, loader, mut reader) = asset_server
-        .get_meta_loader_and_reader(path, None)
+        // XXX TODO `for_path` or `for_action`?
+        .get_meta_loader_and_reader_for_ref(path, None)
         .await
         .map_err(Into::<BevyError>::into)?;
 
@@ -801,7 +854,7 @@ mod action {
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             context
                 .erased_load(
-                    AssetPath::parse(&params.path).into_owned(),
+                    &AssetRef::Path(AssetPath::parse(&params.path).into_owned()),
                     &params.loader_settings,
                 )
                 .await
@@ -813,7 +866,7 @@ mod action {
     #[derive(Serialize, Deserialize, Default)]
     pub struct JoinStringsParams {
         separator: String,
-        strings: Vec<BassetPathSerializable>,
+        strings: Vec<AssetRef<'static>>,
     }
 
     impl BassetAction for JoinStrings {
@@ -827,8 +880,8 @@ mod action {
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             let mut strings = Vec::new();
 
-            for action in &params.strings {
-                strings.push(context.apply::<demo::StringAsset>(action).await?.0);
+            for path in &params.strings {
+                strings.push(context.load::<demo::StringAsset>(path, &None).await?.0);
             }
 
             let joined = strings
@@ -844,7 +897,7 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct UppercaseStringParams {
-        string: BassetPathSerializable,
+        string: AssetRef<'static>,
     }
 
     impl BassetAction for UppercaseString {
@@ -858,7 +911,7 @@ mod action {
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             let string = demo::StringAsset(
                 context
-                    .apply::<demo::StringAsset>(&params.string)
+                    .load::<demo::StringAsset>(&params.string, &None)
                     .await?
                     .0
                     .to_uppercase(),
@@ -874,7 +927,7 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct AcmeSceneFromGltfParams {
-        gltf: BassetPathSerializable,
+        gltf: AssetRef<'static>,
     }
 
     impl BassetAction for AcmeSceneFromGltf {
@@ -886,7 +939,7 @@ mod action {
             context: &mut BassetActionContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
-            let gltf = context.erased_apply(&params.gltf).await?;
+            let gltf = context.erased_load(&params.gltf, &None).await?;
 
             let scene = acme::from_gltf(&gltf, context.asset_server);
 
@@ -900,7 +953,7 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct MeshletFromMeshParams {
-        mesh: BassetPathSerializable,
+        mesh: AssetRef<'static>,
         #[serde(default)]
         vertex_position_quantization_factor: Option<u8>,
     }
@@ -924,7 +977,7 @@ mod action {
             // TODO: Should we check if `MeshletPlugin` is registered so we can
             // return a sensible error?
 
-            let mesh = context.apply::<Mesh>(&params.mesh).await?;
+            let mesh = context.load::<Mesh>(&params.mesh, &None).await?;
 
             let meshlet =
                 MeshletMesh::from_mesh(&mesh, params.vertex_position_quantization_factor())?;
@@ -937,7 +990,7 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct ConvertAcmeSceneMeshesToMeshletsParams {
-        scene: BassetPathSerializable,
+        scene: AssetRef<'static>,
         #[serde(default)]
         vertex_position_quantization_factor: Option<u8>,
     }
@@ -954,18 +1007,20 @@ mod action {
             // TODO: Should we check if `MeshletPlugin` is registered so we can
             // return a sensible error?
 
-            let mut scene = context.apply::<acme::AcmeScene>(&params.scene).await?;
+            let mut scene = context
+                .load::<acme::AcmeScene>(&params.scene, &None)
+                .await?;
 
             for entity in &mut scene.entities {
                 if let Some(mesh) = entity.mesh.take() {
                     entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
-                        asset: BassetPathSerializable::from_action::<MeshletFromMesh>(
+                        asset: AssetRef::Action(make_action::<MeshletFromMesh>(
                             &MeshletFromMeshParams {
                                 mesh: mesh.asset,
                                 vertex_position_quantization_factor: params
                                     .vertex_position_quantization_factor,
                             },
-                        ),
+                        )),
                     });
                 }
             }
@@ -1119,17 +1174,17 @@ mod acme {
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMesh {
-        pub asset: BassetPathSerializable,
+        pub asset: AssetRef<'static>,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMeshletMesh {
-        pub asset: BassetPathSerializable,
+        pub asset: AssetRef<'static>,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMaterial {
-        pub base_color_texture: Option<BassetPathSerializable>,
+        pub base_color_texture: Option<AssetRef<'static>>,
     }
 
     #[derive(Serialize, Deserialize, Default, Debug)]
@@ -1197,9 +1252,7 @@ mod acme {
             {
                 for primitive in mesh.primitives.iter() {
                     let mesh = Some(AcmeMesh {
-                        asset: BassetPathSerializable::from_handle(
-                            &primitive.mesh.clone().untyped(),
-                        ),
+                        asset: primitive.mesh.path().expect("TODO").clone(),
                     });
 
                     let standard_material = get_sub_asset(
@@ -1212,7 +1265,7 @@ mod acme {
                         base_color_texture: standard_material
                             .base_color_texture
                             .clone()
-                            .map(|p| BassetPathSerializable::from_handle(&p.untyped())),
+                            .map(|p| p.path().expect("TODO").clone()),
                     });
 
                     entities.push(AcmeEntity {
@@ -1260,7 +1313,7 @@ mod acme {
                     base_color_texture: material
                         .base_color_texture
                         .as_ref()
-                        .map(|p| asset_server.load::<Image>(p.to_asset_path())),
+                        .map(|p| asset_server.load::<Image>(p)),
                     ..Default::default()
                 };
 
@@ -1270,14 +1323,12 @@ mod acme {
             }
 
             if let Some(mesh) = &scene_entity.mesh {
-                world_entity.insert(Mesh3d(
-                    asset_server.load::<Mesh>(mesh.asset.to_asset_path()),
-                ));
+                world_entity.insert(Mesh3d(asset_server.load::<Mesh>(&mesh.asset)));
             }
 
             if let Some(meshlet_mesh) = &scene_entity.meshlet_mesh {
                 world_entity.insert(MeshletMesh3d(
-                    asset_server.load::<MeshletMesh>(meshlet_mesh.asset.to_asset_path()),
+                    asset_server.load::<MeshletMesh>(&meshlet_mesh.asset),
                 ));
             }
 
@@ -1343,7 +1394,8 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let inline_path = BassetPathSerializable::Path("1234.int".into()).to_asset_path();
+    // XXX TODO
+    //let _inline_path = BassetPathSerializable::Path("1234.int".into()).to_asset_path();
 
     commands.insert_resource(Handles(vec![
         asset_server
@@ -1363,7 +1415,7 @@ fn setup(
         asset_server
             .load::<demo::StringAsset>("join_strings.basset")
             .untyped(),
-        asset_server.load::<demo::IntAsset>(inline_path).untyped(),
+        //asset_server.load::<demo::IntAsset>(inline_path).untyped(),
     ]));
 
     commands.spawn((
@@ -1457,7 +1509,39 @@ fn reload(asset_server: Res<AssetServer>, handles: Res<Handles>, mut done: Local
     }
 }
 
+fn make_action<A: BassetAction>(params: &<A as BassetAction>::Params) -> AssetAction2<'static> {
+    AssetAction2::new(
+        core::any::type_name::<A>().into(),
+        ron::value::RawValue::from_rust(params).expect("TODO"),
+        None,
+    )
+}
+
 fn main() {
+    dbg!(ron::ser::to_string(&AssetRef::Path("asdf.txt".into())).expect("TODO"));
+    dbg!(
+        ron::ser::to_string(&AssetRef::Action(make_action::<action::LoadPath>(
+            &action::LoadPathParams {
+                path: "asdf.txt".into(),
+                ..Default::default()
+            }
+        )))
+        .expect("TODO")
+    );
+    dbg!(ron::de::from_str::<AssetRef>("Path(\"asdf.txt\")").expect("TODO"));
+    dbg!(ron::de::from_str::<AssetRef>("Action((name: \"foo\", params: ()))").expect("TODO"));
+
+    dbg!(serde_json::ser::to_string(&AssetRef::Path("asdf.txt".into())).expect("TODO"));
+    dbg!(
+        serde_json::ser::to_string(&AssetRef::Action(make_action::<action::LoadPath>(
+            &action::LoadPathParams {
+                path: "asdf.txt".into(),
+                ..Default::default()
+            }
+        )))
+        .expect("TODO")
+    );
+
     App::new()
         .add_plugins((
             DefaultPlugins.set(AssetPlugin {

@@ -721,8 +721,8 @@ mod tests {
         },
         loader::{AssetLoader, LoadContext},
         Asset, AssetApp, AssetEvent, AssetId, AssetLoadError, AssetLoadFailedEvent, AssetPath,
-        AssetPlugin, AssetServer, Assets, InvalidGenerationError, LoadState, UnapprovedPathMode,
-        UntypedHandle,
+        AssetPlugin, AssetRef, AssetServer, Assets, InvalidGenerationError, LoadState,
+        UnapprovedPathMode, UntypedHandle,
     };
     use alloc::{
         boxed::Box,
@@ -1700,7 +1700,7 @@ mod tests {
         struct ErrorTracker {
             tick: u64,
             failures: usize,
-            queued_retries: Vec<(AssetPath<'static>, AssetId<CoolText>, u64)>,
+            queued_retries: Vec<(AssetRef<'static>, AssetId<CoolText>, u64)>,
             finished_asset: Option<AssetId<CoolText>>,
         }
 
@@ -1741,7 +1741,10 @@ mod tests {
             for error in errors.read() {
                 let (load_state, _, _) = server.get_load_states(error.id).unwrap();
                 assert!(load_state.is_failed());
-                assert_eq!(*error.path.source(), AssetSourceId::Name("unstable".into()));
+                assert_eq!(
+                    *error.path.path().unwrap().source(),
+                    AssetSourceId::Name("unstable".into())
+                );
                 match &error.error {
                     AssetLoadError::AssetReaderError(read_error) => match read_error {
                         AssetReaderError::Io(_) => {

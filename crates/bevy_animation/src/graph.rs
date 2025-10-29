@@ -871,7 +871,8 @@ impl TryFrom<AnimationGraph> for SerializedAnimationGraph {
                 node_type: match node.node_type {
                     AnimationNodeType::Clip(ref clip) => match clip.path() {
                         Some(path) => SerializedAnimationNodeType::Clip(
-                            MigrationSerializedAnimationClip::Modern(path.clone()),
+                            // XXX TODO: Added `path().unwrap()` as a temporary workaround.
+                            MigrationSerializedAnimationClip::Modern(path.path().unwrap().clone()),
                         ),
                         None => return Err(NonPathHandleError),
                     },
