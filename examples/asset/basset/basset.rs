@@ -4,6 +4,7 @@
 #[path = "../../helpers/camera_controller.rs"]
 mod camera_controller;
 
+use async_fs::File;
 use bevy::{
     asset::{
         io::Reader,
@@ -32,7 +33,7 @@ use camera_controller::{CameraController, CameraControllerPlugin};
 use core::result::Result;
 use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
-use std::{boxed::Box, io::Write, path::PathBuf, sync::Arc, time::Duration};
+use std::{boxed::Box, io::Write, marker::PhantomData, path::PathBuf, sync::Arc, time::Duration};
 
 struct BassetPlugin;
 
@@ -155,18 +156,28 @@ struct BassetFileSerializable {
     // TODO: Versioning?
 }
 
+// XXX TODO: Review if this actually needs to be shared between `BassetLoader`
+// and `ActionLoader`.
 struct BassetShared {
     action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
-    cache: BassetActionCache,
+    content_cache: ContentCache,
+    dependency_cache: MemoryAndFileCache,
+    action_cache: MemoryAndFileCache,
 }
 
 impl BassetShared {
     fn new(file_cache_path: Option<PathBuf>) -> Self {
         Self {
-            cache: BassetActionCache::new(file_cache_path),
             action_type_name_to_action: Default::default(),
             asset_type_name_to_saver: Default::default(),
+            content_cache: Default::default(),
+            dependency_cache: MemoryAndFileCache::new(
+                file_cache_path.as_ref().map(|p| p.join("dependency")),
+            ),
+            action_cache: MemoryAndFileCache::new(
+                file_cache_path.as_ref().map(|p| p.join("action")),
+            ),
         }
     }
 
@@ -287,21 +298,6 @@ impl ActionLoader {
     }
 }
 
-// XXX TODO: Move this into `AssetAction2`?
-// XXX TODO: Also include action version?
-// XXX TODO: Also consider serializing to ron and hashing that.
-fn action_hash(action: &AssetAction2) -> AssetHash {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(action.name().as_bytes());
-    hasher.update(action.params().get_ron().as_bytes());
-
-    if let Some(label) = action.label() {
-        hasher.update(label.as_bytes());
-    }
-
-    *hasher.finalize().as_bytes()
-}
-
 impl ErasedAssetLoader for ActionLoader {
     fn load<'a>(
         &'a self,
@@ -331,7 +327,7 @@ impl ErasedAssetLoader for ActionLoader {
 
             if let Some(cached_standalone_asset) = self
                 .shared
-                .cache
+                .action_cache
                 .get(&cache_key, load_context.asset_path())
                 .await
             {
@@ -374,7 +370,7 @@ impl ErasedAssetLoader for ActionLoader {
                 let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
 
                 self.shared
-                    .cache
+                    .action_cache
                     .put(&cache_key, blob.into(), load_context.asset_path());
             } else {
                 info!(
@@ -516,13 +512,13 @@ async fn write_standalone_asset(
 }
 
 #[derive(Default)]
-struct BassetActionMemoryCache {
+struct MemoryCache {
     hash_to_blob: HashMap<AssetHash, Arc<[u8]>>,
 }
 
-impl BassetActionMemoryCache {
+impl MemoryCache {
     // XXX TODO: Is this lifetime necessary?
-    fn get<'a>(&'a self, hash: &AssetHash) -> Option<Arc<[u8]>> {
+    fn get(&self, hash: &AssetHash) -> Option<Arc<[u8]>> {
         self.hash_to_blob.get(hash).map(Clone::clone)
     }
 
@@ -531,12 +527,36 @@ impl BassetActionMemoryCache {
     }
 }
 
-struct BassetActionFileCache {
-    path: PathBuf,
+trait FileCacheable: Send + Sync + Clone {
+    fn write(&self, file: &mut File) -> impl ConditionalSendFuture<Output = Result<(), BevyError>>;
+
+    fn read(bytes: Box<[u8]>) -> Self;
 }
 
-impl BassetActionFileCache {
-    fn hash_path(&self, hash: &AssetHash) -> PathBuf {
+impl FileCacheable for Arc<[u8]> {
+    async fn write(&self, file: &mut File) -> Result<(), BevyError> {
+        file.write_all(self).await.map_err(BevyError::from)
+    }
+
+    fn read(bytes: Box<[u8]>) -> Self {
+        bytes.into()
+    }
+}
+
+struct FileCache<V: FileCacheable> {
+    path: PathBuf,
+    phantom: PhantomData<V>,
+}
+
+impl<V: FileCacheable + 'static> FileCache<V> {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            phantom: PhantomData::<V>,
+        }
+    }
+
+    fn value_path(&self, hash: &AssetHash) -> PathBuf {
         // XXX TODO: Duplicates code in `AssetPath::from_basset`.
         let hex = String::from_iter(hash.iter().map(|b| format!("{:x}", b)));
 
@@ -550,18 +570,73 @@ impl BassetActionFileCache {
 
         self.path.join(hash_path)
     }
+
+    // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
+    async fn get(&self, hash: &AssetHash, asset_path: &AssetRef<'static>) -> Option<V> {
+        let value_path = self.value_path(hash);
+
+        let Ok(value) = async_fs::read(value_path).await else {
+            info!("{asset_path:?}: File cache miss.");
+
+            return None;
+        };
+
+        info!("{asset_path:?}: File cache hit.");
+
+        Some(<V as FileCacheable>::read(value.into()))
+    }
+
+    // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
+    fn put(&self, hash: &AssetHash, value: V, asset_path: &AssetRef<'static>) {
+        let value_path = self.value_path(hash);
+        let asset_path = asset_path.to_owned(); // XXX TODO: Annoying clone when it's only for debugging.
+        let value = value.clone();
+
+        IoTaskPool::get()
+            .spawn(async move {
+                // XXX TODO: Early out if file already exists?
+
+                async_fs::create_dir_all(value_path.parent().expect("TODO"))
+                    .await
+                    .expect("TODO");
+
+                let temp_path = value_path.with_extension("tmp");
+
+                let Ok(mut temp_file) = async_fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&temp_path)
+                    .await
+                else {
+                    // TODO: Temp files could be left behind if interrupted
+                    // during write or rename. Should we try to clean them up?
+                    return;
+                };
+
+                <V as FileCacheable>::write(&value, &mut temp_file)
+                    .await
+                    .expect("TODO");
+
+                async_fs::rename(temp_path, value_path)
+                    .await
+                    .expect("TODO, this is ok to fail?");
+
+                info!("{asset_path:?}: File cache put.");
+            })
+            .detach();
+    }
 }
 
-struct BassetActionCache {
-    memory: Arc<RwLock<BassetActionMemoryCache>>,
-    file: Option<BassetActionFileCache>,
+struct MemoryAndFileCache {
+    memory: Arc<RwLock<MemoryCache>>,
+    file: Option<FileCache<Arc<[u8]>>>,
 }
 
-impl BassetActionCache {
+impl MemoryAndFileCache {
     fn new(file_cache_path: Option<PathBuf>) -> Self {
-        BassetActionCache {
+        MemoryAndFileCache {
             memory: Default::default(),
-            file: file_cache_path.map(|path| BassetActionFileCache { path }),
+            file: file_cache_path.map(FileCache::new),
         }
     }
 
@@ -584,17 +659,7 @@ impl BassetActionCache {
             return None;
         };
 
-        let path = file_cache.hash_path(hash);
-
-        let Ok(from_file) = async_fs::read(path).await else {
-            info!("{asset_path:?}: File cache miss.");
-
-            return None;
-        };
-
-        info!("{asset_path:?}: File cache hit.");
-
-        let from_file = Into::<Arc<[u8]>>::into(from_file);
+        let from_file = file_cache.get(hash, asset_path).await?;
 
         self.memory
             .write()
@@ -606,6 +671,7 @@ impl BassetActionCache {
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
     fn put(&self, hash: &AssetHash, blob: Arc<[u8]>, asset_path: &AssetRef<'static>) {
+        // XXX TODO: Avoid `blob.clone()` if there's no file cache?
         self.memory
             .write()
             .unwrap_or_else(PoisonError::into_inner)
@@ -617,43 +683,81 @@ impl BassetActionCache {
             return;
         };
 
-        let path = file_cache.hash_path(hash);
-        let asset_path = asset_path.to_owned(); // XXX TODO: Annoying clone when it's only for debugging.
-
-        IoTaskPool::get()
-            .spawn(async move {
-                async_fs::create_dir_all(path.parent().expect("TODO"))
-                    .await
-                    .expect("TODO");
-
-                let temp_path = path.with_extension("tmp");
-
-                let Ok(mut temp_file) = async_fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&temp_path)
-                    .await
-                else {
-                    // TODO: Temp files could be left behind if interrupted
-                    // during write or rename. Should we try to clean them up?
-                    return;
-                };
-
-                temp_file.write_all(&blob).await.expect("TODO");
-
-                async_fs::rename(temp_path, path)
-                    .await
-                    .expect("TODO, this is ok to fail?");
-
-                info!("{asset_path:?}: File cache put.");
-            })
-            .detach();
+        file_cache.put(hash, blob, asset_path);
     }
 }
 
-fn hash_bytes(bytes: &[u8]) -> AssetHash {
+#[derive(Default)]
+struct ContentCache {
+    path_to_hash: RwLock<HashMap<AssetPath<'static>, AssetHash>>,
+}
+
+impl ContentCache {
+    // XXX TODO: Can the `AssetPath` lifetime be more flexible?
+    async fn get(
+        &self,
+        path: &AssetPath<'static>,
+        asset_server: &AssetServer,
+    ) -> Result<AssetHash, BevyError> {
+        if let Some(hash) = self
+            .path_to_hash
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(path)
+        {
+            info!("{path:?}: Content cache hit.");
+
+            return Ok(*hash);
+        }
+
+        info!("{path:?}: Content cache miss.");
+
+        let source = asset_server
+            .get_source(path.source())
+            .map_err(BevyError::from)?;
+
+        let mut reader = source
+            .reader()
+            .read(path.path())
+            .await
+            .map_err(BevyError::from)?;
+
+        let mut bytes = Vec::<u8>::new();
+        reader
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(BevyError::from)?;
+
+        let hash = content_hash(&bytes);
+
+        self.path_to_hash
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(path.clone(), hash);
+
+        Ok(hash)
+    }
+}
+
+fn content_hash(bytes: &[u8]) -> AssetHash {
     let mut hasher = blake3::Hasher::new();
     hasher.update(bytes);
+    *hasher.finalize().as_bytes()
+}
+
+// XXX TODO: Move this into `AssetAction2`?
+// XXX TODO: Also include action version?
+// XXX TODO: Also consider serializing to ron and hashing that.
+fn action_hash(action: &AssetAction2) -> AssetHash {
+    let mut hasher = blake3::Hasher::new();
+
+    hasher.update(action.name().as_bytes());
+    hasher.update(action.params().get_ron().as_bytes());
+
+    if let Some(label) = action.label() {
+        hasher.update(label.as_bytes());
+    }
+
     *hasher.finalize().as_bytes()
 }
 
