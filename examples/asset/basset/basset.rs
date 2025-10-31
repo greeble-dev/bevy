@@ -226,70 +226,19 @@ impl ErasedAssetLoader for BassetLoader {
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
 
-            // XXX TODO: Should include all inputs, versions etc.
-            //let input_hash = hash_bytes(&bytes);
-
             let mut context = BassetActionContext {
                 shared: &self.shared,
                 asset_server: load_context.asset_server(),
                 loader_dependencies: HashMap::default(),
             };
 
-            /*
-            if let Some(cached_standalone_asset) = self
-                .shared
-                .cache
-                .get(&input_hash, load_context.asset_path())
-                .await
-            {
-                // XXX TODO: Are we correctly updating the loader dependencies?
-                // compare against `load_direct` and `BassetActionContext::erased_load`.
-                return read_standalone_asset(&cached_standalone_asset, &context).await;
-            }
-            */
-
             let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
 
-            let asset = context.erased_load(&basset.root, &None).await?;
-
-            // XXX TODO: At this point we should replace `asset.loader_dependencies`
-            // with our own `context.loader_dependencies`.
-
-            if !context.loader_dependencies.is_empty() {
-                info!(
-                    "{:?}: Dependencies = {:?}",
-                    load_context.asset_path(),
-                    context.loader_dependencies.keys().collect::<Vec<_>>(),
-                );
-            }
-
-            /*
-            if let Some((saver, settings)) = self.shared.saver(asset.asset_type_name()) {
-                info!("{:?}: Cache put.", load_context.asset_path());
-
-                // XXX TODO: Verify loader matches saver? Need a way to get
-                // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
-                let loader = load_context
-                    .asset_server()
-                    .get_asset_loader_with_type_name(saver.loader_type_name())
-                    .await
-                    .expect("TODO");
-
-                let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
-
-                self.shared
-                    .cache
-                    .put(&input_hash, blob.into(), load_context.asset_path());
-            } else {
-                info!(
-                    "{:?}: Cache ineligible, no saver for \"{}\".",
-                    load_context.asset_path(),
-                    asset.asset_type_name()
-                );
-            }
-            */
-
-            Ok(asset)
+            // XXX TODO: Review this. Decide if it's correct to go through the
+            // context and log dependencies, or if we should do a plain load and
+            // leave it to `ActionLoader`.
+            // to `ActionLoader`.
+            context.erased_load(&basset.root, &None).await
         })
     }
 
@@ -338,6 +287,21 @@ impl ActionLoader {
     }
 }
 
+// XXX TODO: Move this into `AssetAction2`?
+// XXX TODO: Also include action version?
+// XXX TODO: Also consider serializing to ron and hashing that.
+fn action_hash(action: &AssetAction2) -> AssetHash {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(action.name().as_bytes());
+    hasher.update(action.params().get_ron().as_bytes());
+
+    if let Some(label) = action.label() {
+        hasher.update(label.as_bytes());
+    }
+
+    *hasher.finalize().as_bytes()
+}
+
 impl ErasedAssetLoader for ActionLoader {
     fn load<'a>(
         &'a self,
@@ -350,8 +314,10 @@ impl ErasedAssetLoader for ActionLoader {
             assert_eq!(
                 reader.read_to_end(&mut Vec::new()).await?,
                 0,
-                "Reader should have been empty, all data is in the path"
+                "Reader should have been empty, all data is in the path."
             );
+
+            let action = load_context.asset_path().action().expect("TODO");
 
             let mut context = BassetActionContext {
                 shared: &self.shared,
@@ -359,17 +325,20 @@ impl ErasedAssetLoader for ActionLoader {
                 loader_dependencies: HashMap::default(),
             };
 
-            /*
-            if let Some(cached_standalone_asset) =
-                self.cache.get(&input_hash, load_context.asset_path()).await
+            // XXX TODO: Proper cache key including dependencies etc.
+
+            let cache_key = action_hash(action);
+
+            if let Some(cached_standalone_asset) = self
+                .shared
+                .cache
+                .get(&cache_key, load_context.asset_path())
+                .await
             {
                 // XXX TODO: Are we correctly updating the loader dependencies?
                 // compare against `load_direct` and `BassetActionContext::erased_load`.
                 return read_standalone_asset(&cached_standalone_asset, &context).await;
             }
-            */
-
-            let action = load_context.asset_path().action().expect("TODO");
 
             let asset = self
                 .shared
@@ -391,8 +360,7 @@ impl ErasedAssetLoader for ActionLoader {
                 );
             }
 
-            /*
-            if let Some((saver, settings)) = self.saver(asset.asset_type_name()) {
+            if let Some((saver, settings)) = self.shared.saver(asset.asset_type_name()) {
                 info!("{:?}: Cache put.", load_context.asset_path());
 
                 // XXX TODO: Verify loader matches saver? Need a way to get
@@ -405,8 +373,9 @@ impl ErasedAssetLoader for ActionLoader {
 
                 let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
 
-                self.cache
-                    .put(&input_hash, blob.into(), load_context.asset_path());
+                self.shared
+                    .cache
+                    .put(&cache_key, blob.into(), load_context.asset_path());
             } else {
                 info!(
                     "{:?}: Cache ineligible, no saver for \"{}\".",
@@ -414,7 +383,6 @@ impl ErasedAssetLoader for ActionLoader {
                     asset.asset_type_name()
                 );
             }
-            */
 
             Ok(asset)
         })
