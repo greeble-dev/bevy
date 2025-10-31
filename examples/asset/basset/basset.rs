@@ -141,7 +141,6 @@ where
         context: &'a mut BassetActionContext,
         params: &'a ron::value::RawValue,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
-        // TODO: Check that we're correctly using BoxedFuture and Box::pin.
         Box::pin(async move {
             let params = params.into_rust::<T::Params>().expect("TODO");
 
@@ -232,7 +231,6 @@ impl ErasedAssetLoader for BassetLoader {
         _meta: &'a dyn AssetMetaDyn,
         load_context: LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
-        // TODO: Check that we're correctly using BoxedFuture and Box::pin.
         Box::pin(async move {
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
@@ -305,7 +303,6 @@ impl ErasedAssetLoader for ActionLoader {
         _meta: &'a dyn AssetMetaDyn,
         load_context: LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
-        // TODO: Check that we're correctly using BoxedFuture and Box::pin.
         Box::pin(async move {
             assert_eq!(
                 reader.read_to_end(&mut Vec::new()).await?,
@@ -513,21 +510,22 @@ async fn write_standalone_asset(
 
 #[derive(Default)]
 struct MemoryCache {
-    hash_to_blob: HashMap<AssetHash, Arc<[u8]>>,
+    key_to_value: HashMap<AssetHash, Arc<[u8]>>,
 }
 
 impl MemoryCache {
     // XXX TODO: Is this lifetime necessary?
-    fn get(&self, hash: &AssetHash) -> Option<Arc<[u8]>> {
-        self.hash_to_blob.get(hash).map(Clone::clone)
+    fn get(&self, key: &AssetHash) -> Option<Arc<[u8]>> {
+        self.key_to_value.get(key).map(Clone::clone)
     }
 
-    fn put(&mut self, hash: &AssetHash, blob: Arc<[u8]>) {
-        self.hash_to_blob.insert(*hash, blob);
+    fn put(&mut self, key: &AssetHash, value: Arc<[u8]>) {
+        self.key_to_value.insert(*key, value);
     }
 }
 
-trait FileCacheable: Send + Sync + Clone {
+// XXX TODO: Why do we need this `static` bound to make the async happy?
+trait FileCacheable: Send + Sync + Clone + 'static {
     fn write(&self, file: &mut File) -> impl ConditionalSendFuture<Output = Result<(), BevyError>>;
 
     fn read(bytes: Box<[u8]>) -> Self;
@@ -548,7 +546,7 @@ struct FileCache<V: FileCacheable> {
     phantom: PhantomData<V>,
 }
 
-impl<V: FileCacheable + 'static> FileCache<V> {
+impl<V: FileCacheable> FileCache<V> {
     fn new(path: PathBuf) -> Self {
         Self {
             path,
@@ -556,9 +554,9 @@ impl<V: FileCacheable + 'static> FileCache<V> {
         }
     }
 
-    fn value_path(&self, hash: &AssetHash) -> PathBuf {
+    fn value_path(&self, key: &AssetHash) -> PathBuf {
         // XXX TODO: Duplicates code in `AssetPath::from_basset`.
-        let hex = String::from_iter(hash.iter().map(|b| format!("{:x}", b)));
+        let hex = String::from_iter(key.iter().map(|b| format!("{:x}", b)));
 
         // Spread files across multiple folders in case we're on a filesystem
         // that doesn't like lots of files in a single folder.
@@ -572,8 +570,8 @@ impl<V: FileCacheable + 'static> FileCache<V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    async fn get(&self, hash: &AssetHash, asset_path: &AssetRef<'static>) -> Option<V> {
-        let value_path = self.value_path(hash);
+    async fn get(&self, key: &AssetHash, asset_path: &AssetRef<'static>) -> Option<V> {
+        let value_path = self.value_path(key);
 
         let Ok(value) = async_fs::read(value_path).await else {
             info!("{asset_path:?}: File cache miss.");
@@ -587,8 +585,8 @@ impl<V: FileCacheable + 'static> FileCache<V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn put(&self, hash: &AssetHash, value: V, asset_path: &AssetRef<'static>) {
-        let value_path = self.value_path(hash);
+    fn put(&self, key: &AssetHash, value: V, asset_path: &AssetRef<'static>) {
+        let value_path = self.value_path(key);
         let asset_path = asset_path.to_owned(); // XXX TODO: Annoying clone when it's only for debugging.
         let value = value.clone();
 
@@ -641,12 +639,12 @@ impl MemoryAndFileCache {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    async fn get(&self, hash: &AssetHash, asset_path: &AssetRef<'static>) -> Option<Arc<[u8]>> {
+    async fn get(&self, key: &AssetHash, asset_path: &AssetRef<'static>) -> Option<Arc<[u8]>> {
         if let Some(from_memory) = self
             .memory
             .read()
             .unwrap_or_else(PoisonError::into_inner)
-            .get(hash)
+            .get(key)
         {
             info!("{asset_path:?}: Memory cache hit.");
 
@@ -655,35 +653,33 @@ impl MemoryAndFileCache {
 
         info!("{asset_path:?}: Memory cache miss.");
 
-        let Some(file_cache) = &self.file else {
-            return None;
-        };
+        if let Some(file) = &self.file {
+            let from_file = file.get(key, asset_path).await?;
 
-        let from_file = file_cache.get(hash, asset_path).await?;
+            self.memory
+                .write()
+                .unwrap_or_else(PoisonError::into_inner)
+                .put(key, from_file.clone());
 
-        self.memory
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .put(hash, from_file.clone());
-
-        Some(from_file)
+            Some(from_file)
+        } else {
+            None
+        }
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn put(&self, hash: &AssetHash, blob: Arc<[u8]>, asset_path: &AssetRef<'static>) {
+    fn put(&self, key: &AssetHash, blob: Arc<[u8]>, asset_path: &AssetRef<'static>) {
         // XXX TODO: Avoid `blob.clone()` if there's no file cache?
         self.memory
             .write()
             .unwrap_or_else(PoisonError::into_inner)
-            .put(hash, blob.clone());
+            .put(key, blob.clone());
 
         info!("{asset_path:?}: Memory cache put.");
 
-        let Some(file_cache) = &self.file else {
-            return;
-        };
-
-        file_cache.put(hash, blob, asset_path);
+        if let Some(file) = &self.file {
+            file.put(key, blob, asset_path);
+        }
     }
 }
 
@@ -693,7 +689,7 @@ struct ContentCache {
 }
 
 impl ContentCache {
-    // XXX TODO: Can the `AssetPath` lifetime be more flexible?
+    // XXX TODO: Can we avoid `AssetPath` being `<'static>`?
     async fn get(
         &self,
         path: &AssetPath<'static>,
