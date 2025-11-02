@@ -33,7 +33,10 @@ use camera_controller::{CameraController, CameraControllerPlugin};
 use core::result::Result;
 use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
-use std::{boxed::Box, io::Write, marker::PhantomData, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    boxed::Box, hash::Hash, io::Write, marker::PhantomData, path::PathBuf, sync::Arc,
+    time::Duration,
+};
 
 struct BassetPlugin;
 
@@ -586,8 +589,8 @@ async fn write_standalone_asset(
     Ok(writer.into())
 }
 
-trait CacheKey: Send + Sync + Copy + Eq + std::hash::Hash {
-    fn hash(&self) -> AssetHash;
+trait CacheKey: Clone + Eq + Hash {
+    fn as_hash(&self) -> AssetHash;
 }
 
 trait MemoryCacheValue: Send + Sync + Clone {}
@@ -598,7 +601,8 @@ struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
     key_to_value: HashMap<K, V>,
 }
 
-// XXX TODO: Review why we need this. Deriving has issues with the generic parameter.
+// XXX TODO: Review why we need this manual `Default` implementation instead of
+// deriving it.
 impl<K: CacheKey, V: MemoryCacheValue> Default for MemoryCache<K, V> {
     fn default() -> Self {
         Self {
@@ -608,8 +612,8 @@ impl<K: CacheKey, V: MemoryCacheValue> Default for MemoryCache<K, V> {
 }
 
 impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
-    fn get(&self, key: K) -> Option<V> {
-        self.key_to_value.get(&key).cloned()
+    fn get(&self, key: &K) -> Option<V> {
+        self.key_to_value.get(key).cloned()
     }
 
     fn put(&mut self, key: K, value: V) {
@@ -647,15 +651,16 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
         }
     }
 
-    fn value_path(&self, key: K) -> PathBuf {
+    fn value_path(&self, key: &K) -> PathBuf {
         // XXX TODO: Check if this is worth optimising.
-        let hex = String::from_iter(CacheKey::hash(&key).iter().map(|b| format!("{:x}", b)));
+        let hex = String::from_iter(key.as_hash().iter().map(|b| format!("{:x}", b)));
 
         // Spread files across multiple folders by using the first few digits of
         // the hash. This is a hedge against filesystems that don't like
         // thousands of files in a single folder.
         //
         // XXX TODO: Could be refined? Review the probabilities.
+        // XXX TODO: Can be optimised if the file separator is a single character?
         let relative_path = [&hex[0..2], &hex[2..4], &hex[..]]
             .iter()
             .collect::<PathBuf>();
@@ -664,7 +669,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    async fn get(&self, key: K, asset_path: &AssetRef<'static>) -> Option<V> {
+    async fn get(&self, key: &K, asset_path: &AssetRef<'static>) -> Option<V> {
         let value_path = self.value_path(key);
 
         let Ok(value) = async_fs::read(value_path).await else {
@@ -680,7 +685,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
     fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
-        let value_path = self.value_path(key);
+        let value_path = self.value_path(&key);
         let asset_path = asset_path.to_owned(); // XXX TODO: Annoying clone when it's only for debugging.
         let value = value.clone(); // XXX TODO: ???
 
@@ -738,7 +743,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
             .memory
             .read()
             .unwrap_or_else(PoisonError::into_inner)
-            .get(key)
+            .get(&key)
         {
             info!("{asset_path:?}: Memory cache hit.");
 
@@ -748,7 +753,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
         info!("{asset_path:?}: Memory cache miss.");
 
         if let Some(file) = &self.file {
-            let from_file = file.get(key, asset_path).await?;
+            let from_file = file.get(&key, asset_path).await?;
 
             self.memory
                 .write()
@@ -767,7 +772,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
         self.memory
             .write()
             .unwrap_or_else(PoisonError::into_inner)
-            .put(key, value.clone());
+            .put(key.clone(), value.clone());
 
         info!("{asset_path:?}: Memory cache put.");
 
@@ -837,7 +842,7 @@ impl ContentCache {
 struct DependencyCacheKey(AssetHash);
 
 impl CacheKey for DependencyCacheKey {
-    fn hash(&self) -> AssetHash {
+    fn as_hash(&self) -> AssetHash {
         self.0
     }
 }
@@ -872,7 +877,7 @@ fn content_hash(bytes: &[u8]) -> ContentHash {
 struct ActionCacheKey(AssetHash);
 
 impl CacheKey for ActionCacheKey {
-    fn hash(&self) -> AssetHash {
+    fn as_hash(&self) -> AssetHash {
         self.0
     }
 }
