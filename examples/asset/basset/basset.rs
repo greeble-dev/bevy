@@ -19,7 +19,7 @@ use bevy::{
         MeshletMesh, MeshletPlugin, MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR,
     },
     platform::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         sync::{PoisonError, RwLock},
     },
     prelude::*,
@@ -161,8 +161,8 @@ struct BassetShared {
     action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
     content_cache: ContentCache,
-    dependency_cache: MemoryAndFileCache,
-    action_cache: MemoryAndFileCache,
+    dependency_cache: MemoryAndFileCache<Arc<DependencyList>>,
+    action_cache: MemoryAndFileCache<Arc<[u8]>>,
 }
 
 impl BassetShared {
@@ -296,6 +296,71 @@ impl ActionLoader {
     }
 }
 
+async fn dependency_key(
+    path: &AssetRef<'static>,
+    shared: &BassetShared,
+    asset_server: &AssetServer,
+) -> AssetHash {
+    let mut hasher = blake3::Hasher::new();
+
+    // XXX TODO: Is this wrong for actions and paths with a label? Yes if the cache
+    // holds the full asset - the label selects after getting from the cache. No if
+    // the cache holds the sub-sset.
+    hasher.update(path.to_string().as_bytes());
+
+    if let Some(really_a_path) = path.path() {
+        let content_hash = shared
+            .content_cache
+            .get(really_a_path, asset_server)
+            .await
+            .expect("TODO");
+
+        hasher.update(&content_hash);
+    }
+
+    // XXX TODO: Loader version?
+
+    *hasher.finalize().as_bytes()
+}
+
+async fn action_key(
+    path: &AssetRef<'static>,
+    shared: &BassetShared,
+    asset_server: &AssetServer,
+) -> Option<AssetHash> {
+    let mut stack = vec![path.clone()];
+
+    let mut done_vec = Vec::<AssetHash>::new();
+    let mut done_set = HashSet::<AssetRef<'_>>::new();
+
+    while let Some(current) = stack.pop() {
+        if !done_set.insert(current.clone()) {
+            continue;
+        }
+
+        let dependency_key = dependency_key(&current, shared, asset_server).await;
+
+        let dependency_list = shared
+            .dependency_cache
+            .get(&dependency_key, &current)
+            .await?;
+
+        for dependency in &dependency_list.list {
+            stack.push(dependency.clone());
+        }
+
+        done_vec.push(dependency_key);
+    }
+
+    let mut hasher = blake3::Hasher::new();
+
+    for done in &done_vec {
+        hasher.update(done);
+    }
+
+    Some(*hasher.finalize().as_bytes())
+}
+
 impl ErasedAssetLoader for ActionLoader {
     fn load<'a>(
         &'a self,
@@ -320,13 +385,19 @@ impl ErasedAssetLoader for ActionLoader {
 
             // XXX TODO: Proper cache key including dependencies etc.
 
-            let cache_key = action_hash(action);
+            let action_key = action_key(
+                load_context.asset_path(),
+                &self.shared,
+                load_context.asset_server(),
+            )
+            .await;
 
-            if let Some(cached_standalone_asset) = self
-                .shared
-                .action_cache
-                .get(&cache_key, load_context.asset_path())
-                .await
+            if let Some(action_key) = action_key
+                && let Some(cached_standalone_asset) = self
+                    .shared
+                    .action_cache
+                    .get(&action_key, load_context.asset_path())
+                    .await
             {
                 // XXX TODO: Are we correctly updating the loader dependencies?
                 // compare against `load_direct` and `BassetActionContext::erased_load`.
@@ -353,7 +424,11 @@ impl ErasedAssetLoader for ActionLoader {
                 );
             }
 
-            if let Some((saver, settings)) = self.shared.saver(asset.asset_type_name()) {
+            // XXX TODO: This is where we need to work out the real action key
+            // is it wasn't found previously.
+            if let Some(action_key) = action_key
+                && let Some((saver, settings)) = self.shared.saver(asset.asset_type_name())
+            {
                 info!("{:?}: Cache put.", load_context.asset_path());
 
                 // XXX TODO: Verify loader matches saver? Need a way to get
@@ -368,7 +443,7 @@ impl ErasedAssetLoader for ActionLoader {
 
                 self.shared
                     .action_cache
-                    .put(&cache_key, blob.into(), load_context.asset_path());
+                    .put(&action_key, blob.into(), load_context.asset_path());
             } else {
                 info!(
                     "{:?}: Cache ineligible, no saver for \"{}\".",
@@ -376,6 +451,9 @@ impl ErasedAssetLoader for ActionLoader {
                     asset.asset_type_name()
                 );
             }
+
+            // XXX TODO: Should select sub-asset with `action.label`? But need to work
+            // out if the cache holds the full asset or sub-asset (see also `dependency_key`).
 
             Ok(asset)
         })
@@ -508,18 +586,29 @@ async fn write_standalone_asset(
     Ok(writer.into())
 }
 
-#[derive(Default)]
-struct MemoryCache {
-    key_to_value: HashMap<AssetHash, Arc<[u8]>>,
+trait MemoryCacheable: Send + Sync + Clone {}
+
+impl<T: Send + Sync + Clone> MemoryCacheable for T {}
+
+struct MemoryCache<V: MemoryCacheable> {
+    key_to_value: HashMap<AssetHash, V>,
 }
 
-impl MemoryCache {
-    // XXX TODO: Is this lifetime necessary?
-    fn get(&self, key: &AssetHash) -> Option<Arc<[u8]>> {
-        self.key_to_value.get(key).map(Clone::clone)
+// XXX TODO: Review why we need this. Deriving has issues with the generic parameter.
+impl<V: MemoryCacheable> Default for MemoryCache<V> {
+    fn default() -> Self {
+        Self {
+            key_to_value: Default::default(),
+        }
+    }
+}
+
+impl<V: MemoryCacheable> MemoryCache<V> {
+    fn get(&self, key: &AssetHash) -> Option<V> {
+        self.key_to_value.get(key).cloned()
     }
 
-    fn put(&mut self, key: &AssetHash, value: Arc<[u8]>) {
+    fn put(&mut self, key: &AssetHash, value: V) {
         self.key_to_value.insert(*key, value);
     }
 }
@@ -542,31 +631,32 @@ impl FileCacheable for Arc<[u8]> {
 }
 
 struct FileCache<V: FileCacheable> {
-    path: PathBuf,
+    base_path: PathBuf,
     phantom: PhantomData<V>,
 }
 
 impl<V: FileCacheable> FileCache<V> {
-    fn new(path: PathBuf) -> Self {
+    fn new(base_path: PathBuf) -> Self {
         Self {
-            path,
+            base_path,
             phantom: PhantomData::<V>,
         }
     }
 
     fn value_path(&self, key: &AssetHash) -> PathBuf {
-        // XXX TODO: Duplicates code in `AssetPath::from_basset`.
+        // XXX TODO: Check if this is worth optimising.
         let hex = String::from_iter(key.iter().map(|b| format!("{:x}", b)));
 
-        // Spread files across multiple folders in case we're on a filesystem
-        // that doesn't like lots of files in a single folder.
+        // Spread files across multiple folders by using the first few digits of
+        // the hash. This is a hedge against filesystems that don't like
+        // thousands of files in a single folder.
         //
-        // XXX TODO: Maybe unnecessary?
-        let hash_path = [&hex[0..7], &hex[8..15], &hex[16..23], &hex[..]]
+        // XXX TODO: Could be refined? Review the probabilities.
+        let relative_path = [&hex[0..2], &hex[2..4], &hex[..]]
             .iter()
             .collect::<PathBuf>();
 
-        self.path.join(hash_path)
+        self.base_path.join(relative_path)
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
@@ -588,7 +678,7 @@ impl<V: FileCacheable> FileCache<V> {
     fn put(&self, key: &AssetHash, value: V, asset_path: &AssetRef<'static>) {
         let value_path = self.value_path(key);
         let asset_path = asset_path.to_owned(); // XXX TODO: Annoying clone when it's only for debugging.
-        let value = value.clone();
+        let value = value.clone(); // XXX TODO: ???
 
         IoTaskPool::get()
             .spawn(async move {
@@ -625,12 +715,12 @@ impl<V: FileCacheable> FileCache<V> {
     }
 }
 
-struct MemoryAndFileCache {
-    memory: Arc<RwLock<MemoryCache>>,
-    file: Option<FileCache<Arc<[u8]>>>,
+struct MemoryAndFileCache<V: FileCacheable> {
+    memory: Arc<RwLock<MemoryCache<V>>>,
+    file: Option<FileCache<V>>,
 }
 
-impl MemoryAndFileCache {
+impl<V: FileCacheable> MemoryAndFileCache<V> {
     fn new(file_cache_path: Option<PathBuf>) -> Self {
         MemoryAndFileCache {
             memory: Default::default(),
@@ -639,7 +729,7 @@ impl MemoryAndFileCache {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    async fn get(&self, key: &AssetHash, asset_path: &AssetRef<'static>) -> Option<Arc<[u8]>> {
+    async fn get(&self, key: &AssetHash, asset_path: &AssetRef<'static>) -> Option<V> {
         if let Some(from_memory) = self
             .memory
             .read()
@@ -668,17 +758,17 @@ impl MemoryAndFileCache {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn put(&self, key: &AssetHash, blob: Arc<[u8]>, asset_path: &AssetRef<'static>) {
+    fn put(&self, key: &AssetHash, value: V, asset_path: &AssetRef<'static>) {
         // XXX TODO: Avoid `blob.clone()` if there's no file cache?
         self.memory
             .write()
             .unwrap_or_else(PoisonError::into_inner)
-            .put(key, blob.clone());
+            .put(key, value.clone());
 
         info!("{asset_path:?}: Memory cache put.");
 
         if let Some(file) = &self.file {
-            file.put(key, blob, asset_path);
+            file.put(key, value, asset_path);
         }
     }
 }
@@ -690,6 +780,7 @@ struct ContentCache {
 
 impl ContentCache {
     // XXX TODO: Can we avoid `AssetPath` being `<'static>`?
+    // XXX TODO: Returning AssetHash by value is probabably the practical choice? But check.
     async fn get(
         &self,
         path: &AssetPath<'static>,
@@ -735,6 +826,26 @@ impl ContentCache {
     }
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct DependencyList {
+    // XXX TODO: Could store some debug info on the input?
+    list: Vec<AssetRef<'static>>,
+}
+
+impl FileCacheable for Arc<DependencyList> {
+    async fn write(&self, file: &mut File) -> Result<(), BevyError> {
+        let string = ron::ser::to_string(self.as_ref()).map_err(BevyError::from)?;
+
+        file.write_all(string.as_bytes())
+            .await
+            .map_err(BevyError::from)
+    }
+
+    fn read(bytes: Box<[u8]>) -> Self {
+        Arc::new(ron::de::from_bytes::<DependencyList>(&bytes).expect("TODO"))
+    }
+}
+
 fn content_hash(bytes: &[u8]) -> AssetHash {
     let mut hasher = blake3::Hasher::new();
     hasher.update(bytes);
@@ -749,6 +860,9 @@ fn action_hash(action: &AssetAction2) -> AssetHash {
 
     hasher.update(action.name().as_bytes());
     hasher.update(action.params().get_ron().as_bytes());
+
+    // XXX TODO: Hash shouldn't include label? It's not an input to the asset,
+    // just a way of filtering the output.
 
     if let Some(label) = action.label() {
         hasher.update(label.as_bytes());
