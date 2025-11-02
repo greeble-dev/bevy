@@ -161,8 +161,8 @@ struct BassetShared {
     action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
     content_cache: ContentCache,
-    dependency_cache: MemoryAndFileCache<Arc<DependencyList>>,
-    action_cache: MemoryAndFileCache<Arc<[u8]>>,
+    dependency_cache: MemoryAndFileCache<DependencyCacheKey, Arc<DependencyList>>,
+    action_cache: MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>,
 }
 
 impl BassetShared {
@@ -300,7 +300,7 @@ async fn dependency_key(
     path: &AssetRef<'static>,
     shared: &BassetShared,
     asset_server: &AssetServer,
-) -> AssetHash {
+) -> DependencyCacheKey {
     let mut hasher = blake3::Hasher::new();
 
     // XXX TODO: Is this wrong for actions and paths with a label? Yes if the cache
@@ -315,22 +315,22 @@ async fn dependency_key(
             .await
             .expect("TODO");
 
-        hasher.update(&content_hash);
+        hasher.update(&content_hash.0);
     }
 
     // XXX TODO: Loader version?
 
-    *hasher.finalize().as_bytes()
+    DependencyCacheKey(*hasher.finalize().as_bytes())
 }
 
 async fn action_key(
     path: &AssetRef<'static>,
     shared: &BassetShared,
     asset_server: &AssetServer,
-) -> Option<AssetHash> {
+) -> Option<ActionCacheKey> {
     let mut stack = vec![path.clone()];
 
-    let mut done_vec = Vec::<AssetHash>::new();
+    let mut done_vec = Vec::<DependencyCacheKey>::new();
     let mut done_set = HashSet::<AssetRef<'_>>::new();
 
     while let Some(current) = stack.pop() {
@@ -342,7 +342,7 @@ async fn action_key(
 
         let dependency_list = shared
             .dependency_cache
-            .get(&dependency_key, &current)
+            .get(dependency_key, &current)
             .await?;
 
         for dependency in &dependency_list.list {
@@ -355,10 +355,10 @@ async fn action_key(
     let mut hasher = blake3::Hasher::new();
 
     for done in &done_vec {
-        hasher.update(done);
+        hasher.update(&done.0);
     }
 
-    Some(*hasher.finalize().as_bytes())
+    Some(ActionCacheKey(*hasher.finalize().as_bytes()))
 }
 
 impl ErasedAssetLoader for ActionLoader {
@@ -396,7 +396,7 @@ impl ErasedAssetLoader for ActionLoader {
                 && let Some(cached_standalone_asset) = self
                     .shared
                     .action_cache
-                    .get(&action_key, load_context.asset_path())
+                    .get(action_key, load_context.asset_path())
                     .await
             {
                 // XXX TODO: Are we correctly updating the loader dependencies?
@@ -443,7 +443,7 @@ impl ErasedAssetLoader for ActionLoader {
 
                 self.shared
                     .action_cache
-                    .put(&action_key, blob.into(), load_context.asset_path());
+                    .put(action_key, blob.into(), load_context.asset_path());
             } else {
                 info!(
                     "{:?}: Cache ineligible, no saver for \"{}\".",
@@ -586,16 +586,20 @@ async fn write_standalone_asset(
     Ok(writer.into())
 }
 
-trait MemoryCacheable: Send + Sync + Clone {}
+trait CacheKey: Send + Sync + Copy + Eq + std::hash::Hash {
+    fn hash(&self) -> AssetHash;
+}
 
-impl<T: Send + Sync + Clone> MemoryCacheable for T {}
+trait MemoryCacheValue: Send + Sync + Clone {}
 
-struct MemoryCache<V: MemoryCacheable> {
-    key_to_value: HashMap<AssetHash, V>,
+impl<T: Send + Sync + Clone> MemoryCacheValue for T {}
+
+struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
+    key_to_value: HashMap<K, V>,
 }
 
 // XXX TODO: Review why we need this. Deriving has issues with the generic parameter.
-impl<V: MemoryCacheable> Default for MemoryCache<V> {
+impl<K: CacheKey, V: MemoryCacheValue> Default for MemoryCache<K, V> {
     fn default() -> Self {
         Self {
             key_to_value: Default::default(),
@@ -603,24 +607,24 @@ impl<V: MemoryCacheable> Default for MemoryCache<V> {
     }
 }
 
-impl<V: MemoryCacheable> MemoryCache<V> {
-    fn get(&self, key: &AssetHash) -> Option<V> {
-        self.key_to_value.get(key).cloned()
+impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
+    fn get(&self, key: K) -> Option<V> {
+        self.key_to_value.get(&key).cloned()
     }
 
-    fn put(&mut self, key: &AssetHash, value: V) {
-        self.key_to_value.insert(*key, value);
+    fn put(&mut self, key: K, value: V) {
+        self.key_to_value.insert(key, value);
     }
 }
 
 // XXX TODO: Why do we need this `static` bound to make the async happy?
-trait FileCacheable: Send + Sync + Clone + 'static {
+trait FileCacheValue: Send + Sync + Clone + 'static {
     fn write(&self, file: &mut File) -> impl ConditionalSendFuture<Output = Result<(), BevyError>>;
 
     fn read(bytes: Box<[u8]>) -> Self;
 }
 
-impl FileCacheable for Arc<[u8]> {
+impl FileCacheValue for Arc<[u8]> {
     async fn write(&self, file: &mut File) -> Result<(), BevyError> {
         file.write_all(self).await.map_err(BevyError::from)
     }
@@ -630,22 +634,22 @@ impl FileCacheable for Arc<[u8]> {
     }
 }
 
-struct FileCache<V: FileCacheable> {
+struct FileCache<K: CacheKey, V: FileCacheValue> {
     base_path: PathBuf,
-    phantom: PhantomData<V>,
+    phantom: PhantomData<(K, V)>,
 }
 
-impl<V: FileCacheable> FileCache<V> {
+impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     fn new(base_path: PathBuf) -> Self {
         Self {
             base_path,
-            phantom: PhantomData::<V>,
+            phantom: PhantomData::<(K, V)>,
         }
     }
 
-    fn value_path(&self, key: &AssetHash) -> PathBuf {
+    fn value_path(&self, key: K) -> PathBuf {
         // XXX TODO: Check if this is worth optimising.
-        let hex = String::from_iter(key.iter().map(|b| format!("{:x}", b)));
+        let hex = String::from_iter(CacheKey::hash(&key).iter().map(|b| format!("{:x}", b)));
 
         // Spread files across multiple folders by using the first few digits of
         // the hash. This is a hedge against filesystems that don't like
@@ -660,7 +664,7 @@ impl<V: FileCacheable> FileCache<V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    async fn get(&self, key: &AssetHash, asset_path: &AssetRef<'static>) -> Option<V> {
+    async fn get(&self, key: K, asset_path: &AssetRef<'static>) -> Option<V> {
         let value_path = self.value_path(key);
 
         let Ok(value) = async_fs::read(value_path).await else {
@@ -671,11 +675,11 @@ impl<V: FileCacheable> FileCache<V> {
 
         info!("{asset_path:?}: File cache hit.");
 
-        Some(<V as FileCacheable>::read(value.into()))
+        Some(<V as FileCacheValue>::read(value.into()))
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn put(&self, key: &AssetHash, value: V, asset_path: &AssetRef<'static>) {
+    fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
         let value_path = self.value_path(key);
         let asset_path = asset_path.to_owned(); // XXX TODO: Annoying clone when it's only for debugging.
         let value = value.clone(); // XXX TODO: ???
@@ -701,7 +705,7 @@ impl<V: FileCacheable> FileCache<V> {
                     return;
                 };
 
-                <V as FileCacheable>::write(&value, &mut temp_file)
+                <V as FileCacheValue>::write(&value, &mut temp_file)
                     .await
                     .expect("TODO");
 
@@ -715,12 +719,12 @@ impl<V: FileCacheable> FileCache<V> {
     }
 }
 
-struct MemoryAndFileCache<V: FileCacheable> {
-    memory: Arc<RwLock<MemoryCache<V>>>,
-    file: Option<FileCache<V>>,
+struct MemoryAndFileCache<K: CacheKey, V: FileCacheValue + MemoryCacheValue> {
+    memory: Arc<RwLock<MemoryCache<K, V>>>,
+    file: Option<FileCache<K, V>>,
 }
 
-impl<V: FileCacheable> MemoryAndFileCache<V> {
+impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
     fn new(file_cache_path: Option<PathBuf>) -> Self {
         MemoryAndFileCache {
             memory: Default::default(),
@@ -729,7 +733,7 @@ impl<V: FileCacheable> MemoryAndFileCache<V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    async fn get(&self, key: &AssetHash, asset_path: &AssetRef<'static>) -> Option<V> {
+    async fn get(&self, key: K, asset_path: &AssetRef<'static>) -> Option<V> {
         if let Some(from_memory) = self
             .memory
             .read()
@@ -758,7 +762,7 @@ impl<V: FileCacheable> MemoryAndFileCache<V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn put(&self, key: &AssetHash, value: V, asset_path: &AssetRef<'static>) {
+    fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
         // XXX TODO: Avoid `blob.clone()` if there's no file cache?
         self.memory
             .write()
@@ -773,9 +777,12 @@ impl<V: FileCacheable> MemoryAndFileCache<V> {
     }
 }
 
+#[derive(Hash, Copy, Clone)]
+struct ContentHash(AssetHash);
+
 #[derive(Default)]
 struct ContentCache {
-    path_to_hash: RwLock<HashMap<AssetPath<'static>, AssetHash>>,
+    path_to_hash: RwLock<HashMap<AssetPath<'static>, ContentHash>>,
 }
 
 impl ContentCache {
@@ -785,7 +792,7 @@ impl ContentCache {
         &self,
         path: &AssetPath<'static>,
         asset_server: &AssetServer,
-    ) -> Result<AssetHash, BevyError> {
+    ) -> Result<ContentHash, BevyError> {
         if let Some(hash) = self
             .path_to_hash
             .read()
@@ -826,13 +833,22 @@ impl ContentCache {
     }
 }
 
+#[derive(Hash, Copy, Clone, Eq, PartialEq)]
+struct DependencyCacheKey(AssetHash);
+
+impl CacheKey for DependencyCacheKey {
+    fn hash(&self) -> AssetHash {
+        self.0
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct DependencyList {
     // XXX TODO: Could store some debug info on the input?
     list: Vec<AssetRef<'static>>,
 }
 
-impl FileCacheable for Arc<DependencyList> {
+impl FileCacheValue for Arc<DependencyList> {
     async fn write(&self, file: &mut File) -> Result<(), BevyError> {
         let string = ron::ser::to_string(self.as_ref()).map_err(BevyError::from)?;
 
@@ -846,29 +862,19 @@ impl FileCacheable for Arc<DependencyList> {
     }
 }
 
-fn content_hash(bytes: &[u8]) -> AssetHash {
+fn content_hash(bytes: &[u8]) -> ContentHash {
     let mut hasher = blake3::Hasher::new();
     hasher.update(bytes);
-    *hasher.finalize().as_bytes()
+    ContentHash(*hasher.finalize().as_bytes())
 }
 
-// XXX TODO: Move this into `AssetAction2`?
-// XXX TODO: Also include action version?
-// XXX TODO: Also consider serializing to ron and hashing that.
-fn action_hash(action: &AssetAction2) -> AssetHash {
-    let mut hasher = blake3::Hasher::new();
+#[derive(Hash, Copy, Clone, Eq, PartialEq)]
+struct ActionCacheKey(AssetHash);
 
-    hasher.update(action.name().as_bytes());
-    hasher.update(action.params().get_ron().as_bytes());
-
-    // XXX TODO: Hash shouldn't include label? It's not an input to the asset,
-    // just a way of filtering the output.
-
-    if let Some(label) = action.label() {
-        hasher.update(label.as_bytes());
+impl CacheKey for ActionCacheKey {
+    fn hash(&self) -> AssetHash {
+        self.0
     }
-
-    *hasher.finalize().as_bytes()
 }
 
 fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::value::RawValue>>) {
