@@ -299,71 +299,6 @@ impl ActionLoader {
     }
 }
 
-async fn dependency_key(
-    path: &AssetRef<'static>,
-    shared: &BassetShared,
-    asset_server: &AssetServer,
-) -> DependencyCacheKey {
-    let mut hasher = blake3::Hasher::new();
-
-    // XXX TODO: Is this wrong for actions and paths with a label? Yes if the cache
-    // holds the full asset - the label selects after getting from the cache. No if
-    // the cache holds the sub-sset.
-    hasher.update(path.to_string().as_bytes());
-
-    if let Some(really_a_path) = path.path() {
-        let content_hash = shared
-            .content_cache
-            .get(really_a_path, asset_server)
-            .await
-            .expect("TODO");
-
-        hasher.update(&content_hash.0);
-    }
-
-    // XXX TODO: Loader version?
-
-    DependencyCacheKey(*hasher.finalize().as_bytes())
-}
-
-async fn action_key(
-    path: &AssetRef<'static>,
-    shared: &BassetShared,
-    asset_server: &AssetServer,
-) -> Option<ActionCacheKey> {
-    let mut stack = vec![path.clone()];
-
-    let mut done_vec = Vec::<DependencyCacheKey>::new();
-    let mut done_set = HashSet::<AssetRef<'_>>::new();
-
-    while let Some(current) = stack.pop() {
-        if !done_set.insert(current.clone()) {
-            continue;
-        }
-
-        let dependency_key = dependency_key(&current, shared, asset_server).await;
-
-        let dependency_list = shared
-            .dependency_cache
-            .get(dependency_key, &current)
-            .await?;
-
-        for dependency in &dependency_list.list {
-            stack.push(dependency.clone());
-        }
-
-        done_vec.push(dependency_key);
-    }
-
-    let mut hasher = blake3::Hasher::new();
-
-    for done in &done_vec {
-        hasher.update(&done.0);
-    }
-
-    Some(ActionCacheKey(*hasher.finalize().as_bytes()))
-}
-
 impl ErasedAssetLoader for ActionLoader {
     fn load<'a>(
         &'a self,
@@ -497,6 +432,71 @@ impl ErasedAssetLoader for ActionLoader {
     }
 }
 
+async fn dependency_key(
+    path: &AssetRef<'static>,
+    shared: &BassetShared,
+    asset_server: &AssetServer,
+) -> DependencyCacheKey {
+    let mut hasher = blake3::Hasher::new();
+
+    // XXX TODO: Is this wrong for actions and paths with a label? Yes if the cache
+    // holds the full asset - the label selects after getting from the cache. No if
+    // the cache holds the sub-sset.
+    hasher.update(path.to_string().as_bytes());
+
+    if let Some(really_a_path) = path.path() {
+        let content_hash = shared
+            .content_cache
+            .get(really_a_path, asset_server)
+            .await
+            .expect("TODO");
+
+        hasher.update(&content_hash.0);
+    }
+
+    // XXX TODO: Loader version?
+
+    DependencyCacheKey(*hasher.finalize().as_bytes())
+}
+
+async fn action_key(
+    path: &AssetRef<'static>,
+    shared: &BassetShared,
+    asset_server: &AssetServer,
+) -> Option<ActionCacheKey> {
+    let mut stack = vec![path.clone()];
+
+    let mut done_vec = Vec::<DependencyCacheKey>::new();
+    let mut done_set = HashSet::<AssetRef<'_>>::new();
+
+    while let Some(current) = stack.pop() {
+        if !done_set.insert(current.clone()) {
+            continue;
+        }
+
+        let dependency_key = dependency_key(&current, shared, asset_server).await;
+
+        let dependency_list = shared
+            .dependency_cache
+            .get(dependency_key, &current)
+            .await?;
+
+        for dependency in &dependency_list.list {
+            stack.push(dependency.clone());
+        }
+
+        done_vec.push(dependency_key);
+    }
+
+    let mut hasher = blake3::Hasher::new();
+
+    for done in &done_vec {
+        hasher.update(&done.0);
+    }
+
+    Some(ActionCacheKey(*hasher.finalize().as_bytes()))
+}
+
 const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
 const STANDALONE_VERSION: u16 = 1;
 
@@ -602,7 +602,7 @@ struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
 }
 
 // XXX TODO: Review why we need this manual `Default` implementation instead of
-// deriving it.
+// deriving it. Causes a compile error in `MemoryAndFileCache`.
 impl<K: CacheKey, V: MemoryCacheValue> Default for MemoryCache<K, V> {
     fn default() -> Self {
         Self {
