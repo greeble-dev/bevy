@@ -149,6 +149,9 @@ pub struct LoadedAsset<A: Asset> {
     pub(crate) dependencies: HashSet<UntypedAssetId>,
     pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     pub(crate) labeled_assets: HashMap<CowArc<'static, str>, LabeledAsset>,
+
+    // XXX TODO: Document. Review if we're duplicating loader_dependencies.
+    pub keys: Option<LoadedAssetKeys>,
 }
 
 impl<A: Asset> LoadedAsset<A> {
@@ -163,6 +166,26 @@ impl<A: Asset> LoadedAsset<A> {
             dependencies,
             loader_dependencies: HashMap::default(),
             labeled_assets: HashMap::default(),
+            keys: None,
+        }
+    }
+
+    /// XXX TODO: Review, document.
+    pub fn new_with_keys(
+        value: A,
+        keys: Option<LoadedAssetKeys>,
+        loader_dependencies: Option<HashMap<AssetRef<'static>, AssetHash>>,
+    ) -> Self {
+        let mut dependencies = <HashSet<_>>::default();
+        value.visit_dependencies(&mut |id| {
+            dependencies.insert(id);
+        });
+        Self {
+            value,
+            dependencies,
+            loader_dependencies: loader_dependencies.unwrap_or_default(),
+            labeled_assets: HashMap::default(),
+            keys,
         }
     }
 
@@ -196,12 +219,36 @@ impl<A: Asset> From<A> for LoadedAsset<A> {
     }
 }
 
+#[derive(Hash, Copy, Clone, Eq, PartialEq)]
+pub struct ActionCacheKey(pub AssetHash);
+
+impl core::fmt::Debug for ActionCacheKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // XXX TODO: Review. Duplicated elsewhere. Could be optimized. Avoid `std`?
+        let hex = String::from_iter(self.0.iter().map(|b| std::format!("{:x}", b)));
+
+        core::fmt::Debug::fmt(&hex, f)
+    }
+}
+
+/// XXX TODO: Document. Review if we're duplicating loader_dependencies.
+pub struct LoadedAssetKeys {
+    /// XXX TODO: `AssetHash` Should be `ActionCacheKey`.
+    pub action_key: ActionCacheKey,
+    /// XXX TODO: `AssetHash` Should be `ActionCacheKey`.
+    pub immediate_dependee_action_keys: HashMap<AssetRef<'static>, ActionCacheKey>,
+}
+
 /// A "type erased / boxed" counterpart to [`LoadedAsset`]. This is used in places where the loaded type is not statically known.
 pub struct ErasedLoadedAsset {
     pub(crate) value: Box<dyn AssetContainer>,
     pub(crate) dependencies: HashSet<UntypedAssetId>,
     pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     pub(crate) labeled_assets: HashMap<CowArc<'static, str>, LabeledAsset>,
+
+    // XXX TODO: Document. Review if we're duplicating loader_dependencies.
+    // XXX TODO: Review `pub`.
+    pub keys: Option<LoadedAssetKeys>,
 }
 
 impl<A: Asset> From<LoadedAsset<A>> for ErasedLoadedAsset {
@@ -211,6 +258,7 @@ impl<A: Asset> From<LoadedAsset<A>> for ErasedLoadedAsset {
             dependencies: asset.dependencies,
             loader_dependencies: asset.loader_dependencies,
             labeled_assets: asset.labeled_assets,
+            keys: asset.keys,
         }
     }
 }
@@ -270,12 +318,19 @@ impl ErasedLoadedAsset {
                 dependencies: self.dependencies,
                 loader_dependencies: self.loader_dependencies,
                 labeled_assets: self.labeled_assets,
+                keys: self.keys,
             }),
             Err(value) => {
                 self.value = value;
                 Err(self)
             }
         }
+    }
+
+    /// XXX TODO: Review if this is necessary? Would prefer to be correct by construction.
+    pub fn with_keys(mut self, keys: Option<LoadedAssetKeys>) -> ErasedLoadedAsset {
+        self.keys = keys;
+        self
     }
 }
 
@@ -472,6 +527,7 @@ impl<'a> LoadContext<'a> {
             dependencies: self.dependencies,
             loader_dependencies: self.loader_dependencies,
             labeled_assets: self.labeled_assets,
+            keys: None, // XXX TODO: Review if this is right.
         }
     }
 

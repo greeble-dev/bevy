@@ -688,6 +688,8 @@ impl<'a, 'de> Deserialize<'de> for SerializableLabel<'a> {
     }
 }
 
+/// XXX TODO: Awkwardly called `AssetAction2` since `AssetAction` is taking.
+/// Need to decide on an alternative name or another way of structuring this.
 #[derive(Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct AssetAction2<'a> {
     // XXX TODO: Review if these should be Arc/CowArc, similar to AssetPath.
