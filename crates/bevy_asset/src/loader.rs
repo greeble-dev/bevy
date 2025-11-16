@@ -321,10 +321,9 @@ pub enum DeserializeMetaError {
 /// Any asset state accessed by [`LoadContext`] will be tracked and stored for use in dependency events and asset preprocessing.
 pub struct LoadContext<'a> {
     pub(crate) asset_server: &'a AssetServer,
-    pub(crate) should_load_dependencies: bool,
+    should_load_dependencies: bool,
     populate_hashes: bool,
     asset_path: AssetPath<'static>,
-    pub(crate) dependencies: HashSet<ErasedAssetIndex>,
     /// Direct dependencies used by this loader.
     pub(crate) loader_dependencies: HashMap<AssetPath<'static>, AssetHash>,
     pub(crate) labeled_assets: HashMap<CowArc<'static, str>, LabeledAsset>,
@@ -343,7 +342,6 @@ impl<'a> LoadContext<'a> {
             asset_path,
             populate_hashes,
             should_load_dependencies,
-            dependencies: HashSet::default(),
             loader_dependencies: HashMap::default(),
             labeled_assets: HashMap::default(),
         }
@@ -457,9 +455,11 @@ impl<'a> LoadContext<'a> {
 
     /// "Finishes" this context by populating the final [`Asset`] value.
     pub fn finish<A: Asset>(self, value: A) -> LoadedAsset<A> {
+        let dependencies = <HashSet<_>>::default();
+
         LoadedAsset {
             value,
-            dependencies: self.dependencies,
+            dependencies,
             loader_dependencies: self.loader_dependencies,
             labeled_assets: self.labeled_assets,
         }
@@ -515,11 +515,7 @@ impl<'a> LoadContext<'a> {
         label: impl Into<CowArc<'b, str>>,
     ) -> Handle<A> {
         let path = self.asset_path.clone().with_label(label);
-        let handle = self.asset_server.get_or_create_path_handle::<A>(path, None);
-        // `get_or_create_path_handle` always returns a Strong variant, so we are safe to unwrap.
-        let index = (&handle).try_into().unwrap();
-        self.dependencies.insert(index);
-        handle
+        self.asset_server.get_or_create_path_handle::<A>(path, None)
     }
 
     pub(crate) async fn load_direct_internal(

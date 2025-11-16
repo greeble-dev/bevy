@@ -304,23 +304,9 @@ impl NestedLoader<'_, '_, StaticTyped, Deferred> {
     /// [`with_unknown_type`]: Self::with_unknown_type
     pub fn load<'c, A: Asset>(self, path: impl Into<AssetPath<'c>>) -> Handle<A> {
         let path = path.into().to_owned();
-        let handle = if self.load_context.should_load_dependencies {
-            self.load_context.asset_server.load_with_meta_transform(
-                path,
-                self.meta_transform,
-                (),
-                true,
-            )
-        } else {
-            self.load_context
-                .asset_server
-                .get_or_create_path_handle(path, self.meta_transform)
-        };
-        // `load_with_meta_transform` and `get_or_create_path_handle` always returns a Strong
-        // variant, so we are safe to unwrap.
-        let index = (&handle).try_into().unwrap();
-        self.load_context.dependencies.insert(index);
-        handle
+        self.load_context
+            .asset_server
+            .get_or_create_path_handle(path, self.meta_transform)
     }
 }
 
@@ -334,29 +320,9 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
     /// [`with_dynamic_type`]: Self::with_dynamic_type
     pub fn load<'p>(self, path: impl Into<AssetPath<'p>>) -> UntypedHandle {
         let path = path.into().to_owned();
-        let handle = if self.load_context.should_load_dependencies {
-            self.load_context
-                .asset_server
-                .load_erased_with_meta_transform(
-                    path,
-                    self.typing.asset_type_id,
-                    self.meta_transform,
-                    (),
-                )
-        } else {
-            self.load_context
-                .asset_server
-                .get_or_create_path_handle_erased(
-                    path,
-                    self.typing.asset_type_id,
-                    self.meta_transform,
-                )
-        };
-        // `load_erased_with_meta_transform` and `get_or_create_path_handle_erased` always returns a
-        // Strong variant, so we are safe to unwrap.
-        let index = (&handle).try_into().unwrap();
-        self.load_context.dependencies.insert(index);
-        handle
+        self.load_context
+            .asset_server
+            .get_or_create_path_handle_erased(path, self.typing.asset_type_id, self.meta_transform)
     }
 }
 
@@ -367,20 +333,9 @@ impl NestedLoader<'_, '_, UnknownTyped, Deferred> {
     /// This will infer the asset type from metadata.
     pub fn load<'p>(self, path: impl Into<AssetPath<'p>>) -> Handle<LoadedUntypedAsset> {
         let path = path.into().to_owned();
-        let handle = if self.load_context.should_load_dependencies {
-            self.load_context
-                .asset_server
-                .load_unknown_type_with_meta_transform(path, self.meta_transform)
-        } else {
-            self.load_context
-                .asset_server
-                .get_or_create_path_handle(path, self.meta_transform)
-        };
-        // `load_unknown_type_with_meta_transform` and `get_or_create_path_handle` always returns a
-        // Strong variant, so we are safe to unwrap.
-        let index = (&handle).try_into().unwrap();
-        self.load_context.dependencies.insert(index);
-        handle
+        self.load_context
+            .asset_server
+            .get_or_create_path_handle(path, self.meta_transform)
     }
 }
 
