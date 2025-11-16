@@ -455,7 +455,26 @@ impl<'a> LoadContext<'a> {
 
     /// "Finishes" this context by populating the final [`Asset`] value.
     pub fn finish<A: Asset>(self, value: A) -> LoadedAsset<A> {
-        let dependencies = <HashSet<_>>::default();
+        let mut dependencies = <HashSet<_>>::default();
+        value.visit_dependencies(&mut |id| {
+            let Some(handle) = self.asset_server.get_id_handle_untyped(id) else {
+                // XXX TODO: Error?
+                return;
+            };
+
+            // Skip our sub-assets - they're not a dependency.
+            // XXX TODO: Can we do this without cloning the path?
+            if handle.path().expect("TODO").without_label() == self.asset_path {
+                return;
+            }
+
+            self.asset_server.load_untyped_handle(handle);
+
+            let Ok(asset_index) = id.try_into() else {
+                return;
+            };
+            dependencies.insert(asset_index);
+        });
 
         LoadedAsset {
             value,

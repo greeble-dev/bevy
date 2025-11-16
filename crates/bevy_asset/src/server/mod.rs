@@ -523,6 +523,7 @@ impl AssetServer {
         handle
     }
 
+    #[expect(dead_code, reason = "XXX TODO: Decide if this stays.")]
     pub(crate) fn load_erased_with_meta_transform<'a, G: Send + Sync + 'static>(
         &self,
         path: impl Into<AssetPath<'a>>,
@@ -545,6 +546,30 @@ impl AssetServer {
         }
 
         handle
+    }
+
+    pub(crate) fn load_untyped_handle(&self, handle: UntypedHandle) {
+        let path = handle
+            .path()
+            .expect("XXX TODO: Error handling. Can't load a handle without a path.")
+            .to_owned();
+
+        // Call `get_or_create_path_handle_erased` to update the loading state.
+        // We never expect this to actually create a handle.
+        let mut infos = self.write_infos();
+        let (existing_handle, should_load) = infos.get_or_create_path_handle_erased(
+            path.clone(),
+            handle.type_id(),
+            None,
+            HandleLoadingMode::Request,
+            None,
+        );
+
+        assert_eq!(handle, existing_handle);
+
+        if should_load {
+            self.spawn_load_task(handle, path, infos, ());
+        }
     }
 
     pub(crate) fn spawn_load_task<G: Send + Sync + 'static>(
