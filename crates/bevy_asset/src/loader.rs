@@ -231,7 +231,7 @@ impl core::fmt::Debug for ActionCacheKey {
     }
 }
 
-/// XXX TODO: Document. Review if we're duplicating loader_dependencies.
+/// XXX TODO: Document. Review if we're duplicating `loader_dependencies`.
 pub struct LoadedAssetKeys {
     /// XXX TODO: `AssetHash` Should be `ActionCacheKey`.
     pub action_key: ActionCacheKey,
@@ -293,7 +293,19 @@ impl ErasedLoadedAsset {
         self.labeled_assets.get(&label.into()).map(|a| &a.asset)
     }
 
-    /// XXX TODO: Document
+    /// XXX TODO: Document. Review name.
+    pub fn get_labeled_by_id(&self, id: UntypedAssetId) -> Option<&ErasedLoadedAsset> {
+        self.labeled_assets.values().find_map(|a| {
+            if a.handle.id() == id {
+                Some(&a.asset)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// XXX TODO: Document.
+    #[expect(clippy::result_large_err, reason = "XXX TODO")]
     pub fn take_labeled(
         mut self,
         label: impl Into<CowArc<'static, str>>,
@@ -311,6 +323,7 @@ impl ErasedLoadedAsset {
 
     /// Cast this loaded asset as the given type. If the type does not match,
     /// the original type-erased asset is returned.
+    #[expect(clippy::result_large_err, reason = "XXX TODO")]
     pub fn downcast<A: Asset>(mut self) -> Result<LoadedAsset<A>, ErasedLoadedAsset> {
         match self.value.downcast::<A>() {
             Ok(value) => Ok(LoadedAsset {
@@ -641,7 +654,7 @@ impl<'a> LoadContext<'a> {
         self.loader().load(path)
     }
 
-    // XXX TODO: Review, document.
+    // XXX TODO: Review, document. Should try to avoid exposing this if possible.
     pub fn asset_server(&self) -> &AssetServer {
         self.asset_server
     }

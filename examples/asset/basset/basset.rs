@@ -81,7 +81,7 @@ fn resolve_keys(
         }
     }
 
-    return Some(out);
+    Some(out)
 }
 
 /// XXX TODO: Document.
@@ -1062,7 +1062,7 @@ async fn load_path(
 
     let dependency_key = dependency_key(&path, shared, asset_server).await;
 
-    todo!("This should get the action key from asset.keys");
+    //todo!("This should get the action key from asset.keys");
 
     let immediate_dependee_action_keys = HashMap::default();
 
@@ -1360,7 +1360,7 @@ mod action {
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             let gltf = context.erased_load_dependee(&params.gltf).await?;
 
-            let scene = acme::from_gltf(&gltf, context.asset_server);
+            let scene = acme::from_gltf(&gltf);
 
             // XXX TODO: What about dependencies?
 
@@ -1629,22 +1629,15 @@ mod acme {
     fn get_sub_asset<'a, T: Asset>(
         asset: &'a ErasedLoadedAsset,
         sub_asset_handle: &Handle<T>,
-        asset_server: &'a AssetServer,
     ) -> &'a T {
-        let label = asset_server
-            .get_path(sub_asset_handle.id().untyped())
-            .expect("TODO")
-            .label_cow()
-            .expect("TODO");
-
         asset
-            .get_labeled(label.into_owned())
+            .get_labeled_by_id(sub_asset_handle.into())
             .expect("TODO")
             .get::<T>()
             .expect("TODO")
     }
 
-    pub fn from_gltf(asset: &ErasedLoadedAsset, asset_server: &AssetServer) -> AcmeScene {
+    pub fn from_gltf(asset: &ErasedLoadedAsset) -> AcmeScene {
         let mut entities = Vec::<AcmeEntity>::new();
 
         let gltf = asset.get::<Gltf>().expect("TODO");
@@ -1653,7 +1646,7 @@ mod acme {
             .nodes
             .iter()
             .map(|node_handle| {
-                let node = get_sub_asset(asset, node_handle, asset_server);
+                let node = get_sub_asset(asset, node_handle);
 
                 (node, node.transform)
             })
@@ -1667,18 +1660,15 @@ mod acme {
             if let Some(mesh) = node
                 .mesh
                 .as_ref()
-                .map(|mesh_handle| get_sub_asset(asset, mesh_handle, asset_server))
+                .map(|mesh_handle| get_sub_asset(asset, mesh_handle))
             {
                 for primitive in mesh.primitives.iter() {
                     let mesh = Some(AcmeMesh {
                         asset: primitive.mesh.path().expect("TODO").clone(),
                     });
 
-                    let standard_material = get_sub_asset(
-                        asset,
-                        primitive.material.as_ref().expect("TODO"),
-                        asset_server,
-                    );
+                    let standard_material =
+                        get_sub_asset(asset, primitive.material.as_ref().expect("TODO"));
 
                     let material = Some(AcmeMaterial {
                         base_color_texture: standard_material
@@ -1699,7 +1689,7 @@ mod acme {
             for child in node
                 .children
                 .iter()
-                .map(|child_handle| get_sub_asset(asset, child_handle, asset_server))
+                .map(|child_handle| get_sub_asset(asset, child_handle))
             {
                 stack.push((child, transform * child.transform));
             }
