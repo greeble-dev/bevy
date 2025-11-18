@@ -1,9 +1,6 @@
 //! Basset proof of concept.
 #![expect(dead_code, reason = "TODO")]
 
-#[path = "../../helpers/camera_controller.rs"]
-mod camera_controller;
-
 use async_fs::File;
 use bevy::{
     asset::{
@@ -13,6 +10,7 @@ use bevy::{
         AssetLoader, AssetPath, DeserializeMetaError, ErasedAssetLoader, ErasedLoadedAsset,
         LoadContext, LoadedAsset,
     },
+    camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     ecs::error::BevyError,
     light::CascadeShadowConfigBuilder,
     pbr::experimental::meshlet::{
@@ -31,7 +29,7 @@ use bevy::{
 use bevy_asset::{
     io::SliceReader, ActionCacheKey, AssetAction2, AssetRef, AsyncWriteExt, LoadedAssetKeys,
 };
-use camera_controller::{CameraController, CameraControllerPlugin};
+
 use core::result::Result;
 use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
@@ -406,7 +404,7 @@ impl ErasedAssetLoader for ActionLoader {
                 "Reader should have been empty, all data is in the path."
             );
 
-            let action = load_context.asset_path().action().expect(
+            let action = load_context.path().action().expect(
                 "ActionLoader should have been given an AssetRef::Action, not an AssetRef::Path.",
             );
 
@@ -1842,7 +1840,7 @@ fn setup(
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-30.0, 200.0, 300.0).looking_at(Vec3::new(-30.0, 75.0, 0.0), Vec3::Y),
-        CameraController {
+        FreeCamera {
             walk_speed: 200.0,
             ..Default::default()
         },
@@ -1959,7 +1957,7 @@ fn main() {
             }),
             BassetPlugin,
             MaterialPlugin::<MeshletDebugMaterial>::default(),
-            CameraControllerPlugin,
+            FreeCameraPlugin,
             MeshletPlugin {
                 cluster_buffer_slots: 1 << 14,
             },

@@ -48,13 +48,22 @@ impl AssetLoader for GzAssetLoader {
     ) -> Result<Self::Asset, Self::Error> {
         let compressed_path = load_context.path();
         let file_name = compressed_path
+            // XXX TODO: Review. Added `unwpath().unwrap()`.
+            .path()
+            .unwrap()
+            .path()
             .file_name()
             .ok_or(GzAssetLoaderError::IndeterminateFilePath)?
             .to_string_lossy();
         let uncompressed_file_name = file_name
             .strip_suffix(".gz")
             .ok_or(GzAssetLoaderError::IndeterminateFilePath)?;
-        let contained_path = compressed_path.join(uncompressed_file_name);
+        let contained_path = compressed_path
+            // XXX TODO: Review. Added `path.unwrap()`.
+            .path()
+            .unwrap()
+            .resolve_embed(uncompressed_file_name)
+            .map_err(|_| GzAssetLoaderError::IndeterminateFilePath)?;
 
         let mut bytes_compressed = Vec::new();
 

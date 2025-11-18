@@ -347,7 +347,7 @@ impl ErasedAssetLoader for InstrumentedAssetLoader {
         let span = info_span!(
             "asset loading",
             loader = self.0.type_name(),
-            asset = load_context.asset_path().to_string(),
+            asset = load_context.path().to_string(),
         );
         Box::pin(self.0.load(reader, meta, load_context).instrument(span))
     }
