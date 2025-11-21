@@ -1461,7 +1461,7 @@ impl AssetServer {
             }
             AssetRef::Action(_) => {
                 let loader = self
-                    .get_asset_loader_with_type_name("basset::ActionLoader")
+                    .get_asset_loader_with_type_name("bevy_asset::basset::ActionLoader")
                     .await?;
 
                 let meta = loader.default_meta();

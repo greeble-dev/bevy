@@ -1019,7 +1019,7 @@ impl GltfLoader {
                     joints: joint_entities,
                 });
             }
-            let loaded_scene = scene_load_context.finish(Scene::new(world));
+            let loaded_scene = scene_load_context.finish_labeled(Scene::new(world));
             let scene_handle = load_context.add_loaded_labeled_asset(
                 GltfAssetLabel::Scene(scene.index()).to_string(),
                 loaded_scene,

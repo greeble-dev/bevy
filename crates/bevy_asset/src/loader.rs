@@ -1,4 +1,5 @@
 use crate::{
+    basset::{BassetShared, DependencyCacheKey},
     io::{AssetReaderError, MissingAssetSourceError, MissingProcessedAssetReaderError, Reader},
     loader_builders::{Deferred, NestedLoader, StaticTyped},
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfoMinimal, Settings},
@@ -98,7 +99,7 @@ where
             let asset = <L as AssetLoader>::load(self, reader, settings, &mut load_context)
                 .await
                 .map_err(Into::into)?;
-            Ok(load_context.finish(asset).into())
+            Ok(load_context.finish(asset).await.into())
         })
     }
 
@@ -238,7 +239,9 @@ impl core::fmt::Debug for ActionCacheKey {
 }
 
 /// XXX TODO: Document. Review if we're duplicating `loader_dependencies`.
+#[derive(Clone)]
 pub struct LoadedAssetKeys {
+    pub dependency_key: DependencyCacheKey,
     /// XXX TODO: `AssetHash` Should be `ActionCacheKey`.
     pub action_key: ActionCacheKey,
     /// XXX TODO: `AssetHash` Should be `ActionCacheKey`.
@@ -411,6 +414,8 @@ pub struct LoadContext<'a> {
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
     /// Direct dependencies used by this loader.
     pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
+    // XXX TODO: Review, document.
+    pub(crate) immediate_dependee_action_keys: HashMap<AssetRef<'static>, ActionCacheKey>,
     pub(crate) labeled_assets: HashMap<CowArc<'static, str>, LabeledAsset>,
 }
 
@@ -429,6 +434,7 @@ impl<'a> LoadContext<'a> {
             should_load_dependencies,
             dependencies: HashSet::default(),
             loader_dependencies: HashMap::default(),
+            immediate_dependee_action_keys: HashMap::default(),
             labeled_assets: HashMap::default(),
         }
     }
@@ -486,7 +492,7 @@ impl<'a> LoadContext<'a> {
     ) -> Result<Handle<A>, E> {
         let mut context = self.begin_labeled_asset();
         let asset = load(&mut context)?;
-        let loaded_asset = context.finish(asset);
+        let loaded_asset = context.finish_labeled(asset);
         Ok(self.add_loaded_labeled_asset(label, loaded_asset))
     }
 
@@ -540,16 +546,43 @@ impl<'a> LoadContext<'a> {
     }
 
     /// "Finishes" this context by populating the final [`Asset`] value.
-    pub fn finish<A: Asset>(self, value: A) -> LoadedAsset<A> {
+    //
+    // XXX TODO: Review decision to make this async. Was needed for `loaded_asset_keys`,
+    // which needs it to get the dependency key, which needs to async read from
+    // the content cache. Can maybe avoid if we calculate the content key
+    // ourselves from the reader.
+    pub async fn finish<A: Asset>(self, value: A) -> LoadedAsset<A> {
+        let keys = Some(
+            self.asset_server
+                .basset_shared()
+                .loaded_asset_keys(
+                    &self.asset_path,
+                    &self.immediate_dependee_action_keys,
+                    self.asset_server,
+                )
+                .await,
+        );
+
         LoadedAsset {
             value,
             dependencies: self.dependencies,
             loader_dependencies: self.loader_dependencies,
             labeled_assets: self.labeled_assets,
-            keys: None, // XXX TODO: Review if this is right.
+            keys,
         }
     }
 
+    // XXX TODO: Review decision to separate this from `finish`. Done to avoid
+    // making it async, plus labeled assets don't need keys (or do they?).
+    pub fn finish_labeled<A: Asset>(self, value: A) -> LoadedAsset<A> {
+        LoadedAsset {
+            value,
+            dependencies: self.dependencies,
+            loader_dependencies: self.loader_dependencies,
+            labeled_assets: self.labeled_assets,
+            keys: None,
+        }
+    }
     /// Gets the source asset path for this load context.
     // XXX TODO: Review, keeping `asset_path` as name for now even though it's a ref.
     pub fn path(&self) -> &AssetRef<'static> {
@@ -591,6 +624,18 @@ impl<'a> LoadContext<'a> {
             })?;
         self.loader_dependencies
             .insert(path.clone_owned().into(), hash);
+        self.immediate_dependee_action_keys.insert(
+            path.clone_owned().into(),
+            // XXX TODO: Ugly?
+            BassetShared::action_key(
+                &self
+                    .asset_server()
+                    .basset_shared()
+                    .dependency_key(&self.asset_path, self.asset_server)
+                    .await,
+                &Default::default(),
+            ),
+        );
         Ok(bytes)
     }
 
@@ -633,7 +678,11 @@ impl<'a> LoadContext<'a> {
             })?;
         let info = meta.processed_info().as_ref();
         let hash = info.map(|i| i.full_hash).unwrap_or_default();
-        self.loader_dependencies.insert(path.into(), hash);
+        self.loader_dependencies.insert(path.clone().into(), hash);
+        self.immediate_dependee_action_keys.insert(
+            path.clone().into(),
+            loaded_asset.keys.clone().expect("TODO").action_key,
+        );
         Ok(loaded_asset)
     }
 

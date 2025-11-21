@@ -575,9 +575,12 @@ fn setup(
         asset_server
             .load::<demo::StringAsset>("string.basset")
             .untyped(),
+        // Disabled until we can work out how apply_settings works with dynamic types.
+        /*
         asset_server
             .load::<demo::StringAsset>("string_loader_uppercase.basset")
             .untyped(),
+            */
         asset_server
             .load::<demo::StringAsset>("join_strings.basset")
             .untyped(),

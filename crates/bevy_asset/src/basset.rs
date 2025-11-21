@@ -1,5 +1,4 @@
 //! Basset proof of concept.
-#![expect(dead_code, reason = "TODO")]
 
 use bevy_app::{App, Plugin};
 use bevy_asset::{
@@ -71,13 +70,14 @@ pub struct ApplyContext<'a> {
     // XXX TODO: Can this be a reference? Also review `'static` lifetime.
     path: AssetRef<'static>,
     asset_server: &'a AssetServer,
+
+    // Equivalent to `ErasedLoadedAsset::immediate_dependee_action_keys`.
     immediate_dependee_action_keys: HashMap<AssetRef<'static>, Option<ActionCacheKey>>,
 
     // Equivalent to `ErasedLoadedAsset::loader_dependencies.
     // XXX TODO: Review this. Partially duplicates immediate_dependee_action_keys.
     loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
 
-    dependency_key: DependencyCacheKey,
     shared: &'a BassetShared,
 }
 
@@ -161,16 +161,17 @@ impl ApplyContext<'_> {
 
             // XXX TODO: Move into function?
             // XXX TODO: Check if cloning and collecting can be reduced.
-            let loaded_asset_keys = LoadedAssetKeys {
-                action_key: action_key_from_loaded_dependencies(
-                    &self.dependency_key,
+            let loaded_asset_keys = self
+                .shared
+                .loaded_asset_keys(
+                    &self.path,
                     &immediate_dependee_action_keys,
-                ),
-                immediate_dependee_action_keys,
-            };
+                    self.asset_server,
+                )
+                .await;
 
             self.shared.dependency_cache.put(
-                self.dependency_key,
+                loaded_asset_keys.dependency_key,
                 Arc::new(dependency_list),
                 &self.path.clone(), // XXX TODO: Avoid clone?
             );
@@ -322,6 +323,44 @@ impl BassetShared {
 
         DependencyCacheKey(*hasher.finalize().as_bytes())
     }
+
+    pub(crate) fn action_key(
+        dependency_key: &DependencyCacheKey,
+        immediate_dependee_action_keys: &HashMap<AssetRef<'static>, ActionCacheKey>,
+    ) -> ActionCacheKey {
+        let mut hasher = blake3::Hasher::new();
+
+        // XXX TODO: Action key also needs loader version.
+        // XXX TODO: Anything else?
+
+        hasher.update(&dependency_key.0);
+
+        // XXX TODO: How are we stabilising the order of dependencies?
+
+        for immediate_dependee_action_key in immediate_dependee_action_keys.values() {
+            hasher.update(&immediate_dependee_action_key.0);
+        }
+
+        ActionCacheKey(*hasher.finalize().as_bytes())
+    }
+
+    pub(crate) async fn loaded_asset_keys(
+        &self,
+        path: &AssetRef<'static>,
+        immediate_dependee_action_keys: &HashMap<AssetRef<'static>, ActionCacheKey>,
+        asset_server: &AssetServer,
+    ) -> LoadedAssetKeys {
+        let dependency_key = self.dependency_key(path, asset_server).await;
+
+        let action_key = BassetShared::action_key(&dependency_key, immediate_dependee_action_keys);
+
+        LoadedAssetKeys {
+            dependency_key,
+            action_key,
+            // XXX TODO: Parameter should be by value to avoid clone here?
+            immediate_dependee_action_keys: immediate_dependee_action_keys.clone(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -346,7 +385,9 @@ impl ErasedAssetLoader for BassetLoader {
             let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
 
             // XXX TODO: Review use of `load_ref`. Is this getting the
-            // dependencies and everything else right?
+            // dependencies and everything else right? Depends if it's valid for
+            // us to return the action key of the root action, and not something
+            // calculated from our actual file.
 
             load_ref(load_context.asset_server(), &basset.root).await
         })
@@ -544,8 +585,7 @@ async fn action_key_from_dependency_cache(
             continue;
         }
 
-        let action_key =
-            action_key_from_loaded_dependencies(&top.dependency_key, &top.completed_dependees);
+        let action_key = BassetShared::action_key(&top.dependency_key, &top.completed_dependees);
 
         if let Some(mut parent) = stack.pop() {
             parent.completed_dependees.insert(top.path, action_key);
@@ -557,30 +597,6 @@ async fn action_key_from_dependency_cache(
 
         return Some(action_key);
     }
-}
-
-fn action_key_from_loaded_dependencies(
-    dependency_key: &DependencyCacheKey,
-    immediate_dependee_action_keys: &HashMap<AssetRef<'static>, ActionCacheKey>,
-) -> ActionCacheKey {
-    let mut hasher = blake3::Hasher::new();
-
-    // XXX TODO: Action key also needs loader version.
-    // XXX TODO: Anything else?
-
-    hasher.update(&dependency_key.0);
-
-    // XXX TODO: How are we stabilising the order of dependencies?
-
-    for immediate_dependee_action_key in immediate_dependee_action_keys.values() {
-        hasher.update(&immediate_dependee_action_key.0);
-    }
-
-    ActionCacheKey(*hasher.finalize().as_bytes())
-}
-
-fn action_key_from_loaded_asset(asset: &ErasedLoadedAsset) -> Option<ActionCacheKey> {
-    asset.keys.as_ref().map(|keys| keys.action_key)
 }
 
 const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
@@ -937,7 +953,7 @@ impl ContentCache {
 }
 
 #[derive(Hash, Copy, Clone, Eq, PartialEq)]
-pub(crate) struct DependencyCacheKey(AssetHash);
+pub struct DependencyCacheKey(AssetHash);
 
 impl CacheKey for DependencyCacheKey {
     fn as_hash(&self) -> AssetHash {
@@ -1043,25 +1059,7 @@ async fn load_path(
         .await
         .map_err(Into::<BevyError>::into)?;
 
-    //todo!("This should get the action key from asset.keys");
-    assert!(asset.keys.is_some(), "{path:?}");
-
-    /*
-    let dependency_key = shared.dependency_key(&path, asset_server).await;
-
-
-    let immediate_dependee_action_keys = HashMap::default();
-
-    let action_key =
-        action_key_from_loaded_dependencies(&dependency_key, &immediate_dependee_action_keys);
-
-    let keys = LoadedAssetKeys {
-        action_key,
-        immediate_dependee_action_keys,
-    };
-
-    let asset = asset.with_keys(Some(keys));
-    */
+    assert!(asset.keys.is_some(), "Missing keys: {path:?}");
 
     if let Some(label) = path.label_cow() {
         match asset.take_labeled(label.clone()) {
@@ -1083,27 +1081,29 @@ async fn load_action(
 
     let shared = asset_server.basset_shared().clone();
 
-    // XXX TODO: `dependency_key` will be looking up the content hash even though we have the bytes right here. Avoid?
-    let dependency_key = shared.dependency_key(&path, asset_server).await;
-
     let mut apply_context = ApplyContext {
         path: path.clone(), // XXX TODO: Avoid `clone`?
         asset_server,
         immediate_dependee_action_keys: HashMap::default(),
         loader_dependencies: HashMap::default(),
-        dependency_key,
         shared: &shared,
     };
 
-    // XXX TODO: Proper cache key including dependencies etc.
-    let action_key = action_key_from_dependency_cache(&path, &dependency_key, asset_server).await;
-
-    if let Some(action_key) = action_key
-        && let Some(cached_standalone_asset) = shared.action_cache.get(&action_key, &path).await
+    // XXX TODO: `dependency_key` will be looking up the content hash even though we have the bytes right here. Avoid?
     {
-        // XXX TODO: Are we correctly updating the loader dependencies?
-        // compare against `load_direct` and `BassetActionContext::erased_load`.
-        return read_standalone_asset(&cached_standalone_asset, &apply_context).await;
+        let dependency_key = shared.dependency_key(&path, asset_server).await;
+
+        // XXX TODO: Proper cache key including dependencies etc.
+        let action_key =
+            action_key_from_dependency_cache(&path, &dependency_key, asset_server).await;
+
+        if let Some(action_key) = action_key
+            && let Some(cached_standalone_asset) = shared.action_cache.get(&action_key, &path).await
+        {
+            // XXX TODO: Are we correctly updating the loader dependencies?
+            // compare against `load_direct` and `BassetActionContext::erased_load`.
+            return read_standalone_asset(&cached_standalone_asset, &apply_context).await;
+        }
     }
 
     let asset = shared
@@ -1111,6 +1111,8 @@ async fn load_action(
         .ok_or_else(|| BevyError::from(format!("Couldn't find action \"{}\")", action.name())))?
         .apply(&mut apply_context, action.params())
         .await?;
+
+    assert!(asset.keys.is_some());
 
     // XXX TODO: At this point we should replace `asset.loader_dependencies`
     // with our own `context.loader_dependencies`.
@@ -1124,9 +1126,7 @@ async fn load_action(
         );
     }
 
-    // XXX TODO: This is where we need to work out the real action key
-    // if it wasn't found previously.
-    if let Some(action_key) = action_key
+    if let Some(keys) = asset.keys.as_ref()
         && let Some((saver, settings)) = shared.saver(asset.asset_type_name())
     {
         info!("{:?}: Cache put.", &action);
@@ -1140,7 +1140,7 @@ async fn load_action(
 
         let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
 
-        shared.action_cache.put(action_key, blob.into(), &path);
+        shared.action_cache.put(keys.action_key, blob.into(), &path);
     } else {
         info!(
             "{:?}: Cache ineligible, no saver for \"{}\".",
