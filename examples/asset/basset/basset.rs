@@ -2,8 +2,8 @@
 
 use bevy::{
     asset::{
-        io::Reader, saver::AssetSaver, AssetLoader, AssetPath, ErasedLoadedAsset, LoadContext,
-        LoadedAsset,
+        basset::*, io::Reader, saver::AssetSaver, AssetAction2, AssetLoader, AssetPath, AssetRef,
+        ErasedLoadedAsset, LoadContext, LoadedAsset,
     },
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     ecs::error::BevyError,
@@ -16,7 +16,6 @@ use bevy::{
     render::render_resource::AsBindGroup,
     time::common_conditions::on_timer,
 };
-use bevy_asset::{basset::*, AssetAction2, AssetRef};
 
 use core::result::Result;
 use serde::{Deserialize, Serialize};
@@ -42,17 +41,21 @@ mod action {
 
         async fn apply(
             &self,
-            context: &mut ApplyContext<'_>,
+            mut context: ApplyContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             // XXX TODO: Review if treating the asset as a dependee is correct.
-            context
-                .erased_load_dependee_path(
-                    // XXX TODO: Avoid `into_owned`?
-                    &AssetPath::parse(&params.path).into_owned(),
-                    &params.loader_settings,
+            Ok(context
+                .finish(
+                    context
+                        .erased_load_dependee_path(
+                            // XXX TODO: Avoid `into_owned`?
+                            &AssetPath::parse(&params.path).into_owned(),
+                            &params.loader_settings,
+                        )
+                        .await?,
                 )
-                .await
+                .await)
         }
     }
 
@@ -70,7 +73,7 @@ mod action {
 
         async fn apply(
             &self,
-            context: &mut ApplyContext<'_>,
+            mut context: ApplyContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             let mut strings = Vec::new();
@@ -84,7 +87,7 @@ mod action {
                 .reduce(|l, r| l + &params.separator + &r)
                 .unwrap_or("".to_owned());
 
-            Ok(LoadedAsset::new_with_dependencies(demo::StringAsset(joined)).into())
+            Ok(context.finish(demo::StringAsset(joined)).await)
         }
     }
 
@@ -101,7 +104,7 @@ mod action {
 
         async fn apply(
             &self,
-            context: &mut ApplyContext<'_>,
+            mut context: ApplyContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             let string = demo::StringAsset(
@@ -131,7 +134,7 @@ mod action {
 
         async fn apply(
             &self,
-            context: &mut ApplyContext<'_>,
+            mut context: ApplyContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             let gltf = context.erased_load_dependee(&params.gltf).await?;
@@ -166,7 +169,7 @@ mod action {
 
         async fn apply(
             &self,
-            context: &mut ApplyContext<'_>,
+            mut context: ApplyContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             // TODO: Should we check if `MeshletPlugin` is registered so we can
@@ -196,7 +199,7 @@ mod action {
 
         async fn apply(
             &self,
-            context: &mut ApplyContext<'_>,
+            mut context: ApplyContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             // TODO: Should we check if `MeshletPlugin` is registered so we can

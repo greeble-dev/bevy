@@ -1,5 +1,5 @@
 use crate::{
-    basset::{BassetShared, DependencyCacheKey},
+    basset::{ActionCacheKey, BassetShared, LoadedAssetKeys},
     io::{AssetReaderError, MissingAssetSourceError, MissingProcessedAssetReaderError, Reader},
     loader_builders::{Deferred, NestedLoader, StaticTyped},
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfoMinimal, Settings},
@@ -224,28 +224,6 @@ impl<A: Asset> From<A> for LoadedAsset<A> {
     fn from(asset: A) -> Self {
         LoadedAsset::new_with_dependencies(asset)
     }
-}
-
-#[derive(Hash, Copy, Clone, Eq, PartialEq)]
-pub struct ActionCacheKey(pub AssetHash);
-
-impl core::fmt::Debug for ActionCacheKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // XXX TODO: Review. Duplicated elsewhere. Could be optimized. Avoid `std`?
-        let hex = String::from_iter(self.0.iter().map(|b| std::format!("{:x}", b)));
-
-        core::fmt::Debug::fmt(&hex, f)
-    }
-}
-
-/// XXX TODO: Document. Review if we're duplicating `loader_dependencies`.
-#[derive(Clone)]
-pub struct LoadedAssetKeys {
-    pub dependency_key: DependencyCacheKey,
-    /// XXX TODO: `AssetHash` Should be `ActionCacheKey`.
-    pub action_key: ActionCacheKey,
-    /// XXX TODO: `AssetHash` Should be `ActionCacheKey`.
-    pub immediate_dependee_action_keys: HashMap<AssetRef<'static>, ActionCacheKey>,
 }
 
 /// A "type erased / boxed" counterpart to [`LoadedAsset`]. This is used in places where the loaded type is not statically known.
