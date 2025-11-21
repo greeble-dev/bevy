@@ -135,6 +135,7 @@ impl AssetProcessor {
             AssetMetaCheck::Always,
             false,
             UnapprovedPathMode::default(),
+            Default::default(),
         );
         Self { server, data }
     }

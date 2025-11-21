@@ -204,9 +204,14 @@ pub use reflect::*;
 pub use render_asset::*;
 pub use server::*;
 
+// XXX TODO: Review. Right now we're not doing a `pub use basset::*` like the
+// rest of the crate does.
+pub mod basset;
+
 pub use uuid;
 
 use crate::{
+    basset::BassetShared,
     io::{embedded::EmbeddedAssetRegistry, AssetSourceBuilder, AssetSourceBuilders, AssetSourceId},
     processor::{AssetProcessor, Process},
 };
@@ -262,6 +267,9 @@ pub struct AssetPlugin {
     /// Approved folders are [`AssetPlugin::file_path`] and the folder of each
     /// [`AssetSource`](io::AssetSource). Subfolders within these folders are also valid.
     pub unapproved_path_mode: UnapprovedPathMode,
+
+    // XXX TODO: Review.
+    pub basset_shared: Arc<BassetShared>,
 }
 
 /// Determines how to react to attempts to load assets not inside the approved folders.
@@ -341,6 +349,7 @@ impl Default for AssetPlugin {
             use_asset_processor_override: None,
             meta_check: AssetMetaCheck::default(),
             unapproved_path_mode: UnapprovedPathMode::default(),
+            basset_shared: Default::default(),
         }
     }
 }
@@ -381,6 +390,7 @@ impl Plugin for AssetPlugin {
                         self.meta_check.clone(),
                         watch,
                         self.unapproved_path_mode.clone(),
+                        self.basset_shared.clone(),
                     ));
                 }
                 AssetMode::Processed => {
@@ -400,6 +410,7 @@ impl Plugin for AssetPlugin {
                             AssetMetaCheck::Always,
                             watch,
                             self.unapproved_path_mode.clone(),
+                            self.basset_shared.clone(),
                         ))
                         .insert_resource(processor)
                         .add_systems(bevy_app::Startup, AssetProcessor::start);
@@ -412,6 +423,7 @@ impl Plugin for AssetPlugin {
                             AssetMetaCheck::Always,
                             watch,
                             self.unapproved_path_mode.clone(),
+                            self.basset_shared.clone(),
                         ));
                     }
                 }

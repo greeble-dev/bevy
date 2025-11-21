@@ -2,6 +2,7 @@ mod info;
 mod loaders;
 
 use crate::{
+    basset::BassetShared,
     folder::LoadedFolder,
     io::{
         AssetReaderError, AssetSource, AssetSourceEvent, AssetSourceId, AssetSources,
@@ -73,6 +74,7 @@ pub(crate) struct AssetServerData {
     mode: AssetServerMode,
     meta_check: AssetMetaCheck,
     unapproved_path_mode: UnapprovedPathMode,
+    basset_shared: Arc<BassetShared>,
 }
 
 /// The "asset mode" the server is currently in.
@@ -95,6 +97,7 @@ impl AssetServer {
         mode: AssetServerMode,
         watching_for_changes: bool,
         unapproved_path_mode: UnapprovedPathMode,
+        basset_shared: Arc<BassetShared>,
     ) -> Self {
         Self::new_with_loaders(
             sources,
@@ -103,6 +106,7 @@ impl AssetServer {
             AssetMetaCheck::Always,
             watching_for_changes,
             unapproved_path_mode,
+            basset_shared,
         )
     }
 
@@ -114,6 +118,7 @@ impl AssetServer {
         meta_check: AssetMetaCheck,
         watching_for_changes: bool,
         unapproved_path_mode: UnapprovedPathMode,
+        basset_shared: Arc<BassetShared>,
     ) -> Self {
         Self::new_with_loaders(
             sources,
@@ -122,6 +127,7 @@ impl AssetServer {
             meta_check,
             watching_for_changes,
             unapproved_path_mode,
+            basset_shared,
         )
     }
 
@@ -132,6 +138,7 @@ impl AssetServer {
         meta_check: AssetMetaCheck,
         watching_for_changes: bool,
         unapproved_path_mode: UnapprovedPathMode,
+        basset_shared: Arc<BassetShared>,
     ) -> Self {
         let (asset_event_sender, asset_event_receiver) = crossbeam_channel::unbounded();
         let mut infos = AssetInfos::default();
@@ -146,6 +153,7 @@ impl AssetServer {
                 loaders,
                 infos: RwLock::new(infos),
                 unapproved_path_mode,
+                basset_shared,
             }),
         }
     }
@@ -1771,6 +1779,11 @@ impl AssetServer {
             .await?;
 
         Ok(())
+    }
+
+    // XXX TODO: Document. Review visibility.
+    pub(crate) fn basset_shared<'a>(&'a self) -> &'a Arc<BassetShared> {
+        &self.data.basset_shared
     }
 }
 
