@@ -19,6 +19,7 @@ use bevy_platform::{
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture, IoTaskPool};
 
 use async_fs::File;
+use atomicow::CowArc;
 use core::result::Result;
 use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
@@ -38,7 +39,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Asset, AssetApp, AssetServer};
+use crate::{Asset, AssetApp, AssetContainer, AssetServer, LabeledAsset, UntypedAssetId};
 
 pub struct BassetPlugin;
 
@@ -65,17 +66,92 @@ pub struct ApplyContext<'a> {
     shared: &'a BassetShared,
 }
 
+// XXX TODO: Oof, that name.
+pub struct PartialErasedLoadedLabeledAsset {
+    pub(crate) value: Box<dyn AssetContainer>,
+    pub(crate) id: UntypedAssetId,
+}
+
+// XXX TODO: Duplicates a lot of `PartialErasedLoadedAsset` and `ErasedLoadedAsset`.
+impl PartialErasedLoadedLabeledAsset {
+    pub fn get<A: Asset>(&self) -> Option<&A> {
+        self.value.downcast_ref::<A>()
+    }
+
+    #[expect(clippy::result_large_err, reason = "XXX TODO")]
+    pub fn downcast<A: Asset>(mut self) -> Result<A, PartialErasedLoadedLabeledAsset> {
+        match self.value.downcast::<A>() {
+            Ok(value) => Ok(*value),
+            Err(value) => {
+                self.value = value;
+                Err(self)
+            }
+        }
+    }
+}
+
+impl From<LabeledAsset> for PartialErasedLoadedLabeledAsset {
+    fn from(value: LabeledAsset) -> Self {
+        Self {
+            value: value.asset.value,
+            id: value.handle.id(),
+        }
+    }
+}
+
+pub struct PartialErasedLoadedAsset {
+    pub(crate) value: Box<dyn AssetContainer>,
+    pub(crate) labeled_assets: HashMap<CowArc<'static, str>, PartialErasedLoadedLabeledAsset>,
+}
+
+// XXX TODO: Duplicates a lot of `ErasedLoadedAsset`.
+impl PartialErasedLoadedAsset {
+    pub fn get<A: Asset>(&self) -> Option<&A> {
+        self.value.downcast_ref::<A>()
+    }
+
+    #[expect(clippy::result_large_err, reason = "XXX TODO")]
+    pub fn downcast<A: Asset>(mut self) -> Result<A, PartialErasedLoadedAsset> {
+        match self.value.downcast::<A>() {
+            Ok(value) => Ok(*value),
+            Err(value) => {
+                self.value = value;
+                Err(self)
+            }
+        }
+    }
+
+    pub fn get_labeled_by_id(
+        &self,
+        id: UntypedAssetId,
+    ) -> Option<&PartialErasedLoadedLabeledAsset> {
+        self.labeled_assets.values().find(|a| a.id == id)
+    }
+}
+
+impl From<ErasedLoadedAsset> for PartialErasedLoadedAsset {
+    fn from(value: ErasedLoadedAsset) -> Self {
+        let mut labeled_assets = HashMap::new();
+
+        for (label, value) in value.labeled_assets.into_iter() {
+            labeled_assets.insert(label, Into::<PartialErasedLoadedLabeledAsset>::into(value));
+        }
+
+        Self {
+            value: value.value,
+            labeled_assets,
+        }
+    }
+}
+
 impl ApplyContext<'_> {
     pub async fn erased_load_dependee(
         &mut self,
         path: &AssetRef<'static>,
-    ) -> Result<ErasedLoadedAsset, BevyError> {
-        let asset = load_ref(self.asset_server, path).await?;
+    ) -> Result<PartialErasedLoadedAsset, BevyError> {
+        let asset = load_ref(self.asset_server, &path.without_label().into_owned()).await?;
 
-        // XXX TODO: What if the dependee doesn't have an action key?
-        //
-        // If it's an action, we can run the action directly here? If it's a path
-        // then we load and work out the dependency key
+        assert!(asset.keys.is_some(), "Missing keys: {path:?}");
 
         self.immediate_dependee_action_keys
             .insert(path.clone(), asset.keys.as_ref().expect("TODO").action_key);
@@ -86,21 +162,24 @@ impl ApplyContext<'_> {
 
         self.loader_dependencies.insert(path.clone(), hash);
 
-        Ok(asset)
+        if let Some(label) = path.label_cow() {
+            match asset.take_labeled(label.clone()) {
+                Ok(labeled_asset) => Ok(labeled_asset.into()),
+                // XXX TODO
+                Err(_) => panic!("Couldn't find label \"{}\" in \"{}\".", label, path),
+            }
+        } else {
+            Ok(asset.into())
+        }
     }
 
-    // XXX TODO: Kinda duplicates erased_load_dependee.
+    // XXX TODO: Review where this duplicates `erased_load_dependee`.
     pub async fn erased_load_dependee_path(
         &mut self,
         path: &AssetPath<'static>,
         settings: &Option<Box<ron::value::RawValue>>,
-    ) -> Result<ErasedLoadedAsset, BevyError> {
+    ) -> Result<PartialErasedLoadedAsset, BevyError> {
         let asset = load_path(self.asset_server, path, settings).await?;
-
-        // XXX TODO: What if the dependee doesn't have an action key?
-        //
-        // If it's an action, we can run the action directly here? If it's a path
-        // then we load and work out the dependency key
 
         self.immediate_dependee_action_keys.insert(
             path.clone().into(),
@@ -114,7 +193,15 @@ impl ApplyContext<'_> {
         // XXX TODO: Duplicates earlier `path.clone().into()`.
         self.loader_dependencies.insert(path.clone().into(), hash);
 
-        Ok(asset)
+        if let Some(label) = path.label_cow() {
+            match asset.take_labeled(label.clone()) {
+                Ok(labeled_asset) => Ok(labeled_asset.into()),
+                // XXX TODO
+                Err(_) => panic!("Couldn't find label \"{}\" in \"{}\".", label, path),
+            }
+        } else {
+            Ok(asset.into())
+        }
     }
 
     pub async fn load_dependee<T: Asset>(
@@ -122,19 +209,17 @@ impl ApplyContext<'_> {
         path: &AssetRef<'static>,
     ) -> Result<T, BevyError> {
         match self.erased_load_dependee(path).await?.downcast::<T>() {
-            Ok(result) => Ok(result.take()),
+            Ok(result) => Ok(result),
             Err(original) => panic!(
                 "Should have made type {}, actually made type {}. Path: {:?}",
                 core::any::type_name::<T>(),
-                original.asset_type_name(),
+                original.value.asset_type_name(),
                 path,
             ),
         }
     }
 
     pub async fn finish<A: Asset>(self, asset: A) -> ErasedLoadedAsset {
-        // XXX TODO: Move into function?
-        // XXX TODO: Check if cloning and collecting can be reduced.
         // XXX TODO: Check if we can be more efficient and avoid a full `loaded_asset_keys`.
         // We might already have the dependency key somewhere.
 
@@ -363,6 +448,12 @@ impl ErasedAssetLoader for BassetLoader {
         _meta: &'a dyn AssetMetaDyn,
         load_context: LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+        assert!(
+            load_context.path().label().is_none(),
+            "Paranoia. {:?}",
+            load_context.path()
+        );
+
         Box::pin(async move {
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await?;
@@ -422,6 +513,12 @@ impl ErasedAssetLoader for ActionLoader {
         _meta: &'a dyn AssetMetaDyn,
         load_context: LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+        assert!(
+            load_context.path().label().is_none(),
+            "Paranoia. {:?}",
+            load_context.path()
+        );
+
         Box::pin(async move {
             assert_eq!(
                 reader.read_to_end(&mut Vec::new()).await?,
@@ -954,6 +1051,7 @@ struct DependencyList {
 
 impl FileCacheValue for Arc<DependencyList> {
     async fn write(&self, file: &mut File) -> Result<(), BevyError> {
+        // XXX TODO: Should have a serialized struct that includes a version number and an opaque value.
         let string = ron::ser::to_string(self.as_ref()).map_err(BevyError::from)?;
 
         file.write_all(string.as_bytes())
@@ -1036,6 +1134,11 @@ async fn load_path(
     path: &AssetPath<'static>,
     settings: &Option<Box<ron::value::RawValue>>,
 ) -> Result<ErasedLoadedAsset, BevyError> {
+    assert!(
+        !path.label().is_some(),
+        "Labels should not be handled here. {path:?}",
+    );
+
     // XXX TODO: Can this be optimised for the case of path being an AssetAction?
     // So we know that it's just going to call ActionLoader.
 
@@ -1047,6 +1150,9 @@ async fn load_path(
         .await
         .map_err(Into::<BevyError>::into)?;
 
+    // XXX TODO: If we have settings then the action key of the asset is going to
+    // be wrong - it's calculated by `LoadContext::finish` and doesn't take the
+    // settings into account.
     apply_settings(meta.loader_settings_mut(), settings);
 
     // Roughly the same as LoadContext::load_direct_internal.
@@ -1068,20 +1174,18 @@ async fn load_path(
 
     assert!(asset.keys.is_some(), "Missing keys: {path:?}");
 
-    if let Some(label) = path.label_cow() {
-        match asset.take_labeled(label.clone()) {
-            Ok(labeled_asset) => Ok(labeled_asset),
-            Err(_) => panic!("Couldn't find label \"{}\" in \"{}\".", label, path),
-        }
-    } else {
-        Ok(asset)
-    }
+    Ok(asset)
 }
 
 async fn load_action(
     asset_server: &AssetServer,
     action: &AssetAction2<'static>,
 ) -> Result<ErasedLoadedAsset, BevyError> {
+    assert!(
+        !action.label().is_some(),
+        "Labels should not be handled here. {action:?}",
+    );
+
     // XXX TODO: Avoid? There's a bunch of things that expect an `AssetRef` but
     // maybe could be specialized for an action.
     let path = AssetRef::from(action.clone());
@@ -1125,9 +1229,6 @@ async fn load_action(
 
     assert!(asset.keys.is_some(), "Missing keys: {path:?}");
 
-    // XXX TODO: At this point we should replace `asset.loader_dependencies`
-    // with our own `context.loader_dependencies`.
-
     if let Some(keys) = asset.keys.as_ref()
         && !keys.immediate_dependee_action_keys.is_empty()
     {
@@ -1159,9 +1260,6 @@ async fn load_action(
             asset.asset_type_name()
         );
     }
-
-    // XXX TODO: Should select sub-asset with `action.label`? But need to work
-    // out if the cache holds the full asset or sub-asset (see also `dependency_key`).
 
     Ok(asset)
 }

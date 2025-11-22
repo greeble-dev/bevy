@@ -2,8 +2,8 @@
 
 use bevy::{
     asset::{
-        basset::*, io::Reader, saver::AssetSaver, AssetAction2, AssetLoader, AssetPath, AssetRef,
-        ErasedLoadedAsset, LoadContext, LoadedAsset,
+        basset::*, io::Reader, saver::AssetSaver, AssetAction2, AssetLoader, AssetRef,
+        ErasedLoadedAsset, LoadContext,
     },
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     ecs::error::BevyError,
@@ -41,21 +41,12 @@ mod action {
 
         async fn apply(
             &self,
-            mut context: ApplyContext<'_>,
-            params: &Self::Params,
+            _context: ApplyContext<'_>,
+            _params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
-            // XXX TODO: Review if treating the asset as a dependee is correct.
-            Ok(context
-                .finish(
-                    context
-                        .erased_load_dependee_path(
-                            // XXX TODO: Avoid `into_owned`?
-                            &AssetPath::parse(&params.path).into_owned(),
-                            &params.loader_settings,
-                        )
-                        .await?,
-                )
-                .await)
+            // Work out what this should do so that any settings correctly
+            // influence the action key.
+            todo!();
         }
     }
 
@@ -115,7 +106,7 @@ mod action {
                     .to_uppercase(),
             );
 
-            Ok(LoadedAsset::new_with_dependencies(string).into())
+            Ok(context.finish(string).await)
         }
     }
 
@@ -143,7 +134,7 @@ mod action {
 
             // XXX TODO: What about dependencies?
 
-            Ok(LoadedAsset::new_with_dependencies(scene).into())
+            Ok(context.finish(scene).await)
         }
     }
 
@@ -180,7 +171,7 @@ mod action {
             let meshlet =
                 MeshletMesh::from_mesh(&mesh, params.vertex_position_quantization_factor())?;
 
-            Ok(LoadedAsset::new_with_dependencies(meshlet).into())
+            Ok(context.finish(meshlet).await)
         }
     }
 
@@ -223,7 +214,7 @@ mod action {
                 }
             }
 
-            Ok(LoadedAsset::new_with_dependencies(scene).into())
+            Ok(context.finish(scene).await)
         }
     }
 }
@@ -387,7 +378,7 @@ mod acme {
     }
 
     fn get_sub_asset<'a, T: Asset>(
-        asset: &'a ErasedLoadedAsset,
+        asset: &'a PartialErasedLoadedAsset,
         sub_asset_handle: &Handle<T>,
     ) -> &'a T {
         asset
@@ -397,7 +388,7 @@ mod acme {
             .expect("TODO")
     }
 
-    pub fn from_gltf(asset: &ErasedLoadedAsset) -> AcmeScene {
+    pub fn from_gltf(asset: &PartialErasedLoadedAsset) -> AcmeScene {
         let mut entities = Vec::<AcmeEntity>::new();
 
         let gltf = asset.get::<Gltf>().expect("TODO");
@@ -642,11 +633,9 @@ fn print_events<T: Asset + std::fmt::Debug>(
     for event in events.read() {
         match *event {
             AssetEvent::Added { id } | AssetEvent::Modified { id } => {
-                info!(
-                    "{:?}: Value = {:?}",
-                    asset_server.get_path(id).unwrap(),
-                    assets.get(id).unwrap()
-                );
+                let path = asset_server.get_path(id).unwrap();
+                let value = assets.get(id).unwrap();
+                info!(target: "load_events", ?path, ?value, "Loaded");
             }
             _ => (),
         }

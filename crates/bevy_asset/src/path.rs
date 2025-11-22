@@ -851,7 +851,8 @@ impl<'a> AssetRef<'a> {
 
     pub fn without_label(&self) -> AssetRef<'_> {
         match self {
-            // XXX TODO: Review lifetime correctness.
+            // XXX TODO: Review lifetime correctness. Suspect the original
+            // `without_label` could be wrong and should return an `AssetRef<'a>`?
             Self::Path(path) => AssetRef::<'_>::Path(path.without_label()),
             Self::Action(action) => AssetRef::<'_>::Action(action.without_label()),
         }

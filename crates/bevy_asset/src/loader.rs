@@ -5,7 +5,7 @@ use crate::{
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfoMinimal, Settings},
     path::AssetPath,
     Asset, AssetIndex, AssetLoadError, AssetRef, AssetServer, AssetServerMode, Assets,
-    ErasedAssetIndex, Handle, UntypedAssetId, UntypedHandle,
+    ErasedAssetIndex, Handle, UntypedHandle,
 };
 use alloc::{
     boxed::Box,
@@ -280,17 +280,6 @@ impl ErasedLoadedAsset {
         self.labeled_assets.get(&label.into()).map(|a| &a.asset)
     }
 
-    /// XXX TODO: Document. Review name.
-    pub fn get_labeled_by_id(&self, id: UntypedAssetId) -> Option<&ErasedLoadedAsset> {
-        self.labeled_assets.values().find_map(|a| {
-            if a.handle.id() == id {
-                Some(&a.asset)
-            } else {
-                None
-            }
-        })
-    }
-
     /// XXX TODO: Document.
     #[expect(clippy::result_large_err, reason = "XXX TODO")]
     pub fn take_labeled(
@@ -528,7 +517,8 @@ impl<'a> LoadContext<'a> {
     // XXX TODO: Review decision to make this async. Was needed for `loaded_asset_keys`,
     // which needs it to get the dependency key, which needs to async read from
     // the content cache. Can maybe avoid if we calculate the content key
-    // ourselves from the reader.
+    // ourselves from the reader. This would also avoid reading the whole file
+    // twice.
     pub async fn finish<A: Asset>(self, value: A) -> LoadedAsset<A> {
         let keys = Some(
             self.asset_server
