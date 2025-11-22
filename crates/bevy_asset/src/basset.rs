@@ -306,8 +306,8 @@ pub struct BassetShared {
     action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
     content_cache: ContentCache,
-    dependency_cache: MemoryAndFileCache<DependencyCacheKey, Arc<DependencyList>>,
-    action_cache: MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>,
+    dependency_cache: Option<MemoryAndFileCache<DependencyCacheKey, Arc<DependencyList>>>,
+    action_cache: Option<MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>>,
 }
 
 impl BassetShared {
@@ -316,12 +316,14 @@ impl BassetShared {
             action_type_name_to_action: Default::default(),
             asset_type_name_to_saver: Default::default(),
             content_cache: Default::default(),
-            dependency_cache: MemoryAndFileCache::new(
+            dependency_cache: Some(MemoryAndFileCache::new(
+                "dependency_cache",
                 file_cache_path.as_ref().map(|p| p.join("dependency")),
-            ),
-            action_cache: MemoryAndFileCache::new(
+            )),
+            action_cache: Some(MemoryAndFileCache::new(
+                "action_cache",
                 file_cache_path.as_ref().map(|p| p.join("action")),
-            ),
+            )),
         }
     }
 
@@ -421,8 +423,9 @@ impl BassetShared {
         };
 
         // XXX TODO: Is this the right place for the cache put?
-        self.dependency_cache
-            .put(dependency_key, Arc::new(dependency_list), path);
+        if let Some(dependency_cache) = &self.dependency_cache {
+            dependency_cache.put(dependency_key, Arc::new(dependency_list), path);
+        }
 
         LoadedAssetKeys {
             dependency_key,
@@ -634,10 +637,9 @@ async fn action_key_from_dependency_cache(
 
     let shared = asset_server.basset_shared().clone();
 
-    let initial_dependency_list = shared
-        .dependency_cache
-        .get(asset_dependency_key, path)
-        .await?;
+    let dependency_cache = shared.dependency_cache.as_ref()?;
+
+    let initial_dependency_list = dependency_cache.get(asset_dependency_key, path).await?;
 
     let mut stack = vec![Entry {
         path: path.clone(),
@@ -652,8 +654,7 @@ async fn action_key_from_dependency_cache(
         if let Some(next_dependee) = top.pending_dependees.pop() {
             let dependee_dependency_key = shared.dependency_key(&next_dependee, asset_server).await;
 
-            let dependee_dependency_list = shared
-                .dependency_cache
+            let dependee_dependency_list = dependency_cache
                 .get(&dependee_dependency_key, &next_dependee)
                 .await?;
 
@@ -782,25 +783,36 @@ trait MemoryCacheValue: Send + Sync + Clone {}
 impl<T: Send + Sync + Clone> MemoryCacheValue for T {}
 
 struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
+    name: &'static str,
     key_to_value: HashMap<K, V>,
 }
 
-// XXX TODO: Review why we need this manual `Default` implementation instead of
-// deriving it. Causes a compile error in `MemoryAndFileCache`.
-impl<K: CacheKey, V: MemoryCacheValue> Default for MemoryCache<K, V> {
-    fn default() -> Self {
+impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
+    fn new(name: &'static str) -> Self {
         Self {
+            name,
             key_to_value: Default::default(),
         }
     }
-}
 
-impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
-    fn get(&self, key: &K) -> Option<V> {
-        self.key_to_value.get(key).cloned()
+    // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
+    fn get(&self, key: &K, asset_path: &AssetRef<'static>) -> Option<V> {
+        let result = self.key_to_value.get(key).cloned();
+
+        info!(
+            ?asset_path,
+            "{}: Memory cache {}.",
+            self.name,
+            if result.is_some() { "hit" } else { "miss" }
+        );
+
+        result
     }
 
-    fn put(&mut self, key: K, value: V) {
+    // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
+    fn put(&mut self, key: K, value: V, asset_path: &AssetRef<'static>) {
+        info!(?asset_path, "{}: Memory cache put.", self.name,);
+
         self.key_to_value.insert(key, value);
     }
 }
@@ -824,13 +836,15 @@ impl FileCacheValue for Arc<[u8]> {
 
 #[derive(Default)]
 struct FileCache<K: CacheKey, V: FileCacheValue> {
+    name: &'static str,
     base_path: PathBuf,
     phantom: PhantomData<(K, V)>,
 }
 
 impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
-    fn new(base_path: PathBuf) -> Self {
+    fn new(name: &'static str, base_path: PathBuf) -> Self {
         Self {
+            name,
             base_path,
             phantom: PhantomData::<(K, V)>,
         }
@@ -858,12 +872,12 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
         let value_path = self.value_path(key);
 
         let Ok(value) = async_fs::read(value_path).await else {
-            info!("{asset_path:?}: File cache miss.");
+            info!(?asset_path, "{}: File cache miss.", self.name);
 
             return None;
         };
 
-        info!("{asset_path:?}: File cache hit.");
+        info!(?asset_path, "{}: File cache hit.", self.name);
 
         Some(<V as FileCacheValue>::read(value.into()))
     }
@@ -872,7 +886,10 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
         let value_path = self.value_path(&key);
         let asset_path = asset_path.to_owned(); // XXX TODO: Annoying clone when it's only for debugging.
-        let value = value.clone(); // XXX TODO: ???
+
+        // XXX TODO: Review faff that avoids lifetime issues.
+        let value = value.clone();
+        let name = self.name;
 
         IoTaskPool::get()
             .spawn(async move {
@@ -903,33 +920,24 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
                     .await
                     .expect("TODO, this is ok to fail?");
 
-                info!("{asset_path:?}: File cache put.");
+                info!(?asset_path, "{}: File cache put.", name);
             })
             .detach();
     }
 }
 
 struct MemoryAndFileCache<K: CacheKey, V: FileCacheValue + MemoryCacheValue> {
+    name: &'static str,
     memory: Arc<RwLock<MemoryCache<K, V>>>,
     file: Option<FileCache<K, V>>,
 }
 
-// XXX TODO: Review why we need this manual `Default` implementation. For some
-// reason it complains about `ContentKey` not implementing `Default`?
-impl<K: CacheKey, V: FileCacheValue + MemoryCacheValue> Default for MemoryAndFileCache<K, V> {
-    fn default() -> Self {
-        Self {
-            memory: Default::default(),
-            file: Default::default(),
-        }
-    }
-}
-
 impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
-    fn new(file_cache_path: Option<PathBuf>) -> Self {
+    fn new(name: &'static str, file_cache_path: Option<PathBuf>) -> Self {
         MemoryAndFileCache {
-            memory: Default::default(),
-            file: file_cache_path.map(FileCache::new),
+            name,
+            memory: Arc::new(RwLock::new(MemoryCache::new(name))),
+            file: file_cache_path.map(|p| FileCache::new(name, p)),
         }
     }
 
@@ -939,14 +947,10 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
             .memory
             .read()
             .unwrap_or_else(PoisonError::into_inner)
-            .get(key)
+            .get(key, asset_path)
         {
-            info!("{asset_path:?}: Memory cache hit.");
-
             return Some(from_memory);
         }
-
-        info!("{asset_path:?}: Memory cache miss.");
 
         if let Some(file) = &self.file {
             let from_file = file.get(key, asset_path).await?;
@@ -954,7 +958,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
             self.memory
                 .write()
                 .unwrap_or_else(PoisonError::into_inner)
-                .put(key.clone(), from_file.clone());
+                .put(key.clone(), from_file.clone(), asset_path);
 
             Some(from_file)
         } else {
@@ -968,9 +972,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
         self.memory
             .write()
             .unwrap_or_else(PoisonError::into_inner)
-            .put(key.clone(), value.clone());
-
-        info!("{asset_path:?}: Memory cache put.");
+            .put(key.clone(), value.clone(), asset_path);
 
         if let Some(file) = &self.file {
             file.put(key, value, asset_path);
@@ -1000,12 +1002,14 @@ impl ContentCache {
             .unwrap_or_else(PoisonError::into_inner)
             .get(path)
         {
-            info!("{path:?}: Content cache hit.");
+            // XXX TODO: Review. Too spammy for now.
+            //info!(?path, "Content cache hit.");
 
             return Ok(*hash);
         }
 
-        info!("{path:?}: Content cache miss.");
+        // XXX TODO: Review. Too spammy for now.
+        //info!(?path, "Content cache miss.");
 
         let source = asset_server
             .get_source(path.source())
@@ -1229,6 +1233,8 @@ async fn load_action(
 
     assert!(asset.keys.is_some(), "Missing keys: {path:?}");
 
+    // XXX TODO: Review logging. Bit spammy right now.
+    /*
     if let Some(keys) = asset.keys.as_ref()
         && !keys.immediate_dependee_action_keys.is_empty()
     {
@@ -1237,12 +1243,12 @@ async fn load_action(
             path, keys.immediate_dependee_action_keys,
         );
     }
+    */
 
-    if let Some(keys) = asset.keys.as_ref()
+    if let Some(action_cache) = &shared.action_cache
+        && let Some(keys) = asset.keys.as_ref()
         && let Some((saver, settings)) = shared.saver(asset.asset_type_name())
     {
-        info!("{:?}: Cache put.", &action);
-
         // XXX TODO: Verify loader matches saver? Need a way to get
         // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
         let loader = asset_server
@@ -1252,13 +1258,10 @@ async fn load_action(
 
         let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
 
-        shared.action_cache.put(keys.action_key, blob.into(), &path);
+        action_cache.put(keys.action_key, blob.into(), &path);
     } else {
-        info!(
-            "{:?}: Cache ineligible, no saver for \"{}\".",
-            path,
-            asset.asset_type_name()
-        );
+        let type_name = asset.asset_type_name();
+        info!(?type_name, ?path, "Cache ineligible, no saver for type.");
     }
 
     Ok(asset)
