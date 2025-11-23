@@ -20,7 +20,10 @@ use bevy_tasks::{BoxedFuture, ConditionalSendFuture, IoTaskPool};
 
 use async_fs::File;
 use atomicow::CowArc;
-use core::result::Result;
+use core::{
+    fmt::{Debug, Display},
+    result::Result,
+};
 use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -28,7 +31,6 @@ use tracing::info;
 // XXX TODO: Review if `std` imports should be `alloc`/`core`.
 use alloc::{vec, vec::Vec};
 use std::{
-    borrow::ToOwned,
     boxed::Box,
     format,
     hash::Hash,
@@ -379,12 +381,12 @@ impl BassetShared {
                 .await
                 .expect("TODO");
 
-            hasher.update(&content_hash.0);
+            hasher.update(&content_hash.as_bytes());
         }
 
         // XXX TODO: Loader version?
 
-        DependencyCacheKey(*hasher.finalize().as_bytes())
+        DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
     }
 
     pub(crate) fn action_key(
@@ -396,15 +398,15 @@ impl BassetShared {
         // XXX TODO: Action key also needs loader version.
         // XXX TODO: Anything else?
 
-        hasher.update(&dependency_key.0);
+        hasher.update(&dependency_key.0 .0);
 
         // XXX TODO: How are we stabilising the order of dependencies?
 
         for immediate_dependee_action_key in immediate_dependee_action_keys.values() {
-            hasher.update(&immediate_dependee_action_key.0);
+            hasher.update(&immediate_dependee_action_key.0 .0);
         }
 
-        ActionCacheKey(*hasher.finalize().as_bytes())
+        ActionCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
     }
 
     pub(crate) async fn loaded_asset_keys(
@@ -810,8 +812,44 @@ async fn write_standalone_asset(
     Ok(writer.into())
 }
 
-trait CacheKey: Clone + Eq + Hash {
-    fn as_hash(&self) -> AssetHash;
+#[derive(Hash, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BassetHash([u8; 32]);
+
+impl BassetHash {
+    // XXX TODO: Should take bytes by value or ref?
+    fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    // XXX TODO: Naming convention suggests `as_bytes` should return a reference?
+    // So this should be `to_bytes`?
+    fn as_bytes(&self) -> [u8; 32] {
+        self.0
+    }
+}
+
+impl Debug for BassetHash {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // XXX TODO: Review. Duplicated elsewhere. Could be optimized. Avoid `std`?
+        let hex = String::from_iter(self.0.iter().map(|b| std::format!("{:x}", b)));
+
+        Debug::fmt(&hex, f)
+    }
+}
+
+impl Display for BassetHash {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // Display only the first 8 characters.
+        //
+        // XXX TODO: Review. Duplicated elsewhere. Could be optimized. Avoid `std`?
+        let hex = String::from_iter(self.0.iter().take(4).map(|b| std::format!("{:x}", b)));
+
+        Display::fmt(&hex, f)
+    }
+}
+
+trait CacheKey: Copy + Clone + Eq + Hash + Send + Sync {
+    fn as_hash(&self) -> BassetHash;
 }
 
 trait MemoryCacheValue: Send + Sync + Clone {}
@@ -823,7 +861,7 @@ struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
     key_to_value: HashMap<K, V>,
 }
 
-fn log(name: &'static str, path: &AssetRef<'static>, string: &'static str) {
+fn log(name: &'static str, path: &AssetRef<'static>, hash: BassetHash, string: &'static str) {
     // Skip embedded sources for now as they're too spammy.
 
     if let Some(path) = path.path()
@@ -832,7 +870,7 @@ fn log(name: &'static str, path: &AssetRef<'static>, string: &'static str) {
         return;
     }
 
-    info!(?path, "{name}: {string}");
+    info!(?path, %hash, "{name}: {string}");
 }
 
 impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
@@ -848,9 +886,9 @@ impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
         let result = self.key_to_value.get(key).cloned();
 
         if result.is_some() {
-            log(self.name, asset_path, "Memory cache hit.");
+            log(self.name, asset_path, key.as_hash(), "Memory cache hit.");
         } else {
-            log(self.name, asset_path, "Memory cache miss.");
+            log(self.name, asset_path, key.as_hash(), "Memory cache miss.");
         }
 
         result
@@ -858,7 +896,7 @@ impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
     fn put(&mut self, key: K, value: V, asset_path: &AssetRef<'static>) {
-        log(self.name, asset_path, "Memory cache put.");
+        log(self.name, asset_path, key.as_hash(), "Memory cache put.");
 
         self.key_to_value.insert(key, value);
     }
@@ -898,8 +936,9 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     }
 
     fn value_path(&self, key: &K) -> PathBuf {
+        // XXX TODO: Duplicates `BassetHash` debug?
         // XXX TODO: Check if this is worth optimising.
-        let hex = String::from_iter(key.as_hash().iter().map(|b| format!("{:x}", b)));
+        let hex = String::from_iter(key.as_hash().0.iter().map(|b| format!("{:x}", b)));
 
         // Spread files across multiple folders by using the first few digits of
         // the hash. This is a hedge against filesystems that don't like
@@ -919,12 +958,12 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
         let value_path = self.value_path(key);
 
         let Ok(value) = async_fs::read(value_path).await else {
-            log(self.name, asset_path, "File cache miss.");
+            log(self.name, asset_path, key.as_hash(), "File cache miss.");
 
             return None;
         };
 
-        log(self.name, asset_path, "File cache hit.");
+        log(self.name, asset_path, key.as_hash(), "File cache hit.");
 
         Some(<V as FileCacheValue>::read(value.into()))
     }
@@ -932,11 +971,11 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
     fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
         let value_path = self.value_path(&key);
-        let asset_path = asset_path.to_owned(); // XXX TODO: Annoying clone when it's only for debugging.
 
         // XXX TODO: Review faff that avoids lifetime issues.
         let value = value.clone();
-        let name = self.name;
+
+        log(self.name, &asset_path, key.as_hash(), "File cache put.");
 
         IoTaskPool::get()
             .spawn(async move {
@@ -966,8 +1005,6 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
                 async_fs::rename(temp_path, value_path)
                     .await
                     .expect("TODO, this is ok to fail?");
-
-                log(name, &asset_path, "File cache put.");
             })
             .detach();
     }
@@ -1027,17 +1064,23 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
     }
 }
 
-#[derive(Hash, Copy, Clone)]
-struct ContentHash(AssetHash);
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+struct ContentHash(BassetHash);
 
 #[derive(Default)]
 struct ContentCache {
     path_to_hash: RwLock<HashMap<AssetPath<'static>, ContentHash>>,
 }
 
+impl ContentHash {
+    fn as_bytes(&self) -> [u8; 32] {
+        self.0.as_bytes()
+    }
+}
+
 impl ContentCache {
     // XXX TODO: Can we avoid `AssetPath` being `<'static>`?
-    // XXX TODO: Returning AssetHash by value is probabably the practical choice? But check.
+    // XXX TODO: Returning BassetHash by value is probabably the practical choice? But check.
     async fn get(
         &self,
         path: &AssetPath<'static>,
@@ -1085,11 +1128,23 @@ impl ContentCache {
     }
 }
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct DependencyCacheKey(AssetHash);
+#[derive(Hash, Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct DependencyCacheKey(BassetHash);
+
+impl DependencyCacheKey {
+    fn as_bytes(&self) -> [u8; 32] {
+        self.0.as_bytes()
+    }
+}
+
+impl Display for DependencyCacheKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
 
 impl CacheKey for DependencyCacheKey {
-    fn as_hash(&self) -> AssetHash {
+    fn as_hash(&self) -> BassetHash {
         self.0
     }
 }
@@ -1118,23 +1173,26 @@ impl FileCacheValue for Arc<DependencyList> {
 fn content_hash(bytes: &[u8]) -> ContentHash {
     let mut hasher = blake3::Hasher::new();
     hasher.update(bytes);
-    ContentHash(*hasher.finalize().as_bytes())
+    ContentHash(BassetHash::new(*hasher.finalize().as_bytes()))
 }
 
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ActionCacheKey(pub AssetHash);
+pub struct ActionCacheKey(pub BassetHash);
 
-impl core::fmt::Debug for ActionCacheKey {
+impl ActionCacheKey {
+    fn as_bytes(&self) -> [u8; 32] {
+        self.0.as_bytes()
+    }
+}
+
+impl Display for ActionCacheKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // XXX TODO: Review. Duplicated elsewhere. Could be optimized. Avoid `std`?
-        let hex = String::from_iter(self.0.iter().map(|b| std::format!("{:x}", b)));
-
-        core::fmt::Debug::fmt(&hex, f)
+        Display::fmt(&self.0, f)
     }
 }
 
 impl CacheKey for ActionCacheKey {
-    fn as_hash(&self) -> AssetHash {
+    fn as_hash(&self) -> BassetHash {
         self.0
     }
 }
@@ -1143,9 +1201,7 @@ impl CacheKey for ActionCacheKey {
 #[derive(Clone)]
 pub struct LoadedAssetKeys {
     pub dependency_key: DependencyCacheKey,
-    /// XXX TODO: `AssetHash` Should be `ActionCacheKey`.
     pub action_key: ActionCacheKey,
-    /// XXX TODO: `AssetHash` Should be `ActionCacheKey`.
     pub immediate_dependee_action_keys: HashMap<AssetRef<'static>, ActionCacheKey>,
 }
 
