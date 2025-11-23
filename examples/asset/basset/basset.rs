@@ -558,6 +558,7 @@ fn setup(
     //let _inline_path = BassetPathSerializable::Path("1234.int".into()).to_asset_path();
 
     commands.insert_resource(Handles(vec![
+        /*
         asset_server
             .load::<demo::StringAsset>("hello.string")
             .untyped(),
@@ -569,6 +570,7 @@ fn setup(
         asset_server
             .load::<demo::StringAsset>("string.basset")
             .untyped(),
+        */
         // Disabled until we can work out how apply_settings works with dynamic types.
         /*
         asset_server
@@ -581,6 +583,7 @@ fn setup(
         //asset_server.load::<demo::IntAsset>(inline_path).untyped(),
     ]));
 
+    /*
     commands.spawn((
         acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("scene_from_gltf.basset")),
         Transform::from_xyz(-100.0, 0.0, 0.0)
@@ -592,6 +595,7 @@ fn setup(
         Transform::from_xyz(100.0, 0.0, 0.0)
             .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
     ));
+    */
 
     commands.spawn((
         Camera3d::default(),
