@@ -8,6 +8,7 @@ use bevy::{
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     ecs::error::BevyError,
     light::CascadeShadowConfigBuilder,
+    log::LogPlugin,
     pbr::experimental::meshlet::{
         MeshletMesh, MeshletPlugin, MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR,
     },
@@ -721,11 +722,16 @@ fn main() {
 
     App::new()
         .add_plugins((
-            DefaultPlugins.set(AssetPlugin {
-                file_path: "examples/asset/basset/assets".to_string(),
-                basset_shared,
-                ..default()
-            }),
+            DefaultPlugins
+                .set(AssetPlugin {
+                    file_path: "examples/asset/basset/assets".to_string(),
+                    basset_shared,
+                    ..default()
+                })
+                .set(LogPlugin {
+                    filter: bevy::log::DEFAULT_FILTER.to_string() + "bevy_asset::basset=debug",
+                    ..Default::default()
+                }),
             BassetPlugin,
             MaterialPlugin::<MeshletDebugMaterial>::default(),
             FreeCameraPlugin,

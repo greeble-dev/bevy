@@ -26,7 +26,7 @@ use core::{
 };
 use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::debug;
 
 // XXX TODO: Review if `std` imports should be `alloc`/`core`.
 use alloc::{vec, vec::Vec};
@@ -861,7 +861,7 @@ struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
     key_to_value: HashMap<K, V>,
 }
 
-fn log(name: &'static str, path: &AssetRef<'static>, hash: BassetHash, string: &'static str) {
+fn log(name: &'static str, path: &AssetRef<'static>, key: BassetHash, string: &'static str) {
     // Skip embedded sources for now as they're too spammy.
 
     if let Some(path) = path.path()
@@ -870,7 +870,7 @@ fn log(name: &'static str, path: &AssetRef<'static>, hash: BassetHash, string: &
         return;
     }
 
-    info!(?path, %hash, "{name}: {string}");
+    debug!(?path, %key, "{name}: {string}");
 }
 
 impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
@@ -1360,7 +1360,7 @@ async fn load_action(
         action_cache.put(keys.action_key, blob.into(), &path);
     } else {
         let type_name = asset.asset_type_name();
-        info!(?type_name, ?path, "Cache ineligible, no saver for type.");
+        debug!(?type_name, ?path, "Cache ineligible, no saver for type.");
     }
 
     Ok(asset)
