@@ -26,7 +26,7 @@ use core::{
 };
 use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, warn};
 
 // XXX TODO: Review if `std` imports should be `alloc`/`core`.
 use alloc::{vec, vec::Vec};
@@ -52,17 +52,12 @@ impl Plugin for BassetPlugin {
     }
 }
 
-/// XXX TODO: Document.
+/// XXX TODO: Document. Review where this overlaps with `LoadContext` and check
+/// if they can be combined.
 pub struct ApplyContext<'a> {
-    // XXX TODO: Can this be a reference? Also review `'static` lifetime.
-    path: AssetRef<'static>,
     asset_server: &'a AssetServer,
 
-    // Equivalent to `ErasedLoadedAsset::immediate_dependee_action_keys`.
-    immediate_dependee_action_keys: HashMap<AssetRef<'static>, ActionCacheKey>,
-
     // Equivalent to `ErasedLoadedAsset::loader_dependencies.
-    // XXX TODO: Review this. Partially duplicates immediate_dependee_action_keys.
     loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
 
     shared: &'a BassetShared,
@@ -153,11 +148,6 @@ impl ApplyContext<'_> {
     ) -> Result<PartialErasedLoadedAsset, BevyError> {
         let asset = load_ref(self.asset_server, &path.without_label().into_owned()).await?;
 
-        assert!(asset.keys.is_some(), "Missing keys: {path:?}");
-
-        self.immediate_dependee_action_keys
-            .insert(path.clone(), asset.keys.as_ref().expect("TODO").action_key);
-
         // XXX TODO: Decide what to do here. The hash only appears to be used
         // for asset processing, so maybe can ignore for now.
         let hash = [0u8; 32];
@@ -182,11 +172,6 @@ impl ApplyContext<'_> {
         settings: &Option<Box<ron::value::RawValue>>,
     ) -> Result<PartialErasedLoadedAsset, BevyError> {
         let asset = load_path(self.asset_server, path, settings).await?;
-
-        self.immediate_dependee_action_keys.insert(
-            path.clone().into(),
-            asset.keys.as_ref().expect("TODO").action_key,
-        );
 
         // XXX TODO: Decide what to do here. The hash only appears to be used
         // for asset processing, so maybe can ignore for now.
@@ -222,24 +207,11 @@ impl ApplyContext<'_> {
     }
 
     pub async fn finish<A: Asset>(self, asset: A) -> ErasedLoadedAsset {
-        // XXX TODO: Check if we can be more efficient and avoid a full `loaded_asset_keys`.
-        // We might already have the dependency key somewhere.
+        let mut loaded_asset = LoadedAsset::new_with_dependencies(asset);
 
-        let loaded_asset_keys = self
-            .shared
-            .loaded_asset_keys(
-                &self.path,
-                &self.immediate_dependee_action_keys,
-                self.asset_server,
-            )
-            .await;
+        loaded_asset.loader_dependencies = self.loader_dependencies;
 
-        LoadedAsset::new_with_keys(
-            asset,
-            Some(loaded_asset_keys),
-            Some(self.loader_dependencies),
-        )
-        .into()
+        loaded_asset.into()
     }
 }
 
@@ -308,7 +280,7 @@ pub struct BassetShared {
     action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
     content_cache: ContentCache,
-    dependency_cache: Option<MemoryAndFileCache<DependencyCacheKey, Arc<DependencyList>>>,
+    dependency_cache: Option<MemoryAndFileCache<DependencyCacheKey, Arc<DependencyCacheValue>>>,
     action_cache: Option<MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>>,
 }
 
@@ -362,9 +334,12 @@ impl BassetShared {
             .map(move |s| (&*s.0, &*s.1))
     }
 
+    // XXX TODO: The meta should be required, not optional. Or we need another
+    // way to make sure the key incorporates the loader settings.
     pub(crate) async fn dependency_key(
         &self,
         path: &AssetRef<'static>,
+        _meta: Option<&dyn AssetMetaDyn>,
         asset_server: &AssetServer,
     ) -> DependencyCacheKey {
         let mut hasher = blake3::Hasher::new();
@@ -373,6 +348,15 @@ impl BassetShared {
         // holds the full asset - the label selects after getting from the cache. No if
         // the cache holds the sub-asset.
         hasher.update(path.to_string().as_bytes());
+
+        // XXX TODO: We should be including the meta in the dependency key. But
+        // it requires some extra plumbing - `ErasedLoadedAsset` needs to keep
+        // track of the meta of each item in `ErasedLoadedAsset::loader_dependencies`.
+        /*
+        if let Some(meta) = meta {
+            hasher.update(&meta.serialize());
+        }
+        */
 
         if let Some(really_a_path) = path.path() {
             let content_hash = self
@@ -409,6 +393,30 @@ impl BassetShared {
         ActionCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
     }
 
+    // XXX TODO: Should take the dependency key directly. Right now we're looking up
+    // the content key inside this function, but we don't know if that's the same
+    // content that the caller used.
+    pub(crate) async fn register_dependees(
+        &self,
+        path: &AssetRef<'static>,
+        meta: Option<&dyn AssetMetaDyn>,
+        dependees: impl Iterator<Item = AssetRef<'static>>,
+        asset_server: &AssetServer,
+    ) {
+        if let Some(dependency_cache) = &self.dependency_cache {
+            let key = self.dependency_key(path, meta, asset_server).await;
+
+            let value = DependencyCacheValue::new(dependees);
+
+            if should_log(path) {
+                debug!(%key, ?path, ?value, "Register dependees.");
+            }
+
+            dependency_cache.put(key, Arc::new(value), path);
+        }
+    }
+
+    /*
     pub(crate) async fn loaded_asset_keys(
         &self,
         path: &AssetRef<'static>,
@@ -436,6 +444,7 @@ impl BassetShared {
             immediate_dependee_action_keys: immediate_dependee_action_keys.clone(),
         }
     }
+    */
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -465,12 +474,18 @@ impl ErasedAssetLoader for BassetLoader {
 
             let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
 
-            // XXX TODO: Review use of `load_ref`. Is this getting the
-            // dependencies and everything else right? Depends if it's valid for
-            // us to return the action key of the root action, and not something
-            // calculated from our actual file.
+            load_ref(load_context.asset_server(), &basset.root)
+                .await
+                .map(|mut asset| {
+                    // XXX TODO: See other cases of ignoring the hash.
+                    let hash = [0u8; 32];
 
-            load_ref(load_context.asset_server(), &basset.root).await
+                    // XXX TODO: Justify this dependency replacement.
+                    asset.loader_dependencies.clear();
+                    asset.loader_dependencies.insert(basset.root.clone(), hash);
+
+                    asset
+                })
         })
     }
 
@@ -622,7 +637,7 @@ async fn action_key_from_dependency_cache(
     path: &AssetRef<'static>,
     asset_dependency_key: &DependencyCacheKey,
     asset_server: &AssetServer,
-) -> Option<ActionCacheKey> {
+) -> Option<StandaloneAssetInfo> {
     // XXX TODO: How are we handling duplicates? Maybe need a local path -> action cache.
     // XXX TODO: Rewrite this to use a couple of arrays instead of needing an
     // array per `Entry`. One array of `Option<ActionCacheKey` that gets filled
@@ -641,12 +656,12 @@ async fn action_key_from_dependency_cache(
 
     let dependency_cache = shared.dependency_cache.as_ref()?;
 
-    let initial_dependency_list = dependency_cache.get(asset_dependency_key, path).await?;
+    let initial_dependee_list = dependency_cache.get(asset_dependency_key, path).await?;
 
     let mut stack = vec![Entry {
         path: path.clone(),
         dependency_key: *asset_dependency_key,
-        pending_dependees: initial_dependency_list.list.clone(),
+        pending_dependees: initial_dependee_list.list.clone(),
         completed_dependees: HashMap::new(),
     }];
 
@@ -654,16 +669,18 @@ async fn action_key_from_dependency_cache(
         let mut top = stack.pop().expect("Should never be empty at this point");
 
         if let Some(next_dependee) = top.pending_dependees.pop() {
-            let dependee_dependency_key = shared.dependency_key(&next_dependee, asset_server).await;
+            let dependee_dependency_key = shared
+                .dependency_key(&next_dependee, None, asset_server)
+                .await;
 
-            let dependee_dependency_list = dependency_cache
+            let dependee_dependee_list = dependency_cache
                 .get(&dependee_dependency_key, &next_dependee)
                 .await?;
 
             stack.push(Entry {
                 path: next_dependee,
                 dependency_key: dependee_dependency_key,
-                pending_dependees: dependee_dependency_list.list.clone(),
+                pending_dependees: dependee_dependee_list.list.clone(),
                 completed_dependees: HashMap::new(),
             });
 
@@ -673,6 +690,7 @@ async fn action_key_from_dependency_cache(
         let action_key = BassetShared::action_key(&top.dependency_key, &top.completed_dependees);
 
         if let Some(mut parent) = stack.pop() {
+            // XXX TODO: If already inserted, verify the action key matches.
             parent.completed_dependees.insert(top.path, action_key);
 
             stack.push(parent);
@@ -680,24 +698,48 @@ async fn action_key_from_dependency_cache(
             continue;
         }
 
-        return Some(action_key);
+        let immediate_dependee_action_keys = ImmediateDependeeActionKeys::new(
+            top.completed_dependees.iter().map(|(p, k)| (p.clone(), *k)),
+        );
+
+        return Some(StandaloneAssetInfo {
+            action_key,
+            dependency_key: *asset_dependency_key,
+            immediate_dependee_action_keys,
+        });
     }
 }
 
 const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
 const STANDALONE_VERSION: u16 = 1;
 
-// XXX TODO: This is the same as `LoadedAssetKeys`. Review?
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+struct ImmediateDependeeActionKeys {
+    // XXX TODO: Could store some debug info on the input?
+    list: Vec<(AssetRef<'static>, ActionCacheKey)>,
+}
+
+impl ImmediateDependeeActionKeys {
+    fn new(list: impl Iterator<Item = (AssetRef<'static>, ActionCacheKey)>) -> Self {
+        let mut list = list.collect::<Vec<_>>();
+        list.sort();
+
+        Self { list }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 struct StandaloneAssetInfo {
     action_key: ActionCacheKey,
     dependency_key: DependencyCacheKey,
-    immediate_dependee_action_keys: Vec<(AssetRef<'static>, ActionCacheKey)>,
+    immediate_dependee_action_keys: ImmediateDependeeActionKeys,
 }
 
 async fn read_standalone_asset(
+    original_path: &AssetRef<'static>,
     blob: &[u8],
     context: &ApplyContext<'_>,
+    expected_info: &StandaloneAssetInfo,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     let mut blob = BlobReader::new(blob);
 
@@ -732,37 +774,56 @@ async fn read_standalone_asset(
 
     let info = ron::de::from_bytes::<StandaloneAssetInfo>(info_bytes).expect("TODO");
 
-    // XXX TODO: Argh? Need to work out how meaningful this is to the loader.
-    let fake_path = AssetRef::from(AssetPath::parse(
-        "fake_path_from_basset_read_standalone_asset",
-    ));
+    assert_eq!(&info, expected_info);
 
     let mut reader = SliceReader::new(asset_bytes);
 
     let load_dependencies = false;
     let populate_hashes = false;
 
+    // Don't update the dependency cache - this asset loader loader doesn't
+    // know about the dependencies of the action that produced this asset.
+    //
+    // XXX TODO: Maybe better if we sidestepped `load_with_meta_loader_and_reader`
+    // for clarity? Or generally rethink how the dependency cache gets filled out.
+    let update_dependency_cache = false;
+
     let mut asset = context
         .asset_server
         .load_with_meta_loader_and_reader(
-            &fake_path,
+            &original_path,
             &*meta,
             &*loader,
             &mut reader,
             load_dependencies,
             populate_hashes,
+            update_dependency_cache,
         )
         .await
         .map_err(Into::<BevyError>::into)?;
 
-    let immediate_dependee_action_keys: HashMap<AssetRef<'static>, ActionCacheKey> =
-        info.immediate_dependee_action_keys.into_iter().collect();
+    // Apply the correct dependencies.
 
-    asset.keys = Some(LoadedAssetKeys {
-        action_key: info.action_key,
-        dependency_key: info.dependency_key,
-        immediate_dependee_action_keys,
-    });
+    let mut loader_dependencies = HashMap::<AssetRef<'static>, AssetHash>::new();
+
+    for (dependee, _) in &info.immediate_dependee_action_keys.list {
+        // XXX TODO: Fake hash for now. Not sure if we need this long-term as
+        // the hash is only used for processing.
+        let hash = [0u8; 32];
+
+        loader_dependencies.insert(dependee.clone(), hash);
+    }
+
+    // Check that the recorded dependencies are correct - they should be a
+    // superset of what the loader used. If this fails then either we didn't
+    // record the dependency correctly, or the loader is unexpectedly reading
+    // different dependencies.
+
+    for dependee in asset.loader_dependencies.keys() {
+        assert!(loader_dependencies.contains_key(dependee), "{dependee}");
+    }
+
+    asset.loader_dependencies = loader_dependencies;
 
     Ok(asset)
 }
@@ -772,6 +833,7 @@ async fn write_standalone_asset(
     loader: &dyn ErasedAssetLoader,
     saver: &dyn ErasedAssetSaver,
     saver_settings: &dyn Settings,
+    info: &StandaloneAssetInfo,
 ) -> Result<Box<[u8]>, BevyError> {
     let mut asset_bytes = Vec::<u8>::new();
 
@@ -786,16 +848,6 @@ async fn write_standalone_asset(
     // Could get messy.
 
     let meta_bytes = loader.default_meta().serialize();
-
-    // XXX TODO: Avoid clone?
-    let keys = asset.keys.as_ref().expect("TODO").clone();
-
-    let info = StandaloneAssetInfo {
-        action_key: keys.action_key,
-        dependency_key: keys.dependency_key,
-        immediate_dependee_action_keys: keys.immediate_dependee_action_keys.into_iter().collect(),
-    };
-
     let info_bytes = ron::ser::to_string(&info).expect("TODO").into_bytes();
 
     let mut writer = Vec::<u8>::new();
@@ -812,7 +864,7 @@ async fn write_standalone_asset(
     Ok(writer.into())
 }
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct BassetHash([u8; 32]);
 
 impl BassetHash {
@@ -861,16 +913,21 @@ struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
     key_to_value: HashMap<K, V>,
 }
 
-fn log(name: &'static str, path: &AssetRef<'static>, key: BassetHash, string: &'static str) {
+fn should_log(path: &AssetRef<'static>) -> bool {
     // Skip embedded sources for now as they're too spammy.
-
     if let Some(path) = path.path()
         && path.source().as_str() == Some("embedded")
     {
-        return;
+        false
+    } else {
+        true
     }
+}
 
-    debug!(?path, %key, "{name}: {string}");
+fn log(name: &'static str, path: &AssetRef<'static>, key: BassetHash, string: &'static str) {
+    if should_log(path) {
+        debug!(%key, ?path, "{name}: {string}");
+    }
 }
 
 impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
@@ -1128,7 +1185,7 @@ impl ContentCache {
     }
 }
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Serialize, Deserialize)]
 pub struct DependencyCacheKey(BassetHash);
 
 impl DependencyCacheKey {
@@ -1149,13 +1206,22 @@ impl CacheKey for DependencyCacheKey {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
-struct DependencyList {
+#[derive(Default, Debug, Serialize, Deserialize)]
+struct DependencyCacheValue {
     // XXX TODO: Could store some debug info on the input?
     list: Vec<AssetRef<'static>>,
 }
 
-impl FileCacheValue for Arc<DependencyList> {
+impl DependencyCacheValue {
+    fn new(list: impl Iterator<Item = AssetRef<'static>>) -> Self {
+        let mut list = list.collect::<Vec<_>>();
+        list.sort();
+
+        Self { list }
+    }
+}
+
+impl FileCacheValue for Arc<DependencyCacheValue> {
     async fn write(&self, file: &mut File) -> Result<(), BevyError> {
         // XXX TODO: Should have a serialized struct that includes a version number and an opaque value.
         let string = ron::ser::to_string(self.as_ref()).map_err(BevyError::from)?;
@@ -1166,7 +1232,7 @@ impl FileCacheValue for Arc<DependencyList> {
     }
 
     fn read(bytes: Box<[u8]>) -> Self {
-        Arc::new(ron::de::from_bytes::<DependencyList>(&bytes).expect("TODO"))
+        Arc::new(ron::de::from_bytes::<DependencyCacheValue>(&bytes).expect("TODO"))
     }
 }
 
@@ -1176,7 +1242,7 @@ fn content_hash(bytes: &[u8]) -> ContentHash {
     ContentHash(BassetHash::new(*hasher.finalize().as_bytes()))
 }
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Serialize, Deserialize)]
 pub struct ActionCacheKey(pub BassetHash);
 
 impl ActionCacheKey {
@@ -1195,14 +1261,6 @@ impl CacheKey for ActionCacheKey {
     fn as_hash(&self) -> BassetHash {
         self.0
     }
-}
-
-/// XXX TODO: Document. Review if we're duplicating `loader_dependencies`.
-#[derive(Clone)]
-pub struct LoadedAssetKeys {
-    pub dependency_key: DependencyCacheKey,
-    pub action_key: ActionCacheKey,
-    pub immediate_dependee_action_keys: HashMap<AssetRef<'static>, ActionCacheKey>,
 }
 
 fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::value::RawValue>>) {
@@ -1246,9 +1304,6 @@ async fn load_path(
         "Labels should not be handled here. {path:?}",
     );
 
-    // XXX TODO: Can this be optimised for the case of path being an AssetAction?
-    // So we know that it's just going to call ActionLoader.
-
     let path = AssetRef::from(path);
 
     let (mut meta, loader, mut reader) = asset_server
@@ -1257,15 +1312,13 @@ async fn load_path(
         .await
         .map_err(Into::<BevyError>::into)?;
 
-    // XXX TODO: If we have settings then the action key of the asset is going to
-    // be wrong - it's calculated by `LoadContext::finish` and doesn't take the
-    // settings into account.
     apply_settings(meta.loader_settings_mut(), settings);
 
     // Roughly the same as LoadContext::load_direct_internal.
 
     let load_dependencies = false;
     let populate_hashes = false;
+    let update_dependency_cache = true;
 
     let asset = asset_server
         .load_with_meta_loader_and_reader(
@@ -1275,11 +1328,10 @@ async fn load_path(
             &mut *reader,
             load_dependencies,
             populate_hashes,
+            update_dependency_cache,
         )
         .await
         .map_err(Into::<BevyError>::into)?;
-
-    assert!(asset.keys.is_some(), "Missing keys: {path:?}");
 
     Ok(asset)
 }
@@ -1300,9 +1352,7 @@ async fn load_action(
     let shared = asset_server.basset_shared().clone();
 
     let apply_context = ApplyContext {
-        path: path.clone(), // XXX TODO: Avoid `clone`?
         asset_server,
-        immediate_dependee_action_keys: HashMap::default(),
         loader_dependencies: HashMap::default(),
         shared: &shared,
     };
@@ -1312,15 +1362,16 @@ async fn load_action(
         // up in a situation where the saver has been compiled out but we still
         // want to read from the cache.
 
-        let dependency_key = shared.dependency_key(&path, asset_server).await;
+        // XXX TODO: Review passing `None` for `meta`. Is that right?
+        let dependency_key = shared.dependency_key(&path, None, asset_server).await;
 
-        let action_key =
-            action_key_from_dependency_cache(&path, &dependency_key, asset_server).await;
+        let info = action_key_from_dependency_cache(&path, &dependency_key, asset_server).await;
 
-        if let Some(action_key) = action_key
-            && let Some(cached_standalone_asset) = action_cache.get(&action_key, &path).await
+        if let Some(info) = info
+            && let Some(cached_standalone_asset) = action_cache.get(&info.action_key, &path).await
         {
-            return read_standalone_asset(&cached_standalone_asset, &apply_context).await;
+            return read_standalone_asset(&path, &cached_standalone_asset, &apply_context, &info)
+                .await;
         }
     }
 
@@ -1329,8 +1380,6 @@ async fn load_action(
         .ok_or_else(|| BevyError::from(format!("Couldn't find action \"{}\")", action.name())))?
         .apply(apply_context, action.params())
         .await?;
-
-    assert!(asset.keys.is_some(), "Missing keys: {path:?}");
 
     // XXX TODO: Review logging. Bit spammy right now.
     /*
@@ -1345,19 +1394,43 @@ async fn load_action(
     */
 
     if let Some(action_cache) = &shared.action_cache
-        && let Some(keys) = asset.keys.as_ref()
         && let Some((saver, settings)) = shared.saver(asset.asset_type_name())
     {
-        // XXX TODO: Verify loader matches saver? Need a way to get
-        // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
-        let loader = asset_server
-            .get_asset_loader_with_type_name(saver.loader_type_name())
-            .await
-            .expect("TODO");
+        // XXX TODO: Review duplication and awkwardness. We call `register_dependees`,
+        // and then immediately look them up inside `action_key_from_dependency_cache`.
 
-        let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
+        asset_server
+            .basset_shared()
+            .register_dependees(
+                &path, // XXX TODO: Avoid clone?
+                None,
+                asset.loader_dependencies.keys().cloned(),
+                asset_server,
+            )
+            .await;
 
-        action_cache.put(keys.action_key, blob.into(), &path);
+        let dependency_key = shared.dependency_key(&path, None, asset_server).await;
+
+        let info = action_key_from_dependency_cache(&path, &dependency_key, asset_server).await;
+
+        if let Some(info) = info {
+            // XXX TODO: Verify loader matches saver? Need a way to get
+            // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
+            let loader = asset_server
+                .get_asset_loader_with_type_name(saver.loader_type_name())
+                .await
+                .expect("TODO");
+
+            let blob = write_standalone_asset(&asset, &*loader, saver, settings, &info).await?;
+
+            action_cache.put(info.action_key, blob.into(), &path);
+        } else {
+            warn!(
+                ?path,
+                %dependency_key,
+                "Failed to get info from dependency cache after loading."
+            );
+        }
     } else {
         let type_name = asset.asset_type_name();
         debug!(?type_name, ?path, "Cache ineligible, no saver for type.");

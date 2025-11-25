@@ -52,7 +52,7 @@ use thiserror::Error;
 /// This means that the common case of `asset_server.load("my_scene.scn")` when it creates and
 /// clones internal owned [`AssetPaths`](AssetPath).
 /// This also means that you should use [`AssetPath::parse`] in cases where `&str` is the explicit type.
-#[derive(Eq, PartialEq, Hash, Clone, Default, Reflect)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Default, Reflect)]
 #[reflect(opaque)]
 #[reflect(Debug, PartialEq, Hash, Clone, Serialize, Deserialize)]
 pub struct AssetPath<'a> {
@@ -665,7 +665,7 @@ pub(crate) fn normalize_path(path: &Path) -> PathBuf {
 // XXX TODO: Review. We're trying to avoid doing a custom serialize for the
 // whole of `AssetAction`, since the only member that needs a custom serialize
 // is the label. But is it all a bit too weird?
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 struct SerializableLabel<'a>(CowArc<'a, str>);
 
 impl<'a> Serialize for SerializableLabel<'a> {
@@ -690,7 +690,7 @@ impl<'a, 'de> Deserialize<'de> for SerializableLabel<'a> {
 
 /// XXX TODO: Awkwardly called `AssetAction2` since `AssetAction` is taking.
 /// Need to decide on an alternative name or another way of structuring this.
-#[derive(Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct AssetAction2<'a> {
     // XXX TODO: Review if these should be Arc/CowArc, similar to AssetPath.
     name: Box<str>,
@@ -780,7 +780,7 @@ impl Display for AssetAction2<'_> {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, PartialOrd, Hash, Clone, Debug, Serialize, Deserialize)]
 pub enum AssetRef<'a> {
     Path(AssetPath<'a>),
     Action(AssetAction2<'a>),
@@ -883,6 +883,19 @@ impl<'a> AssetRef<'a> {
         match self {
             Self::Path(path) => path.is_unapproved(),
             _ => false,
+        }
+    }
+}
+
+impl<'a> Ord for AssetRef<'a> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        match (self, other) {
+            (Self::Path(_), Self::Action(_)) => core::cmp::Ordering::Less,
+            (Self::Action(_), Self::Path(_)) => core::cmp::Ordering::Greater,
+            (Self::Path(self_path), Self::Path(other_path)) => self_path.cmp(other_path),
+            (Self::Action(self_action), Self::Action(other_action)) => {
+                self_action.cmp(other_action)
+            }
         }
     }
 }

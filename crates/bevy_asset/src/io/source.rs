@@ -20,7 +20,7 @@ use super::{ErasedAssetReader, ErasedAssetWriter};
 ///
 /// * [`AssetSourceId::Default`] corresponds to "default asset paths" that don't specify a source: `/path/to/asset.png`
 /// * [`AssetSourceId::Name`] corresponds to asset paths that _do_ specify a source: `remote://path/to/asset.png`, where `remote` is the name.
-#[derive(Default, Clone, Debug, Eq)]
+#[derive(Default, Ord, PartialOrd, Clone, Debug, Eq)]
 pub enum AssetSourceId<'a> {
     /// The default asset source.
     #[default]

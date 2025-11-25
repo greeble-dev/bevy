@@ -1,5 +1,4 @@
 use crate::{
-    basset::{ActionCacheKey, BassetShared, LoadedAssetKeys},
     io::{AssetReaderError, MissingAssetSourceError, MissingProcessedAssetReaderError, Reader},
     loader_builders::{Deferred, NestedLoader, StaticTyped},
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfoMinimal, Settings},
@@ -99,7 +98,7 @@ where
             let asset = <L as AssetLoader>::load(self, reader, settings, &mut load_context)
                 .await
                 .map_err(Into::into)?;
-            Ok(load_context.finish(asset).await.into())
+            Ok(load_context.finish(asset).into())
         })
     }
 
@@ -150,9 +149,6 @@ pub struct LoadedAsset<A: Asset> {
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
     pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     pub(crate) labeled_assets: HashMap<CowArc<'static, str>, LabeledAsset>,
-
-    // XXX TODO: Document. Review if we're duplicating loader_dependencies.
-    pub keys: Option<LoadedAssetKeys>,
 }
 
 impl<A: Asset> LoadedAsset<A> {
@@ -170,29 +166,6 @@ impl<A: Asset> LoadedAsset<A> {
             dependencies,
             loader_dependencies: HashMap::default(),
             labeled_assets: HashMap::default(),
-            keys: None,
-        }
-    }
-
-    /// XXX TODO: Review, document.
-    pub fn new_with_keys(
-        value: A,
-        keys: Option<LoadedAssetKeys>,
-        loader_dependencies: Option<HashMap<AssetRef<'static>, AssetHash>>,
-    ) -> Self {
-        let mut dependencies = <HashSet<_>>::default();
-        value.visit_dependencies(&mut |id| {
-            let Ok(asset_index) = id.try_into() else {
-                return;
-            };
-            dependencies.insert(asset_index);
-        });
-        Self {
-            value,
-            dependencies,
-            loader_dependencies: loader_dependencies.unwrap_or_default(),
-            labeled_assets: HashMap::default(),
-            keys,
         }
     }
 
@@ -232,10 +205,6 @@ pub struct ErasedLoadedAsset {
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
     pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     pub(crate) labeled_assets: HashMap<CowArc<'static, str>, LabeledAsset>,
-
-    // XXX TODO: Document. Review if we're duplicating loader_dependencies.
-    // XXX TODO: Review `pub`.
-    pub keys: Option<LoadedAssetKeys>,
 }
 
 impl<A: Asset> From<LoadedAsset<A>> for ErasedLoadedAsset {
@@ -245,7 +214,6 @@ impl<A: Asset> From<LoadedAsset<A>> for ErasedLoadedAsset {
             dependencies: asset.dependencies,
             loader_dependencies: asset.loader_dependencies,
             labeled_assets: asset.labeled_assets,
-            keys: asset.keys,
         }
     }
 }
@@ -307,19 +275,12 @@ impl ErasedLoadedAsset {
                 dependencies: self.dependencies,
                 loader_dependencies: self.loader_dependencies,
                 labeled_assets: self.labeled_assets,
-                keys: self.keys,
             }),
             Err(value) => {
                 self.value = value;
                 Err(self)
             }
         }
-    }
-
-    /// XXX TODO: Review if this is necessary? Would prefer to be correct by construction.
-    pub fn with_keys(mut self, keys: Option<LoadedAssetKeys>) -> ErasedLoadedAsset {
-        self.keys = keys;
-        self
     }
 }
 
@@ -381,8 +342,6 @@ pub struct LoadContext<'a> {
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
     /// Direct dependencies used by this loader.
     pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
-    // XXX TODO: Review, document.
-    pub(crate) immediate_dependee_action_keys: HashMap<AssetRef<'static>, ActionCacheKey>,
     pub(crate) labeled_assets: HashMap<CowArc<'static, str>, LabeledAsset>,
 }
 
@@ -401,7 +360,6 @@ impl<'a> LoadContext<'a> {
             should_load_dependencies,
             dependencies: HashSet::default(),
             loader_dependencies: HashMap::default(),
-            immediate_dependee_action_keys: HashMap::default(),
             labeled_assets: HashMap::default(),
         }
     }
@@ -459,7 +417,7 @@ impl<'a> LoadContext<'a> {
     ) -> Result<Handle<A>, E> {
         let mut context = self.begin_labeled_asset();
         let asset = load(&mut context)?;
-        let loaded_asset = context.finish_labeled(asset);
+        let loaded_asset = context.finish(asset);
         Ok(self.add_loaded_labeled_asset(label, loaded_asset))
     }
 
@@ -513,30 +471,12 @@ impl<'a> LoadContext<'a> {
     }
 
     /// "Finishes" this context by populating the final [`Asset`] value.
-    //
-    // XXX TODO: Review decision to make this async. Was needed for `loaded_asset_keys`,
-    // which needs it to get the dependency key, which needs to async read from
-    // the content cache. Can maybe avoid if we calculate the content key
-    // ourselves from the reader. This would also avoid reading the whole file
-    // twice.
-    pub async fn finish<A: Asset>(self, value: A) -> LoadedAsset<A> {
-        let keys = Some(
-            self.asset_server
-                .basset_shared()
-                .loaded_asset_keys(
-                    &self.asset_path,
-                    &self.immediate_dependee_action_keys,
-                    self.asset_server,
-                )
-                .await,
-        );
-
+    pub fn finish<A: Asset>(self, value: A) -> LoadedAsset<A> {
         LoadedAsset {
             value,
             dependencies: self.dependencies,
             loader_dependencies: self.loader_dependencies,
             labeled_assets: self.labeled_assets,
-            keys,
         }
     }
 
@@ -548,7 +488,6 @@ impl<'a> LoadContext<'a> {
             dependencies: self.dependencies,
             loader_dependencies: self.loader_dependencies,
             labeled_assets: self.labeled_assets,
-            keys: None,
         }
     }
     /// Gets the source asset path for this load context.
@@ -592,18 +531,6 @@ impl<'a> LoadContext<'a> {
             })?;
         self.loader_dependencies
             .insert(path.clone_owned().into(), hash);
-        self.immediate_dependee_action_keys.insert(
-            path.clone_owned().into(),
-            // XXX TODO: Ugly?
-            BassetShared::action_key(
-                &self
-                    .asset_server()
-                    .basset_shared()
-                    .dependency_key(&self.asset_path, self.asset_server)
-                    .await,
-                &Default::default(),
-            ),
-        );
         Ok(bytes)
     }
 
@@ -638,6 +565,7 @@ impl<'a> LoadContext<'a> {
                 reader,
                 false,
                 self.populate_hashes,
+                true,
             )
             .await
             .map_err(|error| LoadDirectError::LoadError {
@@ -647,10 +575,6 @@ impl<'a> LoadContext<'a> {
         let info = meta.processed_info().as_ref();
         let hash = info.map(|i| i.full_hash).unwrap_or_default();
         self.loader_dependencies.insert(path.clone().into(), hash);
-        self.immediate_dependee_action_keys.insert(
-            path.clone().into(),
-            loaded_asset.keys.clone().expect("TODO").action_key,
-        );
         Ok(loaded_asset)
     }
 

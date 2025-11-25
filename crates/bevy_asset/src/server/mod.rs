@@ -858,6 +858,7 @@ impl AssetServer {
                 &mut *reader,
                 true,
                 false,
+                true, // XXX TODO: Review.
             )
             .await
         {
@@ -1587,12 +1588,13 @@ impl AssetServer {
         reader: &mut dyn Reader,
         load_dependencies: bool,
         populate_hashes: bool,
+        update_dependency_cache: bool,
     ) -> Result<ErasedLoadedAsset, AssetLoadError> {
         // TODO: experiment with this
         let asset_path = asset_path.clone_owned();
         let load_context =
             LoadContext::new(self, asset_path.clone(), load_dependencies, populate_hashes);
-        AssertUnwindSafe(loader.load(reader, meta, load_context))
+        let result = AssertUnwindSafe(loader.load(reader, meta, load_context))
             .catch_unwind()
             .await
             .map_err(|_| AssetLoadError::AssetLoaderPanic {
@@ -1605,7 +1607,20 @@ impl AssetServer {
                     loader_name: loader.type_name(),
                     error: e.into(),
                 })
-            })
+            });
+
+        if update_dependency_cache && let Ok(asset) = &result {
+            self.basset_shared()
+                .register_dependees(
+                    &asset_path.clone_owned(), // XXX TODO: Avoid clone?
+                    Some(meta),
+                    asset.loader_dependencies.keys().cloned(),
+                    &self,
+                )
+                .await;
+        }
+
+        result
     }
 
     /// Returns a future that will suspend until the specified asset and its dependencies finish
