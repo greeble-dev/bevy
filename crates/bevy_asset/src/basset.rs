@@ -29,17 +29,15 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 // XXX TODO: Review if `std` imports should be `alloc`/`core`.
-use alloc::{vec, vec::Vec};
-use std::{
+use alloc::{
     boxed::Box,
-    format,
-    hash::Hash,
-    io::Write,
-    marker::PhantomData,
-    path::PathBuf,
     string::{String, ToString},
     sync::Arc,
+    vec,
+    vec::Vec,
 };
+use core::{hash::Hash, marker::PhantomData};
+use std::{format, io::Write, path::PathBuf};
 
 use crate::{Asset, AssetApp, AssetContainer, AssetServer, LabeledAsset, UntypedAssetId};
 
@@ -75,7 +73,6 @@ impl PartialErasedLoadedLabeledAsset {
         self.value.downcast_ref::<A>()
     }
 
-    #[expect(clippy::result_large_err, reason = "XXX TODO")]
     pub fn downcast<A: Asset>(mut self) -> Result<A, PartialErasedLoadedLabeledAsset> {
         match self.value.downcast::<A>() {
             Ok(value) => Ok(*value),
@@ -107,7 +104,6 @@ impl PartialErasedLoadedAsset {
         self.value.downcast_ref::<A>()
     }
 
-    #[expect(clippy::result_large_err, reason = "XXX TODO")]
     pub fn downcast<A: Asset>(mut self) -> Result<A, PartialErasedLoadedAsset> {
         match self.value.downcast::<A>() {
             Ok(value) => Ok(*value),
@@ -236,11 +232,10 @@ pub trait BassetAction: Send + Sync + 'static {
     type Error: Into<BevyError>;
 
     /// XXX TODO: Document.
-    /// XXX TODO: Reconsider returning ErasedLoadedAsset. Currently the return
+    /// XXX TODO: Reconsider returning `ErasedLoadedAsset`. Currently the return
     /// value is required to go through `ApplyContext::finish`, but that can be
     /// sidestepped by constructing the `ErasedLoadedAsset` directly. Or maybe
     /// `ApplyContext::finish` should be reconsidered?
-
     fn apply(
         &self,
         context: ApplyContext<'_>,
@@ -511,7 +506,7 @@ impl ErasedAssetLoader for BassetLoader {
         core::any::type_name::<Self>()
     }
 
-    fn type_id(&self) -> std::any::TypeId {
+    fn type_id(&self) -> core::any::TypeId {
         core::any::TypeId::of::<Self>()
     }
 
@@ -519,7 +514,7 @@ impl ErasedAssetLoader for BassetLoader {
         None
     }
 
-    fn asset_type_id(&self) -> Option<std::any::TypeId> {
+    fn asset_type_id(&self) -> Option<core::any::TypeId> {
         None
     }
 }
@@ -576,7 +571,7 @@ impl ErasedAssetLoader for ActionLoader {
         core::any::type_name::<Self>()
     }
 
-    fn type_id(&self) -> std::any::TypeId {
+    fn type_id(&self) -> core::any::TypeId {
         core::any::TypeId::of::<Self>()
     }
 
@@ -584,7 +579,7 @@ impl ErasedAssetLoader for ActionLoader {
         None
     }
 
-    fn asset_type_id(&self) -> Option<std::any::TypeId> {
+    fn asset_type_id(&self) -> Option<core::any::TypeId> {
         None
     }
 }
@@ -791,7 +786,7 @@ async fn read_standalone_asset(
     let mut asset = context
         .asset_server
         .load_with_meta_loader_and_reader(
-            &original_path,
+            original_path,
             &*meta,
             &*loader,
             &mut reader,
@@ -1032,7 +1027,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
         // XXX TODO: Review faff that avoids lifetime issues.
         let value = value.clone();
 
-        log(self.name, &asset_path, key.as_hash(), "File cache put.");
+        log(self.name, asset_path, key.as_hash(), "File cache put.");
 
         IoTaskPool::get()
             .spawn(async move {
@@ -1099,7 +1094,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
             self.memory
                 .write()
                 .unwrap_or_else(PoisonError::into_inner)
-                .put(key.clone(), from_file.clone(), asset_path);
+                .put(*key, from_file.clone(), asset_path);
 
             Some(from_file)
         } else {
@@ -1113,7 +1108,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
         self.memory
             .write()
             .unwrap_or_else(PoisonError::into_inner)
-            .put(key.clone(), value.clone(), asset_path);
+            .put(key, value.clone(), asset_path);
 
         if let Some(file) = &self.file {
             file.put(key, value, asset_path);
@@ -1300,7 +1295,7 @@ async fn load_path(
     settings: &Option<Box<ron::value::RawValue>>,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     assert!(
-        !path.label().is_some(),
+        path.label().is_none(),
         "Labels should not be handled here. {path:?}",
     );
 
@@ -1341,7 +1336,7 @@ async fn load_action(
     action: &AssetAction2<'static>,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     assert!(
-        !action.label().is_some(),
+        action.label().is_none(),
         "Labels should not be handled here. {action:?}",
     );
 

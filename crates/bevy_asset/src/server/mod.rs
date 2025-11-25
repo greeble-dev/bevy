@@ -1615,7 +1615,7 @@ impl AssetServer {
                     &asset_path.clone_owned(), // XXX TODO: Avoid clone?
                     Some(meta),
                     asset.loader_dependencies.keys().cloned(),
-                    &self,
+                    self,
                 )
                 .await;
         }

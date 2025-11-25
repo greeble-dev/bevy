@@ -780,7 +780,7 @@ impl Display for AssetAction2<'_> {
     }
 }
 
-#[derive(Eq, PartialEq, PartialOrd, Hash, Clone, Debug, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Serialize, Deserialize)]
 pub enum AssetRef<'a> {
     Path(AssetPath<'a>),
     Action(AssetAction2<'a>),
@@ -883,19 +883,6 @@ impl<'a> AssetRef<'a> {
         match self {
             Self::Path(path) => path.is_unapproved(),
             _ => false,
-        }
-    }
-}
-
-impl<'a> Ord for AssetRef<'a> {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        match (self, other) {
-            (Self::Path(_), Self::Action(_)) => core::cmp::Ordering::Less,
-            (Self::Action(_), Self::Path(_)) => core::cmp::Ordering::Greater,
-            (Self::Path(self_path), Self::Path(other_path)) => self_path.cmp(other_path),
-            (Self::Action(self_action), Self::Action(other_action)) => {
-                self_action.cmp(other_action)
-            }
         }
     }
 }
