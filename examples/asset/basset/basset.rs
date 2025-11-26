@@ -18,6 +18,7 @@ use bevy::{
     time::common_conditions::on_timer,
 };
 
+use argh::FromArgs;
 use core::result::Result;
 use serde::{Deserialize, Serialize};
 use std::{boxed::Box, sync::Arc, time::Duration};
@@ -683,7 +684,24 @@ fn make_action<A: BassetAction>(params: &<A as BassetAction>::Params) -> AssetAc
     )
 }
 
+/// XXX TODO
+#[derive(FromArgs)]
+struct Args {
+    /// XXX TODO
+    #[argh(switch)]
+    validate_dependency_cache: bool,
+
+    /// XXX TODO
+    #[argh(switch)]
+    validate_action_cache: bool,
+}
+
 fn main() {
+    #[cfg(not(target_arch = "wasm32"))]
+    let args: Args = argh::from_env();
+    #[cfg(target_arch = "wasm32")]
+    let args = Args::from_args(&[], &[]).unwrap();
+
     dbg!(ron::ser::to_string(&AssetRef::Path("asdf.txt".into())).expect("TODO"));
     dbg!(
         ron::ser::to_string(&AssetRef::Action(make_action::<action::LoadPath>(
@@ -709,15 +727,19 @@ fn main() {
     );
 
     let basset_shared = Arc::new(
-        BassetShared::new(Some("examples/asset/basset/cache".into()))
-            .with_action(action::LoadPath)
-            .with_action(action::JoinStrings)
-            .with_action(action::UppercaseString)
-            .with_action(action::AcmeSceneFromGltf)
-            .with_action(action::MeshletFromMesh)
-            .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
-            .with_saver(demo::StringAssetSaver)
-            .with_saver(demo::IntAssetSaver),
+        BassetShared::new(
+            Some("examples/asset/basset/cache".into()),
+            args.validate_dependency_cache,
+            args.validate_action_cache,
+        )
+        .with_action(action::LoadPath)
+        .with_action(action::JoinStrings)
+        .with_action(action::UppercaseString)
+        .with_action(action::AcmeSceneFromGltf)
+        .with_action(action::MeshletFromMesh)
+        .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
+        .with_saver(demo::StringAssetSaver)
+        .with_saver(demo::IntAssetSaver),
     );
 
     App::new()

@@ -280,7 +280,11 @@ pub struct BassetShared {
 }
 
 impl BassetShared {
-    pub fn new(file_cache_path: Option<PathBuf>) -> Self {
+    pub fn new(
+        file_cache_path: Option<PathBuf>,
+        validate_dependency_cache: bool,
+        validate_action_cache: bool,
+    ) -> Self {
         Self {
             action_type_name_to_action: Default::default(),
             asset_type_name_to_saver: Default::default(),
@@ -288,10 +292,12 @@ impl BassetShared {
             dependency_cache: Some(MemoryAndFileCache::new(
                 "dependency_cache",
                 file_cache_path.as_ref().map(|p| p.join("dependency")),
+                validate_dependency_cache,
             )),
             action_cache: Some(MemoryAndFileCache::new(
                 "action_cache",
                 file_cache_path.as_ref().map(|p| p.join("action")),
+                validate_action_cache,
             )),
         }
     }
@@ -377,15 +383,19 @@ impl BassetShared {
         // XXX TODO: Action key also needs loader version.
         // XXX TODO: Anything else?
 
-        hasher.update(&dependency_key.0 .0);
+        hasher.update(&dependency_key.as_hash().as_bytes());
 
         // XXX TODO: How are we stabilising the order of dependencies?
 
         for immediate_dependee_action_key in immediate_dependee_action_keys.values() {
-            hasher.update(&immediate_dependee_action_key.0 .0);
+            hasher.update(&immediate_dependee_action_key.as_hash().as_bytes());
         }
 
-        ActionCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
+        let result = ActionCacheKey(BassetHash::new(*hasher.finalize().as_bytes()));
+
+        std::dbg!(&result, &dependency_key, &immediate_dependee_action_keys);
+
+        result
     }
 
     // XXX TODO: Should take the dependency key directly. Right now we're looking up
@@ -407,7 +417,7 @@ impl BassetShared {
                 debug!(%key, ?path, ?value, "Register dependees.");
             }
 
-            dependency_cache.put(key, Arc::new(value), path);
+            dependency_cache.put(key, Arc::new(value), path).await;
         }
     }
 
@@ -633,7 +643,7 @@ async fn action_key_from_dependency_cache(
     asset_dependency_key: &DependencyCacheKey,
     asset_server: &AssetServer,
 ) -> Option<StandaloneAssetInfo> {
-    // XXX TODO: How are we handling duplicates? Maybe need a local path -> action cache.
+    // XXX TODO: How are we handling duplicates and cycles? Maybe need a local path -> action cache.
     // XXX TODO: Rewrite this to use a couple of arrays instead of needing an
     // array per `Entry`. One array of `Option<ActionCacheKey` that gets filled
     // out, and another array of `(AssetRef, usize, Range)` where the usize is
@@ -895,17 +905,18 @@ impl Display for BassetHash {
     }
 }
 
-trait CacheKey: Copy + Clone + Eq + Hash + Send + Sync {
+trait CacheKey: Copy + Clone + Eq + Hash + Debug + Send + Sync {
     fn as_hash(&self) -> BassetHash;
 }
 
-trait MemoryCacheValue: Send + Sync + Clone {}
+trait MemoryCacheValue: Send + Sync + Clone + Eq + Debug {}
 
-impl<T: Send + Sync + Clone> MemoryCacheValue for T {}
+impl<T: Send + Sync + Clone + Eq + Debug> MemoryCacheValue for T {}
 
 struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
     name: &'static str,
     key_to_value: HashMap<K, V>,
+    validate: bool,
 }
 
 fn should_log(path: &AssetRef<'static>) -> bool {
@@ -926,15 +937,20 @@ fn log(name: &'static str, path: &AssetRef<'static>, key: BassetHash, string: &'
 }
 
 impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
-    fn new(name: &'static str) -> Self {
+    fn new(name: &'static str, validate: bool) -> Self {
         Self {
             name,
             key_to_value: Default::default(),
+            validate,
         }
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
     fn get(&self, key: &K, asset_path: &AssetRef<'static>) -> Option<V> {
+        if self.validate {
+            return None;
+        }
+
         let result = self.key_to_value.get(key).cloned();
 
         if result.is_some() {
@@ -950,12 +966,18 @@ impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
     fn put(&mut self, key: K, value: V, asset_path: &AssetRef<'static>) {
         log(self.name, asset_path, key.as_hash(), "Memory cache put.");
 
+        if self.validate
+            && let Some(existing) = self.key_to_value.get(&key)
+        {
+            assert_eq!(&value, existing, "{key:?}");
+        }
+
         self.key_to_value.insert(key, value);
     }
 }
 
 // XXX TODO: Why do we need this `static` bound to make the async happy?
-trait FileCacheValue: Send + Sync + Clone + 'static {
+trait FileCacheValue: Send + Sync + Clone + Eq + Debug + 'static {
     fn write(&self, file: &mut File) -> impl ConditionalSendFuture<Output = Result<(), BevyError>>;
 
     fn read(bytes: Box<[u8]>) -> Self;
@@ -975,14 +997,16 @@ impl FileCacheValue for Arc<[u8]> {
 struct FileCache<K: CacheKey, V: FileCacheValue> {
     name: &'static str,
     base_path: PathBuf,
+    validate: bool,
     phantom: PhantomData<(K, V)>,
 }
 
 impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
-    fn new(name: &'static str, base_path: PathBuf) -> Self {
+    fn new(name: &'static str, base_path: PathBuf, validate: bool) -> Self {
         Self {
             name,
             base_path,
+            validate,
             phantom: PhantomData::<(K, V)>,
         }
     }
@@ -1007,27 +1031,47 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
     async fn get(&self, key: &K, asset_path: &AssetRef<'static>) -> Option<V> {
-        let value_path = self.value_path(key);
-
-        let Ok(value) = async_fs::read(value_path).await else {
-            log(self.name, asset_path, key.as_hash(), "File cache miss.");
-
+        if self.validate {
             return None;
-        };
+        }
 
-        log(self.name, asset_path, key.as_hash(), "File cache hit.");
-
-        Some(<V as FileCacheValue>::read(value.into()))
+        match self.unvalidated_get(key).await {
+            Some(value) => {
+                log(self.name, asset_path, key.as_hash(), "File cache hit.");
+                Some(value)
+            }
+            None => {
+                log(self.name, asset_path, key.as_hash(), "File cache miss.");
+                None
+            }
+        }
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
+    async fn unvalidated_get(&self, key: &K) -> Option<V> {
+        let value_path = self.value_path(key);
+
+        if let Ok(value) = async_fs::read(value_path).await {
+            Some(<V as FileCacheValue>::read(value.into()))
+        } else {
+            None
+        }
+    }
+
+    // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
+    async fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
         let value_path = self.value_path(&key);
 
         // XXX TODO: Review faff that avoids lifetime issues.
         let value = value.clone();
 
         log(self.name, asset_path, key.as_hash(), "File cache put.");
+
+        if self.validate
+            && let Some(existing) = self.unvalidated_get(&key).await
+        {
+            assert_eq!(&value, &existing, "{key:?}");
+        }
 
         IoTaskPool::get()
             .spawn(async move {
@@ -1069,11 +1113,11 @@ struct MemoryAndFileCache<K: CacheKey, V: FileCacheValue + MemoryCacheValue> {
 }
 
 impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
-    fn new(name: &'static str, file_cache_path: Option<PathBuf>) -> Self {
+    fn new(name: &'static str, file_cache_path: Option<PathBuf>, validate: bool) -> Self {
         MemoryAndFileCache {
             name,
-            memory: Arc::new(RwLock::new(MemoryCache::new(name))),
-            file: file_cache_path.map(|p| FileCache::new(name, p)),
+            memory: Arc::new(RwLock::new(MemoryCache::new(name, validate))),
+            file: file_cache_path.map(|p| FileCache::new(name, p, validate)),
         }
     }
 
@@ -1103,7 +1147,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
+    async fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
         // XXX TODO: Avoid `blob.clone()` if there's no file cache?
         self.memory
             .write()
@@ -1111,7 +1155,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
             .put(key, value.clone(), asset_path);
 
         if let Some(file) = &self.file {
-            file.put(key, value, asset_path);
+            file.put(key, value, asset_path).await;
         }
     }
 }
@@ -1201,7 +1245,7 @@ impl CacheKey for DependencyCacheKey {
     }
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct DependencyCacheValue {
     // XXX TODO: Could store some debug info on the input?
     list: Vec<AssetRef<'static>>,
@@ -1418,7 +1462,7 @@ async fn load_action(
 
             let blob = write_standalone_asset(&asset, &*loader, saver, settings, &info).await?;
 
-            action_cache.put(info.action_key, blob.into(), &path);
+            action_cache.put(info.action_key, blob.into(), &path).await;
         } else {
             warn!(
                 ?path,
