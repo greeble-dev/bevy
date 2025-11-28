@@ -347,7 +347,8 @@ impl BassetShared {
 
         // XXX TODO: Is this wrong for actions and paths with a label? Yes if the cache
         // holds the full asset - the label selects after getting from the cache. No if
-        // the cache holds the sub-asset.
+        // the cache holds the sub-asset. Or should this function just disallow
+        // paths with labels?
         hasher.update(path.to_string().as_bytes());
 
         // XXX TODO: We should be including the meta in the dependency key. But
@@ -358,6 +359,9 @@ impl BassetShared {
             hasher.update(&meta.serialize());
         }
         */
+
+        // XXX TODO: Should this include loader versions? Think so, since loader
+        // could change dependency list.
 
         if let Some(really_a_path) = path.path() {
             let content_hash = self
