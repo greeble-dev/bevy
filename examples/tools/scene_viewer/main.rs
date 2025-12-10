@@ -14,7 +14,7 @@ use bevy::{
     camera::primitives::{Aabb, Sphere},
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     core_pipeline::prepass::{DeferredPrepass, DepthPrepass},
-    gltf::GltfPlugin,
+    gltf::{convert_coordinates::GltfConvertCoordinates, GltfPlugin},
     pbr::DefaultOpaqueRendererMethod,
     prelude::*,
     render::experimental::occlusion_culling::OcclusionCulling,
@@ -49,21 +49,34 @@ struct Args {
     /// spawn a light even if the scene already has one
     #[argh(switch)]
     add_light: Option<bool>,
-    /// enable `GltfPlugin::use_model_forward_direction`
-    #[argh(switch)]
-    use_model_forward_direction: Option<bool>,
+    /// override `GltfPlugin::convert_coordinates`
+    #[argh(option, from_str_fn(gltf_convert_coordinates_from_str))]
+    gltf_convert_coordinates: Option<GltfConvertCoordinates>,
 }
 
 impl Args {
     fn rotation(&self) -> Quat {
-        if self.use_model_forward_direction == Some(true) {
+        // XXX TODO: Remove dbg.
+        std::dbg!(if self
+            .gltf_convert_coordinates
+            .is_some_and(|c| c != GltfConvertCoordinates::Off)
+        {
             // If the scene is converted then rotate everything else to match. This
             // makes comparisons easier - the scene will always face the same way
             // relative to the camera.
             Quat::from_xyzw(0.0, 1.0, 0.0, 0.0)
         } else {
             Quat::IDENTITY
-        }
+        })
+    }
+}
+
+fn gltf_convert_coordinates_from_str(s: &str) -> Result<GltfConvertCoordinates, String> {
+    match s {
+        "off" => Ok(GltfConvertCoordinates::Off),
+        "scenes" => Ok(GltfConvertCoordinates::Scenes),
+        "nodes" => Ok(GltfConvertCoordinates::Nodes),
+        _ => Err("Expected \"off\", \"scenes\", or \"nodes\".".to_string()),
     }
 }
 
@@ -74,6 +87,9 @@ fn main() {
     let args: Args = Args::from_args(&[], &[]).unwrap();
 
     let deferred = args.deferred;
+
+    // XXX TODO: Remove dbg.
+    std::dbg!(&args.gltf_convert_coordinates);
 
     let mut app = App::new();
     app.add_plugins((
@@ -92,7 +108,8 @@ fn main() {
                 ..default()
             })
             .set(GltfPlugin {
-                use_model_forward_direction: args.use_model_forward_direction.unwrap_or(false),
+                // XXX TODO: Remove dbg.
+                convert_coordinates: std::dbg!(args.gltf_convert_coordinates.unwrap_or_default()),
                 ..default()
             }),
         FreeCameraPlugin,
