@@ -1,4 +1,7 @@
+//! Utilities for converting from glTF's [standard coordinate system](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#coordinate-system-and-units)
+//! to Bevy's.
 use core::f32::consts::PI;
+use serde::{Deserialize, Serialize};
 
 use bevy_math::{Mat4, Quat, Vec3};
 use bevy_transform::components::Transform;
@@ -78,4 +81,30 @@ impl ConvertCameraCoordinates for Transform {
         self.rotate_y(PI);
         self
     }
+}
+
+/// XXX TODO: Document.
+#[derive(Copy, Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
+pub enum GltfConvertCoordinates {
+    /// XXX TODO: Document.
+    //
+    // XXX TODO: Review if this should be an option here or if clients should
+    // do `Option<GltfConvertCoordinates>`. Problem with the latter is
+    // `GltfLoaderSettings` would need `Option<Option<GltfConvertCoordinates>>`
+    //
+    // XXX TODO: Review name. `None` is arguably clearer, but then we could
+    // end up with `Some(GltfConvertCoordinates::None)` in `GltfLoaderSettings`
+    // for some situations.
+    #[default]
+    Off,
+    /// XXX TODO: Document.
+    //
+    // XXX TODO: Reconsider name? Easy to imagine people getting stuck on how
+    // converting scense is different to converting nodes.
+    Scenes,
+    /// XXX TODO: Document.
+    //
+    // XXX TODO: Reconsider name. Maybe also put "experimental" in the name to
+    // make it super clear.
+    Nodes,
 }
