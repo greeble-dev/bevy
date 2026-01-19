@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use bevy_math::{Mat4, Quat, Vec3};
 use bevy_transform::components::Transform;
 
+/*
 pub(crate) trait ConvertCoordinates {
     /// Converts from glTF coordinates to Bevy's coordinate system. See
     /// [`GltfConvertCoordinates`] for an explanation of the conversion.
@@ -29,6 +30,7 @@ impl ConvertCoordinates for [f32; 4] {
         [-self[0], self[1], -self[2], self[3]]
     }
 }
+*/
 
 /// Options for converting scenes and assets from glTF's [standard coordinate system](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#coordinate-system-and-units)
 /// (+Z forward) to Bevy's coordinate system (-Z forward).
@@ -62,6 +64,8 @@ impl ConvertCoordinates for [f32; 4] {
 /// glTF nodes are not converted.
 #[derive(Copy, Clone, Default, Debug, Serialize, Deserialize)]
 pub struct GltfConvertCoordinates {
+    /// XXX TODO: Update documentation.
+    ///
     /// If true, convert scenes by rotating the top-level transform of the scene entity.
     /// This will ensure that [`Transform::forward`] of the "root" entity (the one with [`SceneInstance`](bevy_scene::SceneInstance))
     /// aligns with the "forward" of the glTF scene.
@@ -73,8 +77,13 @@ pub struct GltfConvertCoordinates {
     /// This option only changes the transform of the scene entity. It does not
     /// directly change the transforms of node entities - it only changes them
     /// indirectly through transform inheritance.
-    pub rotate_scene_entity: bool,
+    pub rotate_scene: bool,
 
+    /// XXX TODO: Documentation.
+    pub rotate_nodes: bool,
+
+    /// XXX TODO: Update documentation.
+    ///
     /// If true, convert mesh assets and skinned mesh bind poses.
     ///
     /// This option only changes mesh assets and the transforms of entities that
@@ -82,41 +91,50 @@ pub struct GltfConvertCoordinates {
     pub rotate_meshes: bool,
 }
 
-impl GltfConvertCoordinates {
-    const CONVERSION_TRANSFORM: Transform =
-        Transform::from_rotation(Quat::from_xyzw(0.0, 1.0, 0.0, 0.0));
+pub(crate) struct Conversion {
+    local: Quat,
+    inverse_parent: Quat,
+}
 
-    fn conversion_mat4() -> Mat4 {
-        Mat4::from_scale(Vec3::new(-1.0, 1.0, -1.0))
-    }
+impl Conversion {
+    pub(crate) const GLTF_TO_BEVY: Quat = Quat::from_xyzw(0.0, 1.0, 0.0, 0.0);
 
-    pub(crate) fn scene_conversion_transform(&self) -> Transform {
-        if self.rotate_scene_entity {
-            Self::CONVERSION_TRANSFORM
-        } else {
-            Transform::IDENTITY
+    pub(crate) fn from_local_and_parent(local: Quat, parent: Quat) -> Self {
+        Self {
+            local,
+            inverse_parent: parent.inverse(),
         }
     }
 
-    pub(crate) fn mesh_conversion_transform(&self) -> Transform {
-        if self.rotate_meshes {
-            Self::CONVERSION_TRANSFORM
-        } else {
-            Transform::IDENTITY
-        }
+    pub(crate) fn translation(&self, t: Vec3) -> Vec3 {
+        self.inverse_parent * t
     }
 
-    pub(crate) fn mesh_conversion_transform_inverse(&self) -> Transform {
-        // We magically know that the transform is its own inverse. We still
-        // make a distinction at the interface level in case that changes.
-        self.mesh_conversion_transform()
+    pub(crate) fn rotation(&self, r: Quat) -> Quat {
+        self.inverse_parent * r * self.local
     }
 
-    pub(crate) fn mesh_conversion_mat4(&self) -> Mat4 {
-        if self.rotate_meshes {
-            Self::conversion_mat4()
-        } else {
-            Mat4::IDENTITY
-        }
+    pub(crate) fn scale(&self, s: Vec3) -> Vec3 {
+        // XXX TODO
+        s
+    }
+
+    pub(crate) fn transform(&self, t: Transform) -> Transform {
+        Transform::from_translation(self.translation(t.translation))
+            .with_rotation(self.rotation(t.rotation))
+            .with_scale(self.scale(t.scale))
+    }
+
+    pub(crate) fn mat4(&self, m: Mat4) -> Mat4 {
+        // XXX TODO: Consider more efficient alternatives.
+        let inverse_parent_matrix = Mat4::from_quat(self.inverse_parent);
+        let local_matrix = Mat4::from_quat(self.local);
+
+        inverse_parent_matrix * m * local_matrix
+    }
+
+    pub(crate) fn inverse_mat4(&self, m: Mat4) -> Mat4 {
+        // XXX TODO:
+        self.mat4(m)
     }
 }

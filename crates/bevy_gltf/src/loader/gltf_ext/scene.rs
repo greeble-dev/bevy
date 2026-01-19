@@ -1,8 +1,8 @@
 use bevy_ecs::name::Name;
-use bevy_math::{Mat4, Vec3};
+use bevy_math::{Mat4, Quat, Vec3};
 use bevy_transform::components::Transform;
 
-use gltf::scene::Node;
+use gltf::{scene::Node, Gltf};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -10,7 +10,10 @@ use itertools::Itertools;
 #[cfg(feature = "bevy_animation")]
 use bevy_platform::collections::{HashMap, HashSet};
 
-use crate::GltfError;
+use crate::{
+    convert_coordinates::{Conversion, GltfConvertCoordinates},
+    GltfError,
+};
 
 pub(crate) fn node_name(node: &Node) -> Name {
     let name = node
@@ -20,13 +23,46 @@ pub(crate) fn node_name(node: &Node) -> Name {
     Name::new(name)
 }
 
+fn node_local_conversion(node: &Node, convert_coordinates: &GltfConvertCoordinates) -> Quat {
+    if convert_coordinates.rotate_nodes && node.camera().is_none() && node.light().is_none() {
+        Conversion::GLTF_TO_BEVY
+    } else {
+        Quat::IDENTITY
+    }
+}
+
+fn scene_local_conversion(convert_coordinates: &GltfConvertCoordinates) -> Quat {
+    if convert_coordinates.rotate_scene {
+        Conversion::GLTF_TO_BEVY
+    } else {
+        Quat::IDENTITY
+    }
+}
+
+pub(crate) fn node_conversion(
+    node: &Node,
+    parent_node: Option<&Node>,
+    convert_coordinates: &GltfConvertCoordinates,
+) -> Conversion {
+    let parent_conversion = if let Some(parent_node) = parent_node {
+        node_local_conversion(parent_node, convert_coordinates)
+    } else {
+        scene_local_conversion(convert_coordinates)
+    };
+
+    Conversion::from_local_and_parent(
+        node_local_conversion(node, convert_coordinates),
+        parent_conversion.inverse(),
+    )
+}
+
 /// Calculate the transform of gLTF [`Node`].
 ///
 /// This should be used instead of calling [`gltf::scene::Transform::matrix()`]
 /// on [`Node::transform()`](gltf::Node::transform) directly because it uses optimized glam types and
 /// if `libm` feature of `bevy_math` crate is enabled also handles cross
 /// platform determinism properly.
-pub(crate) fn node_transform(node: &Node) -> Transform {
+fn node_transform(node: &Node) -> Transform {
     match node.transform() {
         gltf::scene::Transform::Matrix { matrix } => {
             Transform::from_matrix(Mat4::from_cols_array_2d(&matrix))
@@ -37,10 +73,40 @@ pub(crate) fn node_transform(node: &Node) -> Transform {
             scale,
         } => Transform {
             translation: Vec3::from(translation),
-            rotation: bevy_math::Quat::from_array(rotation),
+            rotation: Quat::from_array(rotation),
             scale: Vec3::from(scale),
         },
     }
+}
+
+pub(crate) fn node_transforms_and_conversions(
+    gltf: &Gltf,
+    convert_coordinates: &GltfConvertCoordinates,
+) -> (Vec<Transform>, Vec<Conversion>) {
+    let mut parent_indices = vec![Option::<usize>::None; gltf.nodes().len()];
+
+    for node in gltf.nodes() {
+        for child in node.children() {
+            parent_indices[child.index()] = Some(node.index());
+        }
+    }
+
+    let conversions = gltf
+        .nodes()
+        .zip(parent_indices)
+        .map(|(node, parent_index)| {
+            let parent = parent_index.and_then(|parent_index| gltf.nodes().nth(parent_index));
+            node_conversion(&node, parent.as_ref(), &convert_coordinates)
+        })
+        .collect::<Vec<Conversion>>();
+
+    let transforms = gltf
+        .nodes()
+        .zip(conversions.iter().by_ref())
+        .map(|(node, conversion)| conversion.transform(node_transform(&node)))
+        .collect::<Vec<Transform>>();
+
+    (transforms, conversions)
 }
 
 #[cfg_attr(

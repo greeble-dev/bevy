@@ -6,8 +6,6 @@ use gltf::{
 };
 use thiserror::Error;
 
-use crate::convert_coordinates::ConvertCoordinates;
-
 /// Represents whether integer data requires normalization
 #[derive(Copy, Clone)]
 struct Normalization(bool);
