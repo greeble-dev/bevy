@@ -16,6 +16,7 @@ use bevy_platform::{
     collections::HashMap,
     sync::{PoisonError, RwLock},
 };
+use bevy_reflect::TypePath;
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture, IoTaskPool};
 
 use async_fs::File;
@@ -335,12 +336,10 @@ impl BassetShared {
             .map(move |s| (&*s.0, &*s.1))
     }
 
-    // XXX TODO: The meta should be required, not optional. Or we need another
-    // way to make sure the key incorporates the loader settings.
     pub(crate) async fn dependency_key(
         &self,
         path: &AssetRef<'static>,
-        _meta: Option<&dyn AssetMetaDyn>,
+        _settings: Option<&dyn Settings>,
         asset_server: &AssetServer,
     ) -> DependencyCacheKey {
         let mut hasher = blake3::Hasher::new();
@@ -351,9 +350,9 @@ impl BassetShared {
         // paths with labels?
         hasher.update(path.to_string().as_bytes());
 
-        // XXX TODO: We should be including the meta in the dependency key. But
+        // XXX TODO: We should be including the settings in the dependency key. But
         // it requires some extra plumbing - `ErasedLoadedAsset` needs to keep
-        // track of the meta of each item in `ErasedLoadedAsset::loader_dependencies`.
+        // track of the settings of each item in `ErasedLoadedAsset::loader_dependencies`.
         /*
         if let Some(meta) = meta {
             hasher.update(&meta.serialize());
@@ -408,12 +407,12 @@ impl BassetShared {
     pub(crate) async fn register_dependees(
         &self,
         path: &AssetRef<'static>,
-        meta: Option<&dyn AssetMetaDyn>,
+        settings: Option<&dyn Settings>,
         dependees: impl Iterator<Item = AssetRef<'static>>,
         asset_server: &AssetServer,
     ) {
         if let Some(dependency_cache) = &self.dependency_cache {
-            let key = self.dependency_key(path, meta, asset_server).await;
+            let key = self.dependency_key(path, settings, asset_server).await;
 
             let value = DependencyCacheValue::new(dependees);
 
@@ -462,13 +461,14 @@ struct BassetFileSerializable {
     // TODO: Versioning?
 }
 
+#[derive(TypePath)]
 struct BassetLoader;
 
 impl ErasedAssetLoader for BassetLoader {
     fn load<'a>(
         &'a self,
         reader: &'a mut dyn Reader,
-        _meta: &'a dyn AssetMetaDyn,
+        _settings: &'a dyn Settings,
         load_context: LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         assert!(
@@ -511,13 +511,13 @@ impl ErasedAssetLoader for BassetLoader {
     fn default_meta(&self) -> Box<dyn AssetMetaDyn> {
         // XXX TODO: Review. Is this going to be problematic since we don't know the loader type?
         Box::new(AssetMeta::<FakeAssetLoader, ()>::new(AssetAction::Load {
-            loader: self.type_name().to_string(),
+            loader: self.type_path().to_string(),
             settings: <FakeAssetLoader as AssetLoader>::Settings::default(),
         }))
     }
 
-    fn type_name(&self) -> &'static str {
-        core::any::type_name::<Self>()
+    fn type_path(&self) -> &'static str {
+        <Self as TypePath>::type_path()
     }
 
     fn type_id(&self) -> core::any::TypeId {
@@ -533,13 +533,14 @@ impl ErasedAssetLoader for BassetLoader {
     }
 }
 
+#[derive(TypePath)]
 struct ActionLoader;
 
 impl ErasedAssetLoader for ActionLoader {
     fn load<'a>(
         &'a self,
         reader: &'a mut dyn Reader,
-        _meta: &'a dyn AssetMetaDyn,
+        _settings: &'a dyn Settings,
         load_context: LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         assert!(
@@ -576,13 +577,13 @@ impl ErasedAssetLoader for ActionLoader {
     fn default_meta(&self) -> Box<dyn AssetMetaDyn> {
         // XXX TODO: Review. Is this going to be problematic since we don't know the loader type?
         Box::new(AssetMeta::<FakeAssetLoader, ()>::new(AssetAction::Load {
-            loader: self.type_name().to_string(),
+            loader: self.type_path().to_string(),
             settings: <FakeAssetLoader as AssetLoader>::Settings::default(),
         }))
     }
 
-    fn type_name(&self) -> &'static str {
-        core::any::type_name::<Self>()
+    fn type_path(&self) -> &'static str {
+        <Self as TypePath>::type_path()
     }
 
     fn type_id(&self) -> core::any::TypeId {
@@ -793,15 +794,15 @@ async fn read_standalone_asset(
     // Don't update the dependency cache - this asset loader loader doesn't
     // know about the dependencies of the action that produced this asset.
     //
-    // XXX TODO: Maybe better if we sidestepped `load_with_meta_loader_and_reader`
+    // XXX TODO: Maybe better if we sidestepped `load_with_settings_loader_and_reader`
     // for clarity? Or generally rethink how the dependency cache gets filled out.
     let update_dependency_cache = false;
 
     let mut asset = context
         .asset_server
-        .load_with_meta_loader_and_reader(
+        .load_with_settings_loader_and_reader(
             original_path,
-            &*meta,
+            meta.loader_settings().expect("meta is set to Load"),
             &*loader,
             &mut reader,
             load_dependencies,
@@ -865,7 +866,7 @@ async fn write_standalone_asset(
 
     blob.bytes(STANDALONE_MAGIC);
     blob.u16(STANDALONE_VERSION);
-    blob.string(loader.type_name());
+    blob.string(loader.type_path());
     blob.bytes_sized(&meta_bytes);
     blob.bytes_sized(&info_bytes);
     blob.bytes_sized(&asset_bytes);
@@ -1364,9 +1365,9 @@ async fn load_path(
     let update_dependency_cache = true;
 
     let asset = asset_server
-        .load_with_meta_loader_and_reader(
+        .load_with_settings_loader_and_reader(
             &path,
-            &*meta,
+            meta.loader_settings().expect("meta is set to Load"),
             &*loader,
             &mut *reader,
             load_dependencies,
@@ -1562,6 +1563,7 @@ impl<'a> BlobWriter<'a> {
 
 // TODO: Review this. Awkward hack so that `BassetLoader::default_meta` and
 // `BassetLoader::deserialize_meta` can return a meta even if it's wrong.
+#[derive(TypePath)]
 struct FakeAssetLoader;
 
 impl AssetLoader for FakeAssetLoader {

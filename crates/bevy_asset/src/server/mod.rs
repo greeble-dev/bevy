@@ -1478,7 +1478,7 @@ impl AssetServer {
                 let meta = loader.default_meta();
 
                 // XXX TODO: We just want an empty reader. Is there a simpler way?
-                let reader = Box::new(crate::io::VecReader::new(Vec::new()));
+                let reader: Box<dyn Reader> = Box::new(crate::io::VecReader::new(Vec::new()));
 
                 Ok((meta, loader, reader))
             }
@@ -1602,7 +1602,7 @@ impl AssetServer {
     pub(crate) async fn load_with_settings_loader_and_reader(
         &self,
         asset_path: &AssetRef<'_>,
-        meta: &dyn AssetMetaDyn,
+        settings: &dyn Settings,
         loader: &dyn ErasedAssetLoader,
         reader: &mut dyn Reader,
         load_dependencies: bool,
@@ -1643,7 +1643,7 @@ impl AssetServer {
             self.basset_shared()
                 .register_dependees(
                     &asset_path.clone_owned(), // XXX TODO: Avoid clone?
-                    Some(meta),
+                    Some(settings),
                     asset.loader_dependencies.keys().cloned(),
                     self,
                 )

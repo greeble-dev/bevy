@@ -666,7 +666,7 @@ impl GltfLoader {
                         &material,
                         &texture_handles,
                         false,
-                        load_context.path().clone(),
+                        load_context.path().path().unwrap().clone(), // XXX TODO: Avoid unwrap. Unclear if `load_material` should take AssetRef?
                     );
                     load_context.add_labeled_asset(label, material)
                 };
@@ -1577,7 +1577,7 @@ fn load_node(
                         &material,
                         textures,
                         is_scale_inverted,
-                        load_context.path().clone(),
+                        load_context.path().path().unwrap().clone(), // XXX TODO: Avoid unwrap. Unclear if `load_material` should take AssetRef?
                     );
                     load_context.add_labeled_asset(label, material);
                 }

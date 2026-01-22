@@ -236,7 +236,7 @@ mod demo {
         uppercase: bool,
     }
 
-    #[derive(Default)]
+    #[derive(Default, TypePath)]
     pub struct StringAssetLoader;
 
     impl AssetLoader for StringAssetLoader {
@@ -267,7 +267,7 @@ mod demo {
         }
     }
 
-    #[derive(Default)]
+    #[derive(Default, TypePath)]
     pub struct StringAssetSaver;
 
     impl AssetSaver for StringAssetSaver {
@@ -291,7 +291,7 @@ mod demo {
     #[derive(Asset, TypePath, Debug)]
     pub struct IntAsset(pub i64);
 
-    #[derive(Default)]
+    #[derive(Default, TypePath)]
     pub struct IntAssetLoader;
 
     impl AssetLoader for IntAssetLoader {
@@ -318,7 +318,7 @@ mod demo {
         }
     }
 
-    #[derive(Default)]
+    #[derive(Default, TypePath)]
     pub struct IntAssetSaver;
 
     impl AssetSaver for IntAssetSaver {
@@ -619,7 +619,7 @@ fn setup(
     commands.spawn((
         Transform::from_xyz(100.0, 200.0, 200.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         CascadeShadowConfigBuilder {

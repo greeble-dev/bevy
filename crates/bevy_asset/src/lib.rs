@@ -736,7 +736,7 @@ mod tests {
         },
         loader::{AssetLoader, LoadContext},
         Asset, AssetApp, AssetEvent, AssetId, AssetLoadError, AssetLoadFailedEvent, AssetPath,
-        AssetPlugin, AssetServer, Assets, InvalidGenerationError, LoadState, LoadedAsset,
+        AssetPlugin, AssetRef, AssetServer, Assets, InvalidGenerationError, LoadState, LoadedAsset,
         UnapprovedPathMode, UntypedHandle, WriteDefaultMetaError,
     };
     use alloc::{

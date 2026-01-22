@@ -2,15 +2,9 @@ use crate::{
     loader::{AssetLoader, ErasedAssetLoader},
     path::AssetPath,
 };
-#[cfg(feature = "trace")]
-use crate::{meta::AssetMetaDyn, DeserializeMetaError, ErasedLoadedAsset};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use async_broadcast::RecvError;
-#[cfg(feature = "trace")]
-use bevy_ecs::error::BevyError;
 use bevy_platform::collections::HashMap;
-#[cfg(feature = "trace")]
-use bevy_tasks::BoxedFuture;
 use bevy_tasks::IoTaskPool;
 use bevy_utils::TypeIdMap;
 use core::any::TypeId;
@@ -40,11 +34,11 @@ impl AssetLoaders {
     /// Registers a new [`ErasedAssetLoader`]. [`AssetLoader`]s must be registered before they can be used.
     pub(crate) fn push_erased(&mut self, loader: Box<dyn ErasedAssetLoader>) {
         // TODO: Allow using the short path of loaders.
-        let type_name = loader.type_name();
+        let type_path = loader.type_path();
         let loader_asset_type = loader.asset_type_id();
         let loader_asset_type_name = loader.asset_type_name();
 
-        let loader = Arc::new(loader);
+        let loader = Arc::<dyn ErasedAssetLoader>::from(loader);
 
         let (loader_index, is_new) =
             if let Some(index) = self.type_path_to_preregistered_loader.remove(type_path) {

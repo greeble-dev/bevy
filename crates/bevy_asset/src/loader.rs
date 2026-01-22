@@ -3,8 +3,8 @@ use crate::{
     loader_builders::{Deferred, NestedLoader, StaticTyped},
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfo, ProcessedInfoMinimal, Settings},
     path::AssetPath,
-    Asset, AssetIndex, AssetLoadError, AssetServer, AssetServerMode, Assets, ErasedAssetIndex,
-    Handle, UntypedAssetId, UntypedHandle,
+    Asset, AssetIndex, AssetLoadError, AssetRef, AssetServer, AssetServerMode, Assets,
+    ErasedAssetIndex, Handle, UntypedAssetId, UntypedHandle,
 };
 use alloc::{
     boxed::Box,
