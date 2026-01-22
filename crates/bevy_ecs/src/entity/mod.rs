@@ -766,7 +766,7 @@ impl EntityAllocator {
     /// ```
     /// # use bevy_ecs::{prelude::*};
     /// let mut world = World::new();
-    /// let entity = world.entities_allocator().alloc();
+    /// let entity = world.entity_allocator().alloc();
     /// // wait as long as you like
     /// let entity_access = world.spawn_empty_at(entity).unwrap(); // or spawn_at(entity, my_bundle)
     /// // treat it as a normal entity
@@ -993,7 +993,7 @@ impl Entities {
     ) -> Option<EntityLocation> {
         self.ensure_index_index_is_valid(index);
         // SAFETY: We just did `ensure_index`
-        self.update_existing_location(index, location)
+        unsafe { self.update_existing_location(index, location) }
     }
 
     /// Ensures the index is within the bounds of [`Self::meta`], expanding it if necessary.
@@ -1192,10 +1192,10 @@ impl fmt::Display for EntityValidButNotSpawnedError {
 #[derive(thiserror::Error, Copy, Clone, Debug, Eq, PartialEq)]
 pub enum EntityNotSpawnedError {
     /// The entity was invalid.
-    #[error("{0}")]
+    #[error("Entity despawned: {0}\nNote that interacting with a despawned entity is the most common cause of this error but there are others")]
     Invalid(#[from] InvalidEntityError),
     /// The entity was valid but was not spawned.
-    #[error("{0}")]
+    #[error("Entity not yet spawned: {0}\nNote that interacting with a not-yet-spawned entity is the most common cause of this error but there are others")]
     ValidButNotSpawned(#[from] EntityValidButNotSpawnedError),
 }
 

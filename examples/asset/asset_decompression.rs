@@ -17,7 +17,7 @@ struct GzAsset {
     uncompressed: ErasedLoadedAsset,
 }
 
-#[derive(Default)]
+#[derive(Default, TypePath)]
 struct GzAssetLoader;
 
 /// Possible errors that can be produced by [`GzAssetLoader`]
@@ -62,7 +62,7 @@ impl AssetLoader for GzAssetLoader {
             // XXX TODO: Review. Added `path.unwrap()`.
             .path()
             .unwrap()
-            .resolve_embed(uncompressed_file_name)
+            .resolve_embed_str(uncompressed_file_name)
             .map_err(|_| GzAssetLoaderError::IndeterminateFilePath)?;
 
         let mut bytes_compressed = Vec::new();

@@ -17,19 +17,13 @@ use core::any::TypeId;
 use thiserror::Error;
 use tracing::warn;
 
-#[cfg(feature = "trace")]
-use {
-    alloc::string::ToString,
-    tracing::{info_span, instrument::Instrument},
-};
-
 #[derive(Default)]
 pub(crate) struct AssetLoaders {
     loaders: Vec<MaybeAssetLoader>,
     type_id_to_loaders: TypeIdMap<Vec<usize>>,
     extension_to_loaders: HashMap<Box<str>, Vec<usize>>,
-    type_name_to_loader: HashMap<&'static str, usize>,
-    preregistered_loaders: HashMap<&'static str, usize>,
+    type_path_to_loader: HashMap<&'static str, usize>,
+    type_path_to_preregistered_loader: HashMap<&'static str, usize>,
 }
 
 impl AssetLoaders {
@@ -45,16 +39,15 @@ impl AssetLoaders {
 
     /// Registers a new [`ErasedAssetLoader`]. [`AssetLoader`]s must be registered before they can be used.
     pub(crate) fn push_erased(&mut self, loader: Box<dyn ErasedAssetLoader>) {
+        // TODO: Allow using the short path of loaders.
         let type_name = loader.type_name();
         let loader_asset_type = loader.asset_type_id();
         let loader_asset_type_name = loader.asset_type_name();
 
-        #[cfg(feature = "trace")]
-        let loader: Box<dyn ErasedAssetLoader> = Box::new(InstrumentedAssetLoader(loader));
-        let loader: Arc<dyn ErasedAssetLoader> = loader.into();
+        let loader = Arc::new(loader);
 
         let (loader_index, is_new) =
-            if let Some(index) = self.preregistered_loaders.remove(type_name) {
+            if let Some(index) = self.type_path_to_preregistered_loader.remove(type_path) {
                 (index, false)
             } else {
                 (self.loaders.len(), true)
@@ -89,7 +82,7 @@ impl AssetLoaders {
                     Loader must be specified in a .meta file in order to load assets of this type with these extensions.");
             }
 
-            self.type_name_to_loader.insert(type_name, loader_index);
+            self.type_path_to_loader.insert(type_path, loader_index);
 
             // XXX TODO: Review implications of loader_asset_type being Option, which
             // means we can't update type_id_to_loaders.
@@ -126,12 +119,14 @@ impl AssetLoaders {
     pub(crate) fn reserve<L: AssetLoader>(&mut self, extensions: &[&str]) {
         let loader_asset_type = TypeId::of::<L::Asset>();
         let loader_asset_type_name = core::any::type_name::<L::Asset>();
-        let type_name = core::any::type_name::<L>();
+        let type_path = L::type_path();
+        // TODO: Allow using the short path of loaders.
 
         let loader_index = self.loaders.len();
 
-        self.preregistered_loaders.insert(type_name, loader_index);
-        self.type_name_to_loader.insert(type_name, loader_index);
+        self.type_path_to_preregistered_loader
+            .insert(type_path, loader_index);
+        self.type_path_to_loader.insert(type_path, loader_index);
 
         let existing_loaders_for_type_id = self.type_id_to_loaders.get(&loader_asset_type);
         let mut duplicate_extensions = Vec::new();
@@ -170,7 +165,7 @@ impl AssetLoaders {
 
     /// Get the [`AssetLoader`] by name
     pub(crate) fn get_by_name(&self, name: &str) -> Option<MaybeAssetLoader> {
-        let index = self.type_name_to_loader.get(name).copied()?;
+        let index = self.type_path_to_loader.get(name).copied()?;
 
         self.get_by_index(index)
     }
@@ -333,48 +328,6 @@ impl MaybeAssetLoader {
     }
 }
 
-#[cfg(feature = "trace")]
-struct InstrumentedAssetLoader(Box<dyn ErasedAssetLoader>);
-
-#[cfg(feature = "trace")]
-impl ErasedAssetLoader for InstrumentedAssetLoader {
-    fn load<'a>(
-        &'a self,
-        reader: &'a mut dyn crate::io::Reader,
-        meta: &'a dyn AssetMetaDyn,
-        load_context: crate::LoadContext<'a>,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
-        let span = info_span!(
-            "asset loading",
-            loader = self.0.type_name(),
-            asset = load_context.path().to_string(),
-        );
-        Box::pin(self.0.load(reader, meta, load_context).instrument(span))
-    }
-
-    fn extensions(&self) -> &[&str] {
-        self.0.extensions()
-    }
-    fn deserialize_meta(&self, meta: &[u8]) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
-        self.0.deserialize_meta(meta)
-    }
-    fn default_meta(&self) -> Box<dyn AssetMetaDyn> {
-        self.0.default_meta()
-    }
-    fn type_name(&self) -> &'static str {
-        self.0.type_name()
-    }
-    fn type_id(&self) -> TypeId {
-        self.0.type_id()
-    }
-    fn asset_type_name(&self) -> Option<&'static str> {
-        self.0.asset_type_name()
-    }
-    fn asset_type_id(&self) -> Option<TypeId> {
-        self.0.asset_type_id()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::{format, string::String};
@@ -400,6 +353,7 @@ mod tests {
     #[derive(Asset, TypePath, Debug)]
     struct C;
 
+    #[derive(TypePath)]
     struct Loader<A: Asset, const N: usize, const E: usize> {
         sender: Sender<()>,
         _phantom: PhantomData<A>,
@@ -469,7 +423,7 @@ mod tests {
 
         let loader = block_on(
             loaders
-                .get_by_name(core::any::type_name::<Loader<A, 1, 0>>())
+                .get_by_name(<Loader<A, 1, 0> as TypePath>::type_path())
                 .unwrap()
                 .get(),
         )
