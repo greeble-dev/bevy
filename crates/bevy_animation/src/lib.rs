@@ -1675,13 +1675,15 @@ mod tests {
             vec!["aa"],
             vec!["ab"],
             vec!["ba"],
+            vec!["abc"],
+            vec!["a", "b", "c"],
+            vec!["ab", "c"],
+            vec!["a", "bc"],
         ];
 
         // Test that different paths map to a different `AnimationTargetId`.
-        for li in 0..paths.len() {
-            for ri in (li + 1)..paths.len() {
-                let lp = &paths[li];
-                let rp = &paths[ri];
+        for (li, lp) in paths.iter().enumerate() {
+            for rp in paths.iter().skip(li + 1) {
                 let lt = AnimationTargetId::from_iter(lp.iter());
                 let rt = AnimationTargetId::from_iter(rp.iter());
 
