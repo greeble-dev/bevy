@@ -1263,13 +1263,7 @@ impl AnimationTargetId {
     /// Typically, this will be the path from the animation root to the
     /// animation target (e.g. bone) that is to be animated.
     pub fn from_names<'a>(names: impl Iterator<Item = &'a Name>) -> Self {
-        let mut blake3 = blake3::Hasher::new();
-        blake3.update(ANIMATION_TARGET_NAMESPACE.as_bytes());
-        for name in names {
-            blake3.update(name.as_bytes());
-        }
-        let hash = blake3.finalize().as_bytes()[0..16].try_into().unwrap();
-        Self(*uuid::Builder::from_sha1_bytes(hash).as_uuid())
+        AnimationTargetId::from_iter(names.map(Name::as_str))
     }
 
     /// Creates a new [`AnimationTargetId`] by hashing a single name.
