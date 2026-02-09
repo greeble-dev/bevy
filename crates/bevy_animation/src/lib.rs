@@ -1288,6 +1288,9 @@ impl<T: AsRef<str>> FromIterator<T> for AnimationTargetId {
         blake3.update(ANIMATION_TARGET_NAMESPACE.as_bytes());
         for str in iter {
             blake3.update(str.as_ref().as_bytes());
+            // Also hash the length. This avoids ["ab"] and ["a", "b"] returning
+            // the same id.
+            blake3.update(&str.as_ref().len().to_le_bytes());
         }
         let hash = blake3.finalize().as_bytes()[0..16].try_into().unwrap();
         Self(*uuid::Builder::from_sha1_bytes(hash).as_uuid())
