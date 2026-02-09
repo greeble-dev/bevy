@@ -1664,4 +1664,45 @@ mod tests {
             Box::new(ActiveAnimation::default()),
         );
     }
+
+    #[test]
+    fn test_animation_target_id() {
+        let paths = &[
+            vec![],
+            vec![""],
+            vec!["", ""],
+            vec!["a"],
+            vec!["a", "a"],
+            vec!["a", "b"],
+            vec!["b", "a"],
+            vec!["aa"],
+            vec!["ab"],
+            vec!["ba"],
+        ];
+
+        // Test that different paths map to a different `AnimationTargetId`.
+        for li in 0..paths.len() {
+            for ri in (li + 1)..paths.len() {
+                let lp = &paths[li];
+                let rp = &paths[ri];
+                let lt = AnimationTargetId::from_iter(lp.iter());
+                let rt = AnimationTargetId::from_iter(rp.iter());
+
+                assert!(lt != rt, "{:?} and {:?} collided. {:?} ", lp, rp, lt);
+            }
+        }
+
+        // Test that `from_iter` is equivalent to `from_names`.
+        for str_path in paths {
+            let name_path = str_path.iter().map(|&s| Name::from(s)).collect::<Vec<_>>();
+
+            assert_eq!(
+                AnimationTargetId::from_iter(str_path),
+                AnimationTargetId::from_names(name_path.iter()),
+                "{:?} {:?}",
+                str_path,
+                &name_path
+            );
+        }
+    }
 }
