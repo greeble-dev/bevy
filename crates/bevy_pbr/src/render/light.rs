@@ -2234,6 +2234,7 @@ pub fn queue_shadows(
 
                 let (vertex_slab, index_slab) =
                     mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
+                let morph_target_slab = mesh_allocator.mesh_morph_target_slab(&mesh_instance.mesh_asset_id);
 
                 let batch_set_key = ShadowBatchSetKey {
                     pipeline: pipeline_id,
@@ -2241,6 +2242,7 @@ pub fn queue_shadows(
                     material_bind_group_index,
                     vertex_slab: vertex_slab.unwrap_or_default(),
                     index_slab,
+                    morph_target_slab,
                 };
 
                 shadow_phase.add(
@@ -2302,6 +2304,12 @@ pub struct ShadowBatchSetKey {
     ///
     /// For non-mesh items, you can safely fill this with `None`.
     pub index_slab: Option<SlabId>,
+
+    /// The ID of the slab that the morph target displacements reside in, if
+    /// morph targets are present.
+    ///
+    /// For non-mesh items, you can safely fill this with `None`.
+    pub morph_target_slab: Option<SlabId>,
 }
 
 impl PhaseItemBatchSetKey for ShadowBatchSetKey {

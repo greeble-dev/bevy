@@ -216,6 +216,12 @@ pub struct OpaqueNoLightmap3dBatchSetKey {
     ///
     /// For non-mesh items, you can safely fill this with `None`.
     pub index_slab: Option<SlabId>,
+
+    /// The ID of the slab that the morph target displacements reside in, if
+    /// morph targets are present.
+    ///
+    /// For non-mesh items, you can safely fill this with `None`.
+    pub morph_target_slab: Option<SlabId>,
 }
 
 impl PhaseItemBatchSetKey for OpaqueNoLightmap3dBatchSetKey {

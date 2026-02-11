@@ -265,6 +265,7 @@ fn queue_custom_phase_item(
                     lightmap_slab: None,
                     vertex_slab: default(),
                     index_slab: None,
+                    morph_target_slab: None,
                 },
                 Opaque3dBinKey {
                     asset_id: AssetId::<Mesh>::invalid().untyped(),

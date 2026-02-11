@@ -5,6 +5,7 @@
     prepass_io::{Vertex, VertexOutput, FragmentOutput},
     skinning,
     morph,
+    morph::{morph_position, morph_normal, morph_tangent},
     mesh_view_bindings::view,
     view_transformations::position_world_to_clip,
 }
@@ -19,18 +20,18 @@ fn morph_vertex(vertex_in: Vertex) -> Vertex {
     let first_vertex = mesh[vertex.instance_index].first_vertex_index;
     let vertex_index = vertex.index - first_vertex;
 
-    let weight_count = morph::layer_count();
+    let weight_count = morph::layer_count(vertex.instance_index);
     for (var i: u32 = 0u; i < weight_count; i ++) {
-        let weight = morph::weight_at(i);
+        let weight = morph::weight_at(i, vertex.instance_index);
         if weight == 0.0 {
             continue;
         }
-        vertex.position += weight * morph::morph(vertex_index, morph::position_offset, i);
+        vertex.position += weight * morph_position(vertex_index, i, vertex.instance_index);
 #ifdef VERTEX_NORMALS
-        vertex.normal += weight * morph::morph(vertex_index, morph::normal_offset, i);
+        vertex.normal += weight * morph_normal(vertex_index, i, vertex.instance_index);
 #endif
 #ifdef VERTEX_TANGENTS
-        vertex.tangent += vec4(weight * morph::morph(vertex_index, morph::tangent_offset, i), 0.0);
+        vertex.tangent += vec4(weight * morph_tangent(vertex_index, i, vertex.instance_index), 0.0);
 #endif
     }
     return vertex;
@@ -44,11 +45,11 @@ fn morph_prev_vertex(vertex_in: Vertex) -> Vertex {
     var vertex = vertex_in;
     let weight_count = morph::layer_count();
     for (var i: u32 = 0u; i < weight_count; i ++) {
-        let weight = morph::prev_weight_at(i);
+        let weight = morph::prev_weight_at(i, vertex.instance_index);
         if weight == 0.0 {
             continue;
         }
-        vertex.position += weight * morph::morph(vertex.index, morph::position_offset, i);
+        vertex.position += weight * morph_position(vertex_index, i, vertex.instance_index);
         // Don't bother morphing normals and tangents; we don't need them for
         // motion vector calculation.
     }

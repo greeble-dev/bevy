@@ -2,7 +2,7 @@
     mesh_bindings::mesh,
     mesh_functions,
     skinning,
-    morph::morph,
+    morph::{morph_position, morph_normal, morph_tangent},
     forward_io::{Vertex, VertexOutput},
     view_transformations::position_world_to_clip,
 }
@@ -13,18 +13,18 @@ fn morph_vertex(vertex_in: Vertex) -> Vertex {
     let first_vertex = mesh[vertex.instance_index].first_vertex_index;
     let vertex_index = vertex.index - first_vertex;
 
-    let weight_count = bevy_pbr::morph::layer_count();
+    let weight_count = bevy_pbr::morph::layer_count(vertex.instance_index);
     for (var i: u32 = 0u; i < weight_count; i ++) {
-        let weight = bevy_pbr::morph::weight_at(i);
+        let weight = bevy_pbr::morph::weight_at(i, vertex.instance_index);
         if weight == 0.0 {
             continue;
         }
-        vertex.position += weight * morph(vertex_index, bevy_pbr::morph::position_offset, i);
+        vertex.position += weight * morph_position(vertex_index, i, vertex.instance_index);
 #ifdef VERTEX_NORMALS
-        vertex.normal += weight * morph(vertex_index, bevy_pbr::morph::normal_offset, i);
+        vertex.normal += weight * morph_normal(vertex_index, i, vertex.instance_index);
 #endif
 #ifdef VERTEX_TANGENTS
-        vertex.tangent += vec4(weight * morph(vertex_index, bevy_pbr::morph::tangent_offset, i), 0.0);
+        vertex.tangent += vec4(weight * morph_tangent(vertex_index, i, vertex.instance_index), 0.0);
 #endif
     }
     return vertex;

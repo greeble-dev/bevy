@@ -316,6 +316,8 @@ fn queue_custom_mesh_pipeline(
             };
 
             let (vertex_slab, index_slab) = mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
+            let morph_target_slab =
+                mesh_allocator.mesh_morph_target_slab(&mesh_instance.mesh_asset_id);
 
             // Specialize the key for the current mesh entity
             // For this example we only specialize based on the mesh topology
@@ -348,6 +350,7 @@ fn queue_custom_mesh_pipeline(
                     vertex_slab: vertex_slab.unwrap_or_default(),
                     index_slab,
                     lightmap_slab: None,
+                    morph_target_slab,
                 },
                 // For this example we can use the mesh asset id as the bin key,
                 // but you can use any asset_id as a key

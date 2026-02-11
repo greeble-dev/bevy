@@ -1,8 +1,10 @@
 pub mod allocator;
+pub mod morph;
+
 use crate::{
-    render_asset::{
-        AssetExtractionError, PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssets,
-    },
+    mesh::morph::RenderMorphTargetAllocator,
+    render_asset::{AssetExtractionError, PrepareAssetError, RenderAsset, RenderAssetPlugin},
+    renderer::{RenderDevice, RenderQueue},
     texture::GpuImage,
     RenderApp,
 };
@@ -36,6 +38,15 @@ impl Plugin for MeshRenderAssetPlugin {
 
         render_app.init_resource::<MeshVertexBufferLayouts>();
     }
+
+    fn finish(&self, app: &mut App) {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+
+        #[cfg(feature = "morph")]
+        render_app.init_resource::<RenderMorphTargetAllocator>();
+    }
 }
 
 /// The render world representation of a [`Mesh`].
@@ -43,10 +54,6 @@ impl Plugin for MeshRenderAssetPlugin {
 pub struct RenderMesh {
     /// The number of vertices in the mesh.
     pub vertex_count: u32,
-
-    /// Morph targets for the mesh, if present.
-    #[cfg(feature = "morph")]
-    pub morph_targets: Option<crate::render_resource::TextureView>,
 
     /// Information about the mesh data buffers, including whether the mesh uses
     /// indices or not.
@@ -75,6 +82,11 @@ impl RenderMesh {
     pub fn indexed(&self) -> bool {
         matches!(self.buffer_info, RenderMeshBufferInfo::Indexed { .. })
     }
+
+    #[inline]
+    pub fn has_morph_targets(&self) -> bool {
+        self.key_bits.contains(BaseMeshPipelineKey::MORPH_TARGETS)
+    }
 }
 
 /// The index/vertex buffer info of a [`RenderMesh`].
@@ -90,8 +102,10 @@ pub enum RenderMeshBufferInfo {
 impl RenderAsset for RenderMesh {
     type SourceAsset = Mesh;
     type Param = (
-        SRes<RenderAssets<GpuImage>>,
+        SRes<RenderDevice>,
+        SRes<RenderQueue>,
         SResMut<MeshVertexBufferLayouts>,
+        SResMut<RenderMorphTargetAllocator>,
     );
 
     #[inline]
@@ -123,21 +137,10 @@ impl RenderAsset for RenderMesh {
     /// Converts the extracted mesh into a [`RenderMesh`].
     fn prepare_asset(
         mesh: Self::SourceAsset,
-        _: AssetId<Self::SourceAsset>,
-        (_images, mesh_vertex_buffer_layouts): &mut SystemParamItem<Self::Param>,
+        mesh_id: AssetId<Self::SourceAsset>,
+        (render_device, render_queue, mesh_vertex_buffer_layouts, render_morph_targets_allocator): &mut SystemParamItem<Self::Param>,
         _: Option<&Self>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
-        #[cfg(feature = "morph")]
-        let morph_targets = match mesh.morph_targets() {
-            Some(mt) => {
-                let Some(target_image) = _images.get(mt) else {
-                    return Err(PrepareAssetError::RetryNextUpdate(mesh));
-                };
-                Some(target_image.texture_view.clone())
-            }
-            None => None,
-        };
-
         let buffer_info = match mesh.indices() {
             Some(indices) => RenderMeshBufferInfo::Indexed {
                 count: indices.len() as u32,
@@ -157,13 +160,31 @@ impl RenderAsset for RenderMesh {
             key_bits
         };
 
+        // Place the morph displacements in a slab if necessary.
+        #[cfg(feature = "morph")]
+        if let Some(morph_targets) = mesh.morph_targets() {
+            render_morph_targets_allocator.allocate(
+                render_device,
+                render_queue,
+                mesh_id,
+                morph_targets,
+                mesh.count_vertices(),
+            );
+        }
+
         Ok(RenderMesh {
             vertex_count: mesh.count_vertices() as u32,
             buffer_info,
             key_bits,
             layout: mesh_vertex_buffer_layout,
-            #[cfg(feature = "morph")]
-            morph_targets,
         })
+    }
+
+    fn unload_asset(
+        mesh_id: AssetId<Self::SourceAsset>,
+        (_, _, _, render_morph_targets_allocator): &mut SystemParamItem<Self::Param>,
+    ) {
+        // Free the morph targets from the slab if necessary.
+        render_morph_targets_allocator.free(mesh_id);
     }
 }

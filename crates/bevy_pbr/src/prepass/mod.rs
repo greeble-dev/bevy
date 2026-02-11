@@ -1197,6 +1197,8 @@ pub fn queue_prepass_material_meshes(
                 continue;
             };
             let (vertex_slab, index_slab) = mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
+            let morph_target_slab =
+                mesh_allocator.mesh_morph_target_slab(&mesh_instance.mesh_asset_id);
 
             let deferred = match material.properties.render_method {
                 OpaqueRendererMethod::Forward => false,
@@ -1214,6 +1216,7 @@ pub fn queue_prepass_material_meshes(
                                 material_bind_group_index: Some(material.binding.group.0),
                                 vertex_slab: vertex_slab.unwrap_or_default(),
                                 index_slab,
+                                morph_target_slab,
                             },
                             OpaqueNoLightmap3dBinKey {
                                 asset_id: mesh_instance.mesh_asset_id.into(),
@@ -1243,6 +1246,7 @@ pub fn queue_prepass_material_meshes(
                                 material_bind_group_index,
                                 vertex_slab: vertex_slab.unwrap_or_default(),
                                 index_slab,
+                                morph_target_slab,
                             },
                             OpaqueNoLightmap3dBinKey {
                                 asset_id: mesh_instance.mesh_asset_id.into(),
@@ -1266,6 +1270,7 @@ pub fn queue_prepass_material_meshes(
                                 material_bind_group_index: Some(material.binding.group.0),
                                 vertex_slab: vertex_slab.unwrap_or_default(),
                                 index_slab,
+                                morph_target_slab,
                             },
                             OpaqueNoLightmap3dBinKey {
                                 asset_id: mesh_instance.mesh_asset_id.into(),
@@ -1286,6 +1291,7 @@ pub fn queue_prepass_material_meshes(
                                 material_bind_group_index: Some(material.binding.group.0),
                                 vertex_slab: vertex_slab.unwrap_or_default(),
                                 index_slab,
+                                morph_target_slab,
                             },
                             OpaqueNoLightmap3dBinKey {
                                 asset_id: mesh_instance.mesh_asset_id.into(),

@@ -1243,6 +1243,8 @@ pub fn queue_material_meshes(
 
             // Fetch the slabs that this mesh resides in.
             let (vertex_slab, index_slab) = mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
+            let morph_target_slab =
+                mesh_allocator.mesh_morph_target_slab(&mesh_instance.mesh_asset_id);
 
             match material.properties.render_phase_type {
                 RenderPhaseType::Transmissive => {
@@ -1285,6 +1287,7 @@ pub fn queue_material_meshes(
                         material_bind_group_index: Some(material.binding.group.0),
                         vertex_slab: vertex_slab.unwrap_or_default(),
                         index_slab,
+                        morph_target_slab,
                         lightmap_slab: mesh_instance.shared.lightmap_slab_index.map(|index| *index),
                     };
                     let bin_key = Opaque3dBinKey {
@@ -1316,6 +1319,7 @@ pub fn queue_material_meshes(
                         material_bind_group_index: Some(material.binding.group.0),
                         vertex_slab: vertex_slab.unwrap_or_default(),
                         index_slab,
+                        morph_target_slab,
                     };
                     let bin_key = OpaqueNoLightmap3dBinKey {
                         asset_id: mesh_instance.mesh_asset_id.into(),

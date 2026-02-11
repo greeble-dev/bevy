@@ -208,6 +208,10 @@ pub struct Opaque3dBatchSetKey {
     /// Index of the slab that the lightmap resides in, if a lightmap is
     /// present.
     pub lightmap_slab: Option<NonMaxU32>,
+
+    /// Index of the slab that the morph target displacements reside in, if
+    /// morph targets are present.
+    pub morph_target_slab: Option<SlabId>,
 }
 
 impl PhaseItemBatchSetKey for Opaque3dBatchSetKey {

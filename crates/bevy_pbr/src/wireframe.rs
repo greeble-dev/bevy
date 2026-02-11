@@ -262,6 +262,12 @@ pub struct Wireframe3dBatchSetKey {
     ///
     /// For non-mesh items, you can safely fill this with `None`.
     pub index_slab: Option<SlabId>,
+
+    /// The ID of the slab that the morph target displacements reside in, if
+    /// morph targets are present.
+    ///
+    /// For non-mesh items, you can safely fill this with `None`.
+    pub morph_target_slab: Option<SlabId>,
 }
 
 impl PhaseItemBatchSetKey for Wireframe3dBatchSetKey {
@@ -878,6 +884,7 @@ fn queue_wireframes(
                 continue;
             };
             let (vertex_slab, index_slab) = mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
+            let morph_target_slab = mesh_allocator.mesh_morph_target_slab(&mesh_instance.mesh_asset_id);
             let bin_key = Wireframe3dBinKey {
                 asset_id: mesh_instance.mesh_asset_id.untyped(),
             };
@@ -887,6 +894,7 @@ fn queue_wireframes(
                 draw_function: draw_wireframe,
                 vertex_slab: vertex_slab.unwrap_or_default(),
                 index_slab,
+                morph_target_slab,
             };
             wireframe_phase.add(
                 batch_set_key,
