@@ -2,7 +2,7 @@
 
 use std::f32::consts::PI;
 
-use bevy::{color::palettes::css::WHITE, core_pipeline::Skybox, prelude::*};
+use bevy::{camera::Hdr, color::palettes::css::WHITE, light::Skybox, prelude::*};
 
 /// The camera rotation speed in radians per frame.
 const ROTATION_SPEED: f32 = 0.005;
@@ -59,7 +59,7 @@ fn main() {
         }))
         .init_resource::<AppAssets>()
         .init_resource::<AppStatus>()
-        .insert_resource(AmbientLight {
+        .insert_resource(GlobalAmbientLight {
             color: Color::BLACK,
             brightness: 0.0,
             ..default()
@@ -82,10 +82,7 @@ fn setup(
     // Spawns a camera.
     commands.spawn((
         Transform::from_xyz(-2.0, 0.0, 3.5).looking_at(Vec3::ZERO, Vec3::Y),
-        Camera {
-            hdr: true,
-            ..default()
-        },
+        Hdr,
         Camera3d::default(),
         Skybox {
             image: asset_server.load("environment_maps/pisa_specular_rgb9e5_zstd.ktx2"),
@@ -126,8 +123,8 @@ fn setup(
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
+            bottom: px(12),
+            left: px(12),
             ..default()
         },
         app_status.create_text(),
@@ -156,7 +153,7 @@ fn shift_hue(
     app_status.hue += HUE_SHIFT_SPEED;
 
     for material_handle in objects_with_materials.iter() {
-        let Some(material) = standard_materials.get_mut(material_handle) else {
+        let Some(mut material) = standard_materials.get_mut(material_handle) else {
             continue;
         };
         material.specular_tint = Color::hsva(app_status.hue, 1.0, 1.0, 1.0);
@@ -195,7 +192,7 @@ fn toggle_specular_map(
     };
 
     for material_handle in objects_with_materials.iter() {
-        let Some(material) = standard_materials.get_mut(material_handle) else {
+        let Some(mut material) = standard_materials.get_mut(material_handle) else {
             continue;
         };
 

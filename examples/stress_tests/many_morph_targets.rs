@@ -6,16 +6,16 @@ use bevy::{
     prelude::*,
     scene::SceneInstanceReady,
     window::{PresentMode, WindowResolution},
-    winit::{UpdateMode, WinitSettings},
+    winit::WinitSettings,
 };
 use core::{f32::consts::PI, str::FromStr};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-/// Controls the weight values.
+/// Controls the morph weights.
 #[derive(PartialEq)]
 enum ArgWeights {
-    /// Weights will change over time and be a mix of zero and non-zero.
+    /// Weights will be animated by an `AnimationClip`.
     Animated,
 
     /// Set all the weights to one.
@@ -46,8 +46,8 @@ impl FromStr for ArgWeights {
 /// Controls the camera.
 #[derive(PartialEq)]
 enum ArgCamera {
-    /// Keep all the meshes in view and at a reasonable size.
-    Default,
+    /// Fill the screen with meshes.
+    Near,
 
     /// Zoom far out. This is used to reduce pixel shader costs and so emphasize
     /// vertex shader costs.
@@ -59,9 +59,9 @@ impl FromStr for ArgCamera {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "default" => Ok(Self::Default),
+            "near" => Ok(Self::Near),
             "far" => Ok(Self::Far),
-            _ => Err("must be 'default' or 'far'".into()),
+            _ => Err("must be 'near' or 'far'".into()),
         }
     }
 }
@@ -69,16 +69,16 @@ impl FromStr for ArgCamera {
 /// `many_morph_targets` stress test
 #[derive(FromArgs, Resource)]
 struct Args {
-    /// number of meshes
+    /// number of meshes - default = 1024
     #[argh(option, default = "1024")]
     count: usize,
 
-    /// options: 'animated', 'one', 'zero', 'tiny'
+    /// options: 'animated', 'one', 'zero', 'tiny' - default = 'animated'
     #[argh(option, default = "ArgWeights::Animated")]
     weights: ArgWeights,
 
-    /// options: 'default', 'far'
-    #[argh(option, default = "ArgCamera::Default")]
+    /// options: 'near', 'far' - default = 'near'
+    #[argh(option, default = "ArgCamera::Near")]
     camera: ArgCamera,
 }
 
@@ -95,20 +95,16 @@ fn main() {
                 primary_window: Some(Window {
                     title: "Many Morph Targets".to_string(),
                     present_mode: PresentMode::AutoNoVsync,
-                    resolution: WindowResolution::new(1920.0, 1080.0)
-                        .with_scale_factor_override(1.0),
-                    ..default()
+                    resolution: WindowResolution::new(1920, 1080).with_scale_factor_override(1.0),
+                    ..Default::default()
                 }),
                 ..Default::default()
             }),
             FrameTimeDiagnosticsPlugin::default(),
             LogDiagnosticsPlugin::default(),
         ))
-        .insert_resource(WinitSettings {
-            focused_mode: UpdateMode::Continuous,
-            unfocused_mode: UpdateMode::Continuous,
-        })
-        .insert_resource(AmbientLight {
+        .insert_resource(WinitSettings::continuous())
+        .insert_resource(GlobalAmbientLight {
             brightness: 1000.0,
             ..Default::default()
         })
@@ -173,7 +169,7 @@ fn setup(
         // Randomly vary the animation speed so that the number of morph targets
         // active on each frame is more likely to be stable.
 
-        let animation_speed = rng.r#gen::<f32>() + 0.5;
+        let animation_speed = rng.random_range(0.5..=1.5);
 
         commands
             .spawn((
@@ -192,7 +188,7 @@ fn setup(
 
     let camera_distance = (x_dim as f32)
         * match args.camera {
-            ArgCamera::Default => 4.0,
+            ArgCamera::Near => 4.0,
             ArgCamera::Far => 200.0,
         };
 
@@ -203,19 +199,17 @@ fn setup(
 }
 
 fn play_animation(
-    trigger: Trigger<SceneInstanceReady>,
+    trigger: On<SceneInstanceReady>,
     mut commands: Commands,
     args: Res<Args>,
     children: Query<&Children>,
     animations_to_play: Query<&AnimationToPlay>,
     mut players: Query<&mut AnimationPlayer>,
 ) {
-    if args.weights != ArgWeights::Animated {
-        return;
-    }
-
-    if let Ok(animation_to_play) = animations_to_play.get(trigger.target()) {
-        for child in children.iter_descendants(trigger.target()) {
+    if args.weights == ArgWeights::Animated
+        && let Ok(animation_to_play) = animations_to_play.get(trigger.entity)
+    {
+        for child in children.iter_descendants(trigger.entity) {
             if let Ok(mut player) = players.get_mut(child) {
                 commands
                     .entity(child)
@@ -231,20 +225,18 @@ fn play_animation(
 }
 
 fn set_weights(
-    trigger: Trigger<SceneInstanceReady>,
+    trigger: On<SceneInstanceReady>,
     args: Res<Args>,
     children: Query<&Children>,
     mut weight_components: Query<&mut MorphWeights>,
 ) {
-    let weight_value = match args.weights {
+    if let Some(weight_value) = match args.weights {
         ArgWeights::One => Some(1.0),
         ArgWeights::Zero => Some(0.0),
         ArgWeights::Tiny => Some(0.00001),
         _ => None,
-    };
-
-    if let Some(weight_value) = weight_value {
-        for child in children.iter_descendants(trigger.target()) {
+    } {
+        for child in children.iter_descendants(trigger.entity) {
             if let Ok(mut weight_component) = weight_components.get_mut(child) {
                 weight_component.weights_mut().fill(weight_value);
             }

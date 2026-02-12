@@ -1,17 +1,15 @@
 use crate::blit::{BlitPipeline, BlitPipelineKey};
 use bevy_app::prelude::*;
+use bevy_camera::CameraOutputMode;
 use bevy_ecs::prelude::*;
-use bevy_platform_support::collections::HashSet;
+use bevy_platform::collections::HashSet;
 use bevy_render::{
-    camera::{CameraOutputMode, ExtractedCamera},
-    render_resource::*,
-    view::ViewTarget,
-    Render, RenderApp, RenderSet,
+    camera::ExtractedCamera, render_resource::*, view::ViewTarget, Render, RenderApp, RenderSystems,
 };
 
 mod node;
 
-pub use node::UpscalingNode;
+pub use node::upscaling;
 
 pub struct UpscalingPlugin;
 
@@ -26,7 +24,7 @@ impl Plugin for UpscalingPlugin {
                 // and aversion to extensive and intrusive system ordering.
                 // See https://github.com/bevyengine/bevy/issues/14770 for more context.
                 prepare_view_upscaling_pipelines
-                    .in_set(RenderSet::Prepare)
+                    .in_set(RenderSystems::Prepare)
                     .ambiguous_with_all(),
             );
         }
@@ -74,7 +72,7 @@ fn prepare_view_upscaling_pipelines(
         };
 
         let key = BlitPipelineKey {
-            texture_format: view_target.out_texture_format(),
+            texture_format: view_target.out_texture_view_format(),
             blend_state,
             samples: 1,
         };

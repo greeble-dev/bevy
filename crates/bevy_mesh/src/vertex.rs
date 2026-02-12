@@ -2,13 +2,17 @@ use alloc::sync::Arc;
 use bevy_derive::EnumVariantMeta;
 use bevy_ecs::resource::Resource;
 use bevy_math::Vec3;
-use bevy_platform_support::collections::HashSet;
-use bytemuck::cast_slice;
+#[cfg(feature = "serialize")]
+use bevy_platform::collections::HashMap;
+use bevy_platform::collections::HashSet;
+use bytemuck::{bytes_of, cast_slice};
 use core::hash::{Hash, Hasher};
+#[cfg(feature = "serialize")]
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use wgpu_types::{BufferAddress, VertexAttribute, VertexFormat, VertexStepMode};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MeshVertexAttribute {
     /// The friendly name of the vertex attribute
     pub name: &'static str,
@@ -20,6 +24,37 @@ pub struct MeshVertexAttribute {
 
     /// The format of the vertex attribute.
     pub format: VertexFormat,
+}
+
+#[cfg(feature = "serialize")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SerializedMeshVertexAttribute {
+    pub(crate) name: String,
+    pub(crate) id: MeshVertexAttributeId,
+    pub(crate) format: VertexFormat,
+}
+
+#[cfg(feature = "serialize")]
+impl SerializedMeshVertexAttribute {
+    pub(crate) fn from_mesh_vertex_attribute(attribute: MeshVertexAttribute) -> Self {
+        Self {
+            name: attribute.name.to_string(),
+            id: attribute.id,
+            format: attribute.format,
+        }
+    }
+
+    pub(crate) fn try_into_mesh_vertex_attribute(
+        self,
+        possible_attributes: &HashMap<Box<str>, MeshVertexAttribute>,
+    ) -> Option<MeshVertexAttribute> {
+        let attr = possible_attributes.get(self.name.as_str())?;
+        if attr.id == self.id {
+            Some(*attr)
+        } else {
+            None
+        }
+    }
 }
 
 impl MeshVertexAttribute {
@@ -37,6 +72,7 @@ impl MeshVertexAttribute {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct MeshVertexAttributeId(u64);
 
 impl From<MeshVertexAttribute> for MeshVertexAttributeId {
@@ -132,10 +168,40 @@ impl VertexAttributeDescriptor {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MeshAttributeData {
     pub(crate) attribute: MeshVertexAttribute,
     pub(crate) values: VertexAttributeValues,
+}
+
+#[cfg(feature = "serialize")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SerializedMeshAttributeData {
+    pub(crate) attribute: SerializedMeshVertexAttribute,
+    pub(crate) values: VertexAttributeValues,
+}
+
+#[cfg(feature = "serialize")]
+impl SerializedMeshAttributeData {
+    pub(crate) fn from_mesh_attribute_data(data: MeshAttributeData) -> Self {
+        Self {
+            attribute: SerializedMeshVertexAttribute::from_mesh_vertex_attribute(data.attribute),
+            values: data.values,
+        }
+    }
+
+    pub(crate) fn try_into_mesh_attribute_data(
+        self,
+        possible_attributes: &HashMap<Box<str>, MeshVertexAttribute>,
+    ) -> Option<MeshAttributeData> {
+        let attribute = self
+            .attribute
+            .try_into_mesh_vertex_attribute(possible_attributes)?;
+        Some(MeshAttributeData {
+            attribute,
+            values: self.values,
+        })
+    }
 }
 
 /// Compute a vector whose direction is the normal of the triangle formed by
@@ -153,21 +219,22 @@ pub(crate) struct MeshAttributeData {
 /// the sum of these vectors which are then normalized, a constant multiple has
 /// no effect.
 #[inline]
-pub fn face_area_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
+pub fn triangle_area_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
     let (a, b, c) = (Vec3::from(a), Vec3::from(b), Vec3::from(c));
     (b - a).cross(c - a).into()
 }
 
 /// Compute the normal of a face made of three points: a, b, and c.
 #[inline]
-pub fn face_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
+pub fn triangle_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
     let (a, b, c) = (Vec3::from(a), Vec3::from(b), Vec3::from(c));
-    (b - a).cross(c - a).normalize().into()
+    (b - a).cross(c - a).normalize_or_zero().into()
 }
 
 /// Contains an array where each entry describes a property of a single vertex.
 /// Matches the [`VertexFormats`](VertexFormat).
-#[derive(Clone, Debug, EnumVariantMeta)]
+#[derive(Clone, Debug, EnumVariantMeta, PartialEq)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum VertexAttributeValues {
     Float32(Vec<f32>),
     Sint32(Vec<i32>),
@@ -200,6 +267,61 @@ pub enum VertexAttributeValues {
 }
 
 impl VertexAttributeValues {
+    /// Creates a new [`VertexAttributeValues`] with the storage for given [`VertexFormat`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the [`VertexFormat`] is not supported.
+    pub(crate) fn new(format: VertexFormat) -> Self {
+        match format {
+            VertexFormat::Uint8x2 => VertexAttributeValues::Uint8x2(Vec::new()),
+            VertexFormat::Uint8x4 => VertexAttributeValues::Uint8x4(Vec::new()),
+            VertexFormat::Sint8x2 => VertexAttributeValues::Sint8x2(Vec::new()),
+            VertexFormat::Sint8x4 => VertexAttributeValues::Sint8x4(Vec::new()),
+            VertexFormat::Unorm8x2 => VertexAttributeValues::Unorm8x2(Vec::new()),
+            VertexFormat::Unorm8x4 => VertexAttributeValues::Unorm8x4(Vec::new()),
+            VertexFormat::Snorm8x2 => VertexAttributeValues::Snorm8x2(Vec::new()),
+            VertexFormat::Snorm8x4 => VertexAttributeValues::Snorm8x4(Vec::new()),
+            VertexFormat::Uint16x2 => VertexAttributeValues::Uint16x2(Vec::new()),
+            VertexFormat::Uint16x4 => VertexAttributeValues::Uint16x4(Vec::new()),
+            VertexFormat::Sint16x2 => VertexAttributeValues::Sint16x2(Vec::new()),
+            VertexFormat::Sint16x4 => VertexAttributeValues::Sint16x4(Vec::new()),
+            VertexFormat::Unorm16x2 => VertexAttributeValues::Unorm16x2(Vec::new()),
+            VertexFormat::Unorm16x4 => VertexAttributeValues::Unorm16x4(Vec::new()),
+            VertexFormat::Snorm16x2 => VertexAttributeValues::Snorm16x2(Vec::new()),
+            VertexFormat::Snorm16x4 => VertexAttributeValues::Snorm16x4(Vec::new()),
+            VertexFormat::Float32 => VertexAttributeValues::Float32(Vec::new()),
+            VertexFormat::Float32x2 => VertexAttributeValues::Float32x2(Vec::new()),
+            VertexFormat::Float32x3 => VertexAttributeValues::Float32x3(Vec::new()),
+            VertexFormat::Float32x4 => VertexAttributeValues::Float32x4(Vec::new()),
+            VertexFormat::Uint32 => VertexAttributeValues::Uint32(Vec::new()),
+            VertexFormat::Uint32x2 => VertexAttributeValues::Uint32x2(Vec::new()),
+            VertexFormat::Uint32x3 => VertexAttributeValues::Uint32x3(Vec::new()),
+            VertexFormat::Uint32x4 => VertexAttributeValues::Uint32x4(Vec::new()),
+            VertexFormat::Sint32 => VertexAttributeValues::Sint32(Vec::new()),
+            VertexFormat::Sint32x2 => VertexAttributeValues::Sint32x2(Vec::new()),
+            VertexFormat::Sint32x3 => VertexAttributeValues::Sint32x3(Vec::new()),
+            VertexFormat::Sint32x4 => VertexAttributeValues::Sint32x4(Vec::new()),
+            VertexFormat::Uint8 => panic!("Uint8 is not supported"),
+            VertexFormat::Sint8 => panic!("Sint8 is not supported"),
+            VertexFormat::Snorm8 => panic!("Snorm8 is not supported"),
+            VertexFormat::Unorm8 => panic!("Unorm8 is not supported"),
+            VertexFormat::Uint16 => panic!("Uint16 is not supported"),
+            VertexFormat::Sint16 => panic!("Sint16 is not supported"),
+            VertexFormat::Snorm16 => panic!("Snorm16 is not supported"),
+            VertexFormat::Unorm16 => panic!("Unorm16 is not supported"),
+            VertexFormat::Float16 => panic!("Float16 is not supported"),
+            VertexFormat::Float16x2 => panic!("Float16x2 is not supported"),
+            VertexFormat::Float16x4 => panic!("Float16x4 is not supported"),
+            VertexFormat::Float64 => panic!("Float64 is not supported"),
+            VertexFormat::Float64x2 => panic!("Float64x2 is not supported"),
+            VertexFormat::Float64x3 => panic!("Float64x3 is not supported"),
+            VertexFormat::Float64x4 => panic!("Float64x4 is not supported"),
+            VertexFormat::Unorm8x4Bgra => panic!("Unorm8x4Bgra is not supported"),
+            VertexFormat::Unorm10_10_10_2 => panic!("Unorm10_10_10_2 is not supported"),
+        }
+    }
+
     /// Returns the number of vertices in this [`VertexAttributeValues`]. For a single
     /// mesh, all of the [`VertexAttributeValues`] must have the same length.
     #[expect(
@@ -289,6 +411,215 @@ impl VertexAttributeValues {
             VertexAttributeValues::Snorm8x4(values) => cast_slice(values),
             VertexAttributeValues::Uint8x4(values) => cast_slice(values),
             VertexAttributeValues::Unorm8x4(values) => cast_slice(values),
+        }
+    }
+
+    #[expect(
+        clippy::match_same_arms,
+        reason = "Although the `values` binding on some match arms may have matching types, each variant has different semantics; thus it's not guaranteed that they will use the same type forever."
+    )]
+    pub(crate) fn get_bytes_at(&self, i: usize) -> &[u8] {
+        match self {
+            VertexAttributeValues::Float32(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Sint32(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Uint32(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Float32x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Sint32x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Uint32x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Float32x3(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Sint32x3(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Uint32x3(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Float32x4(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Sint32x4(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Uint32x4(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Sint16x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Snorm16x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Uint16x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Unorm16x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Sint16x4(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Snorm16x4(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Uint16x4(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Unorm16x4(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Sint8x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Snorm8x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Uint8x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Unorm8x2(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Sint8x4(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Snorm8x4(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Uint8x4(values) => bytes_of(&values[i]),
+            VertexAttributeValues::Unorm8x4(values) => bytes_of(&values[i]),
+        }
+    }
+
+    #[expect(
+        clippy::match_same_arms,
+        reason = "Although the `values` binding on some match arms may have matching types, each variant has different semantics; thus it's not guaranteed that they will use the same type forever."
+    )]
+    pub(crate) fn push_from(&mut self, source: &VertexAttributeValues, i: usize) {
+        match (self, source) {
+            (VertexAttributeValues::Float32(this), VertexAttributeValues::Float32(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Float32(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Sint32(this), VertexAttributeValues::Sint32(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Sint32(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Uint32(this), VertexAttributeValues::Uint32(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Uint32(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Float32x2(this), VertexAttributeValues::Float32x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Float32x2(_), _) => {
+                panic!("Mismatched vertex attribute values")
+            }
+            (VertexAttributeValues::Sint32x2(this), VertexAttributeValues::Sint32x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Sint32x2(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Uint32x2(this), VertexAttributeValues::Uint32x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Uint32x2(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Float32x3(this), VertexAttributeValues::Float32x3(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Float32x3(_), _) => {
+                panic!("Mismatched vertex attribute values")
+            }
+            (VertexAttributeValues::Sint32x3(this), VertexAttributeValues::Sint32x3(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Sint32x3(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Uint32x3(this), VertexAttributeValues::Uint32x3(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Uint32x3(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Float32x4(this), VertexAttributeValues::Float32x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Float32x4(_), _) => {
+                panic!("Mismatched vertex attribute values")
+            }
+            (VertexAttributeValues::Sint32x4(this), VertexAttributeValues::Sint32x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Sint32x4(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Uint32x4(this), VertexAttributeValues::Uint32x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Uint32x4(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Sint16x2(this), VertexAttributeValues::Sint16x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Sint16x2(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Snorm16x2(this), VertexAttributeValues::Snorm16x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Snorm16x2(_), _) => {
+                panic!("Mismatched vertex attribute values")
+            }
+            (VertexAttributeValues::Uint16x2(this), VertexAttributeValues::Uint16x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Uint16x2(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Unorm16x2(this), VertexAttributeValues::Unorm16x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Unorm16x2(_), _) => {
+                panic!("Mismatched vertex attribute values")
+            }
+            (VertexAttributeValues::Sint16x4(this), VertexAttributeValues::Sint16x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Sint16x4(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Snorm16x4(this), VertexAttributeValues::Snorm16x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Snorm16x4(_), _) => {
+                panic!("Mismatched vertex attribute values")
+            }
+            (VertexAttributeValues::Uint16x4(this), VertexAttributeValues::Uint16x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Uint16x4(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Unorm16x4(this), VertexAttributeValues::Unorm16x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Unorm16x4(_), _) => {
+                panic!("Mismatched vertex attribute values")
+            }
+            (VertexAttributeValues::Sint8x2(this), VertexAttributeValues::Sint8x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Sint8x2(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Snorm8x2(this), VertexAttributeValues::Snorm8x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Snorm8x2(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Uint8x2(this), VertexAttributeValues::Uint8x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Uint8x2(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Unorm8x2(this), VertexAttributeValues::Unorm8x2(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Unorm8x2(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Sint8x4(this), VertexAttributeValues::Sint8x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Sint8x4(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Snorm8x4(this), VertexAttributeValues::Snorm8x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Snorm8x4(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Uint8x4(this), VertexAttributeValues::Uint8x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Uint8x4(_), _) => panic!("Mismatched vertex attribute values"),
+            (VertexAttributeValues::Unorm8x4(this), VertexAttributeValues::Unorm8x4(source)) => {
+                this.push(source[i]);
+            }
+            (VertexAttributeValues::Unorm8x4(_), _) => panic!("Mismatched vertex attribute values"),
+        }
+    }
+
+    #[expect(
+        clippy::match_same_arms,
+        reason = "Although the `values` binding on some match arms may have matching types, each variant has different semantics; thus it's not guaranteed that they will use the same type forever."
+    )]
+    pub(crate) fn shrink_to_fit(&mut self) {
+        match self {
+            VertexAttributeValues::Float32(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Sint32(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Uint32(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Float32x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Sint32x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Uint32x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Float32x3(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Sint32x3(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Uint32x3(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Float32x4(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Sint32x4(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Uint32x4(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Sint16x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Snorm16x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Uint16x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Unorm16x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Sint16x4(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Snorm16x4(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Uint16x4(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Unorm16x4(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Sint8x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Snorm8x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Uint8x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Unorm8x2(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Sint8x4(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Snorm8x4(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Uint8x4(v) => v.shrink_to_fit(),
+            VertexAttributeValues::Unorm8x4(v) => v.shrink_to_fit(),
         }
     }
 }

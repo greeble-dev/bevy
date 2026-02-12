@@ -13,18 +13,19 @@ use bevy_ecs::{
     world::{FromWorld, World},
 };
 use bevy_encase_derive::ShaderType;
+use bevy_log::{error, info};
 use bevy_math::UVec4;
-use bevy_platform_support::collections::{hash_map::Entry, HashMap, HashSet};
+use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
+use bevy_tasks::ComputeTaskPool;
 use bevy_utils::{default, TypeIdMap};
 use bytemuck::{Pod, Zeroable};
 use encase::{internal::WriteInto, ShaderSize};
 use indexmap::IndexMap;
 use nonmax::NonMaxU32;
-use tracing::error;
 use wgpu::{BindingResource, BufferUsages, DownlevelFlags, Features};
 
 use crate::{
-    experimental::occlusion_culling::OcclusionCulling,
+    occlusion_culling::OcclusionCulling,
     render_phase::{
         BinnedPhaseItem, BinnedRenderPhaseBatch, BinnedRenderPhaseBatchSet,
         BinnedRenderPhaseBatchSets, CachedRenderPipelinePhaseItem, PhaseItem,
@@ -33,10 +34,10 @@ use crate::{
         ViewSortedRenderPhases,
     },
     render_resource::{Buffer, GpuArrayBufferable, RawBufferVec, UninitBufferVec},
-    renderer::{RenderAdapter, RenderDevice, RenderQueue},
+    renderer::{RenderAdapter, RenderAdapterInfo, RenderDevice, RenderQueue, WgpuWrapper},
     sync_world::MainEntity,
     view::{ExtractedView, NoIndirectDrawing, RetainedViewEntity},
-    Render, RenderApp, RenderDebugFlags, RenderSet,
+    Render, RenderApp, RenderDebugFlags, RenderSystems,
 };
 
 use super::{BatchMeta, GetBatchData, GetFullBatchData};
@@ -60,11 +61,11 @@ impl Plugin for BatchingPlugin {
             ))
             .add_systems(
                 Render,
-                write_indirect_parameters_buffers.in_set(RenderSet::PrepareResourcesFlush),
+                write_indirect_parameters_buffers.in_set(RenderSystems::PrepareResourcesFlush),
             )
             .add_systems(
                 Render,
-                clear_indirect_parameters_buffers.in_set(RenderSet::ManageViews),
+                clear_indirect_parameters_buffers.in_set(RenderSystems::ManageViews),
             );
     }
 
@@ -110,6 +111,11 @@ impl GpuPreprocessingSupport {
                 GpuPreprocessingMode::PreprocessingOnly
             }
         }
+    }
+
+    /// Returns true if GPU culling is supported on this platform.
+    pub fn is_culling_supported(&self) -> bool {
+        self.max_supported_mode == GpuPreprocessingMode::Culling
     }
 }
 
@@ -387,6 +393,13 @@ where
 }
 
 /// The buffer of GPU preprocessing work items for a single view.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(
+        clippy::large_enum_variant,
+        reason = "See https://github.com/bevyengine/bevy/issues/19220"
+    )
+)]
 pub enum PreprocessWorkItemBuffers {
     /// The work items we use if we aren't using indirect drawing.
     ///
@@ -847,11 +860,6 @@ impl UntypedPhaseIndirectParametersBuffers {
     pub fn new(
         allow_copies_from_indirect_parameter_buffers: bool,
     ) -> UntypedPhaseIndirectParametersBuffers {
-        let mut indirect_parameter_buffer_usages = BufferUsages::STORAGE | BufferUsages::INDIRECT;
-        if allow_copies_from_indirect_parameter_buffers {
-            indirect_parameter_buffer_usages |= BufferUsages::COPY_SRC;
-        }
-
         UntypedPhaseIndirectParametersBuffers {
             non_indexed: MeshClassIndirectParametersBuffers::new(
                 allow_copies_from_indirect_parameter_buffers,
@@ -1088,33 +1096,47 @@ impl FromWorld for GpuPreprocessingSupport {
         let adapter = world.resource::<RenderAdapter>();
         let device = world.resource::<RenderDevice>();
 
-        // Filter some Qualcomm devices on Android as they crash when using GPU
-        // preprocessing.
-        // We filter out Adreno 730 and earlier GPUs (except 720, as it's newer
-        // than 730).
-        fn is_non_supported_android_device(adapter: &RenderAdapter) -> bool {
-            crate::get_adreno_model(adapter).is_some_and(|model| model != 720 && model <= 730)
+        // Filter Android drivers that are incompatible with GPU preprocessing:
+        // - We filter out Adreno 730 and earlier GPUs (except 720, as it's newer
+        //   than 730).
+        // - We filter out Mali GPUs with driver versions lower than 48.
+        fn is_non_supported_android_device(adapter_info: &RenderAdapterInfo) -> bool {
+            crate::get_adreno_model(adapter_info).is_some_and(|model| model != 720 && model <= 730)
+                || crate::get_mali_driver_version(adapter_info).is_some_and(|version| version < 48)
         }
 
-        let feature_support = device.features().contains(
-            Features::INDIRECT_FIRST_INSTANCE
-                | Features::MULTI_DRAW_INDIRECT
-                | Features::PUSH_CONSTANTS,
-        );
+        let culling_feature_support = device
+            .features()
+            .contains(Features::INDIRECT_FIRST_INSTANCE | Features::IMMEDIATES);
         // Depth downsampling for occlusion culling requires 12 textures
-        let limit_support = device.limits().max_storage_textures_per_shader_stage >= 12;
-        let downlevel_support = adapter.get_downlevel_capabilities().flags.contains(
-            DownlevelFlags::VERTEX_AND_INSTANCE_INDEX_RESPECTS_RESPECTIVE_FIRST_VALUE_IN_INDIRECT_DRAW
-        );
+        let limit_support = device.limits().max_storage_textures_per_shader_stage >= 12 &&
+            // Even if the adapter supports compute, we might be simulating a lack of
+            // compute via device limits (see `WgpuSettingsPriority::WebGL2` and
+            // `wgpu::Limits::downlevel_webgl2_defaults()`). This will have set all the
+            // `max_compute_*` limits to zero, so we arbitrarily pick one as a canary.
+            device.limits().max_compute_workgroup_storage_size != 0;
 
-        let max_supported_mode = if !feature_support
-            || device.limits().max_compute_workgroup_size_x == 0
-            || is_non_supported_android_device(adapter)
+        let downlevel_support = adapter
+            .get_downlevel_capabilities()
+            .flags
+            .contains(DownlevelFlags::COMPUTE_SHADERS);
+
+        let adapter_info = RenderAdapterInfo(WgpuWrapper::new(adapter.get_info()));
+
+        let max_supported_mode = if device.limits().max_compute_workgroup_size_x == 0
+            || is_non_supported_android_device(&adapter_info)
+            || adapter_info.backend == wgpu::Backend::Gl
         {
+            info!(
+                "GPU preprocessing is not supported on this device. \
+                Falling back to CPU preprocessing.",
+            );
             GpuPreprocessingMode::None
-        } else if !(feature_support && limit_support && downlevel_support) {
+        } else if !(culling_feature_support && limit_support && downlevel_support) {
+            info!("Some GPU preprocessing are limited on this device.");
             GpuPreprocessingMode::PreprocessingOnly
         } else {
+            info!("GPU preprocessing is fully supported on this device.");
             GpuPreprocessingMode::Culling
         };
 
@@ -1160,7 +1182,7 @@ where
     /// Returns the binding of the buffer that contains the per-instance data.
     ///
     /// This buffer needs to be filled in via a compute shader.
-    pub fn instance_data_binding(&self) -> Option<BindingResource> {
+    pub fn instance_data_binding(&self) -> Option<BindingResource<'_>> {
         self.data_buffer
             .buffer()
             .map(|buffer| buffer.as_entire_binding())
@@ -1991,56 +2013,74 @@ pub fn write_batched_instance_buffers<GFBD>(
         phase_instance_buffers,
     } = gpu_array_buffer.into_inner();
 
-    current_input_buffer
-        .buffer
-        .write_buffer(&render_device, &render_queue);
-    previous_input_buffer
-        .buffer
-        .write_buffer(&render_device, &render_queue);
+    let render_device = &*render_device;
+    let render_queue = &*render_queue;
 
-    for phase_instance_buffers in phase_instance_buffers.values_mut() {
-        let UntypedPhaseBatchedInstanceBuffers {
-            ref mut data_buffer,
-            ref mut work_item_buffers,
-            ref mut late_indexed_indirect_parameters_buffer,
-            ref mut late_non_indexed_indirect_parameters_buffer,
-        } = *phase_instance_buffers;
+    ComputeTaskPool::get().scope(|scope| {
+        scope.spawn(async {
+            let _span = bevy_log::info_span!("write_current_input_buffers").entered();
+            current_input_buffer
+                .buffer
+                .write_buffer(render_device, render_queue);
+        });
+        scope.spawn(async {
+            let _span = bevy_log::info_span!("write_previous_input_buffers").entered();
+            previous_input_buffer
+                .buffer
+                .write_buffer(render_device, render_queue);
+        });
 
-        data_buffer.write_buffer(&render_device);
-        late_indexed_indirect_parameters_buffer.write_buffer(&render_device, &render_queue);
-        late_non_indexed_indirect_parameters_buffer.write_buffer(&render_device, &render_queue);
+        for phase_instance_buffers in phase_instance_buffers.values_mut() {
+            let UntypedPhaseBatchedInstanceBuffers {
+                ref mut data_buffer,
+                ref mut work_item_buffers,
+                ref mut late_indexed_indirect_parameters_buffer,
+                ref mut late_non_indexed_indirect_parameters_buffer,
+            } = *phase_instance_buffers;
 
-        for phase_work_item_buffers in work_item_buffers.values_mut() {
-            match *phase_work_item_buffers {
-                PreprocessWorkItemBuffers::Direct(ref mut buffer_vec) => {
-                    buffer_vec.write_buffer(&render_device, &render_queue);
-                }
-                PreprocessWorkItemBuffers::Indirect {
-                    ref mut indexed,
-                    ref mut non_indexed,
-                    ref mut gpu_occlusion_culling,
-                } => {
-                    indexed.write_buffer(&render_device, &render_queue);
-                    non_indexed.write_buffer(&render_device, &render_queue);
+            scope.spawn(async {
+                let _span = bevy_log::info_span!("write_phase_instance_buffers").entered();
+                data_buffer.write_buffer(render_device);
+                late_indexed_indirect_parameters_buffer.write_buffer(render_device, render_queue);
+                late_non_indexed_indirect_parameters_buffer
+                    .write_buffer(render_device, render_queue);
+            });
 
-                    if let Some(GpuOcclusionCullingWorkItemBuffers {
-                        ref mut late_indexed,
-                        ref mut late_non_indexed,
-                        late_indirect_parameters_indexed_offset: _,
-                        late_indirect_parameters_non_indexed_offset: _,
-                    }) = *gpu_occlusion_culling
-                    {
-                        if !late_indexed.is_empty() {
-                            late_indexed.write_buffer(&render_device);
+            for phase_work_item_buffers in work_item_buffers.values_mut() {
+                scope.spawn(async {
+                    let _span = bevy_log::info_span!("write_work_item_buffers").entered();
+                    match *phase_work_item_buffers {
+                        PreprocessWorkItemBuffers::Direct(ref mut buffer_vec) => {
+                            buffer_vec.write_buffer(render_device, render_queue);
                         }
-                        if !late_non_indexed.is_empty() {
-                            late_non_indexed.write_buffer(&render_device);
+                        PreprocessWorkItemBuffers::Indirect {
+                            ref mut indexed,
+                            ref mut non_indexed,
+                            ref mut gpu_occlusion_culling,
+                        } => {
+                            indexed.write_buffer(render_device, render_queue);
+                            non_indexed.write_buffer(render_device, render_queue);
+
+                            if let Some(GpuOcclusionCullingWorkItemBuffers {
+                                ref mut late_indexed,
+                                ref mut late_non_indexed,
+                                late_indirect_parameters_indexed_offset: _,
+                                late_indirect_parameters_non_indexed_offset: _,
+                            }) = *gpu_occlusion_culling
+                            {
+                                if !late_indexed.is_empty() {
+                                    late_indexed.write_buffer(render_device);
+                                }
+                                if !late_non_indexed.is_empty() {
+                                    late_non_indexed.write_buffer(render_device);
+                                }
+                            }
                         }
                     }
-                }
+                });
             }
         }
-    }
+    });
 }
 
 pub fn clear_indirect_parameters_buffers(
@@ -2056,43 +2096,71 @@ pub fn write_indirect_parameters_buffers(
     render_queue: Res<RenderQueue>,
     mut indirect_parameters_buffers: ResMut<IndirectParametersBuffers>,
 ) {
-    for phase_indirect_parameters_buffers in indirect_parameters_buffers.values_mut() {
-        phase_indirect_parameters_buffers
-            .indexed
-            .data
-            .write_buffer(&render_device);
-        phase_indirect_parameters_buffers
-            .non_indexed
-            .data
-            .write_buffer(&render_device);
+    let render_device = &*render_device;
+    let render_queue = &*render_queue;
+    ComputeTaskPool::get().scope(|scope| {
+        for phase_indirect_parameters_buffers in indirect_parameters_buffers.values_mut() {
+            scope.spawn(async {
+                let _span = bevy_log::info_span!("indexed_data").entered();
+                phase_indirect_parameters_buffers
+                    .indexed
+                    .data
+                    .write_buffer(render_device);
+            });
+            scope.spawn(async {
+                let _span = bevy_log::info_span!("non_indexed_data").entered();
+                phase_indirect_parameters_buffers
+                    .non_indexed
+                    .data
+                    .write_buffer(render_device);
+            });
 
-        phase_indirect_parameters_buffers
-            .indexed
-            .cpu_metadata
-            .write_buffer(&render_device, &render_queue);
-        phase_indirect_parameters_buffers
-            .non_indexed
-            .cpu_metadata
-            .write_buffer(&render_device, &render_queue);
+            scope.spawn(async {
+                let _span = bevy_log::info_span!("indexed_cpu_metadata").entered();
+                phase_indirect_parameters_buffers
+                    .indexed
+                    .cpu_metadata
+                    .write_buffer(render_device, render_queue);
+            });
+            scope.spawn(async {
+                let _span = bevy_log::info_span!("non_indexed_cpu_metadata").entered();
+                phase_indirect_parameters_buffers
+                    .non_indexed
+                    .cpu_metadata
+                    .write_buffer(render_device, render_queue);
+            });
 
-        phase_indirect_parameters_buffers
-            .non_indexed
-            .gpu_metadata
-            .write_buffer(&render_device);
-        phase_indirect_parameters_buffers
-            .indexed
-            .gpu_metadata
-            .write_buffer(&render_device);
+            scope.spawn(async {
+                let _span = bevy_log::info_span!("non_indexed_gpu_metadata").entered();
+                phase_indirect_parameters_buffers
+                    .non_indexed
+                    .gpu_metadata
+                    .write_buffer(render_device);
+            });
+            scope.spawn(async {
+                let _span = bevy_log::info_span!("indexed_gpu_metadata").entered();
+                phase_indirect_parameters_buffers
+                    .indexed
+                    .gpu_metadata
+                    .write_buffer(render_device);
+            });
 
-        phase_indirect_parameters_buffers
-            .indexed
-            .batch_sets
-            .write_buffer(&render_device, &render_queue);
-        phase_indirect_parameters_buffers
-            .non_indexed
-            .batch_sets
-            .write_buffer(&render_device, &render_queue);
-    }
+            scope.spawn(async {
+                let _span = bevy_log::info_span!("indexed_batch_sets").entered();
+                phase_indirect_parameters_buffers
+                    .indexed
+                    .batch_sets
+                    .write_buffer(render_device, render_queue);
+            });
+            scope.spawn(async {
+                let _span = bevy_log::info_span!("non_indexed_batch_sets").entered();
+                phase_indirect_parameters_buffers
+                    .non_indexed
+                    .batch_sets
+                    .write_buffer(render_device, render_queue);
+            });
+        }
+    });
 }
 
 #[cfg(test)]

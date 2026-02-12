@@ -7,13 +7,14 @@ use crate::{AsAssetId, Asset, AssetId};
 use bevy_ecs::component::Components;
 use bevy_ecs::{
     archetype::Archetype,
-    component::{ComponentId, Tick},
+    change_detection::Tick,
+    component::ComponentId,
     prelude::{Entity, Resource, World},
     query::{FilteredAccess, QueryData, QueryFilter, ReadFetch, WorldQuery},
     storage::{Table, TableRow},
     world::unsafe_world_cell::UnsafeWorldCell,
 };
-use bevy_platform_support::collections::HashMap;
+use bevy_platform::collections::HashMap;
 use core::marker::PhantomData;
 use disqualified::ShortName;
 use tracing::error;
@@ -22,10 +23,10 @@ use tracing::error;
 /// the [`AssetChanged`] filter to determine if an asset has changed since the last time
 /// a query ran.
 ///
-/// This resource is automatically managed by the [`AssetEvents`](crate::AssetEvents) schedule and
-/// should not be exposed to the user in order to maintain safety guarantees. Any additional uses of
-/// this resource should be carefully audited to ensure that they do not introduce any safety
-/// issues.
+/// This resource is automatically managed by the [`AssetEventSystems`](crate::AssetEventSystems)
+/// system set and should not be exposed to the user in order to maintain safety guarantees.
+/// Any additional uses of this resource should be carefully audited to ensure that they do not
+/// introduce any safety issues.
 #[derive(Resource)]
 pub(crate) struct AssetChanges<A: Asset> {
     change_ticks: HashMap<AssetId<A>, Tick>,
@@ -102,14 +103,13 @@ impl<'w, A: AsAssetId> AssetChangeCheck<'w, A> {
 ///
 /// # Quirks
 ///
-/// - Asset changes are registered in the [`AssetEvents`] schedule.
+/// - Asset changes are registered in the [`AssetEventSystems`] system set.
 /// - Removed assets are not detected.
 ///
-/// The list of changed assets only gets updated in the
-/// [`AssetEvents`] schedule which runs in `Last`. Therefore, `AssetChanged`
-/// will only pick up asset changes in schedules following `AssetEvents` or the
-/// next frame. Consider adding the system in the `Last` schedule after [`AssetEvents`] if you need
-/// to react without frame delay to asset changes.
+/// The list of changed assets only gets updated in the [`AssetEventSystems`] system set,
+/// which runs in `PostUpdate`. Therefore, `AssetChanged` will only pick up asset changes in schedules
+/// following [`AssetEventSystems`] or the next frame. Consider adding the system in the `Last` schedule
+/// after [`AssetEventSystems`] if you need to react without frame delay to asset changes.
 ///
 /// # Performance
 ///
@@ -120,7 +120,7 @@ impl<'w, A: AsAssetId> AssetChangeCheck<'w, A> {
 ///
 /// If no `A` asset updated since the last time the system ran, then no lookups occur.
 ///
-/// [`AssetEvents`]: crate::AssetEvents
+/// [`AssetEventSystems`]: crate::AssetEventSystems
 /// [`Assets<Mesh>::get_mut`]: crate::Assets::get_mut
 pub struct AssetChanged<A: AsAssetId>(PhantomData<A>);
 
@@ -149,7 +149,7 @@ pub struct AssetChangedState<A: AsAssetId> {
 }
 
 #[expect(unsafe_code, reason = "WorldQuery is an unsafe trait.")]
-/// SAFETY: `ROQueryFetch<Self>` is the same as `QueryFetch<Self>`
+// SAFETY: `ROQueryFetch<Self>` is the same as `QueryFetch<Self>`
 unsafe impl<A: AsAssetId> WorldQuery for AssetChanged<A> {
     type Fetch<'w> = AssetChangedFetch<'w, A>;
 
@@ -159,15 +159,18 @@ unsafe impl<A: AsAssetId> WorldQuery for AssetChanged<A> {
         fetch
     }
 
-    unsafe fn init_fetch<'w>(
+    unsafe fn init_fetch<'w, 's>(
         world: UnsafeWorldCell<'w>,
-        state: &Self::State,
+        state: &'s Self::State,
         last_run: Tick,
         this_run: Tick,
     ) -> Self::Fetch<'w> {
         // SAFETY:
-        // - `AssetChanges` is private and only accessed mutably in the `AssetEvents` schedule
-        // - `resource_id` was obtained from the type ID of `AssetChanges<A::Asset>`.
+        // - `state.resource_id` was obtained from `world.init_resource::<AssetChanges<A::Asset>>()`,
+        //   so the untyped pointer returned by `get_resource_by_id` can safely be dereferenced into that type.
+        // - `update_component_access` declares a read on `state.resource_id`, so it is safe to
+        //   read that resource here (see trait-level safety comments on `WorldQuery`, regarding
+        //   readonly resource access in `init_fetch`)
         let Some(changes) = (unsafe {
             world
                 .get_resource_by_id(state.resource_id)
@@ -202,9 +205,9 @@ unsafe impl<A: AsAssetId> WorldQuery for AssetChanged<A> {
 
     const IS_DENSE: bool = <&A>::IS_DENSE;
 
-    unsafe fn set_archetype<'w>(
+    unsafe fn set_archetype<'w, 's>(
         fetch: &mut Self::Fetch<'w>,
-        state: &Self::State,
+        state: &'s Self::State,
         archetype: &'w Archetype,
         table: &'w Table,
     ) {
@@ -216,7 +219,11 @@ unsafe impl<A: AsAssetId> WorldQuery for AssetChanged<A> {
         }
     }
 
-    unsafe fn set_table<'w>(fetch: &mut Self::Fetch<'w>, state: &Self::State, table: &'w Table) {
+    unsafe fn set_table<'w, 's>(
+        fetch: &mut Self::Fetch<'w>,
+        state: &Self::State,
+        table: &'w Table,
+    ) {
         if let Some(inner) = &mut fetch.inner {
             // SAFETY: We delegate to the inner `set_table` for `A`
             unsafe {
@@ -226,7 +233,7 @@ unsafe impl<A: AsAssetId> WorldQuery for AssetChanged<A> {
     }
 
     #[inline]
-    fn update_component_access(state: &Self::State, access: &mut FilteredAccess<ComponentId>) {
+    fn update_component_access(state: &Self::State, access: &mut FilteredAccess) {
         <&A>::update_component_access(&state.asset_id, access);
         access.add_resource_read(state.resource_id);
     }
@@ -260,12 +267,13 @@ unsafe impl<A: AsAssetId> WorldQuery for AssetChanged<A> {
 }
 
 #[expect(unsafe_code, reason = "QueryFilter is an unsafe trait.")]
-/// SAFETY: read-only access
+// SAFETY: read-only access
 unsafe impl<A: AsAssetId> QueryFilter for AssetChanged<A> {
     const IS_ARCHETYPAL: bool = false;
 
     #[inline]
     unsafe fn filter_fetch(
+        state: &Self::State,
         fetch: &mut Self::Fetch<'_>,
         entity: Entity,
         table_row: TableRow,
@@ -273,8 +281,8 @@ unsafe impl<A: AsAssetId> QueryFilter for AssetChanged<A> {
         fetch.inner.as_mut().is_some_and(|inner| {
             // SAFETY: We delegate to the inner `fetch` for `A`
             unsafe {
-                let handle = <&A>::fetch(inner, entity, table_row);
-                fetch.check.has_changed(handle)
+                let handle = <&A>::fetch(&state.asset_id, inner, entity, table_row);
+                handle.is_some_and(|handle| fetch.check.has_changed(handle))
             }
         })
     }
@@ -283,17 +291,18 @@ unsafe impl<A: AsAssetId> QueryFilter for AssetChanged<A> {
 #[cfg(test)]
 #[expect(clippy::print_stdout, reason = "Allowed in tests.")]
 mod tests {
-    use crate::{AssetEvents, AssetPlugin, Handle};
+    use crate::tests::create_app;
+    use crate::{AssetEventSystems, Handle};
     use alloc::{vec, vec::Vec};
     use core::num::NonZero;
     use std::println;
 
     use crate::{AssetApp, Assets};
-    use bevy_app::{App, AppExit, PostUpdate, Startup, TaskPoolPlugin, Update};
+    use bevy_app::{App, AppExit, PostUpdate, Startup, Update};
     use bevy_ecs::schedule::IntoScheduleConfigs;
     use bevy_ecs::{
         component::Component,
-        event::EventWriter,
+        message::MessageWriter,
         resource::Resource,
         system::{Commands, IntoSystem, Local, Query, Res, ResMut},
     };
@@ -316,10 +325,8 @@ mod tests {
     }
 
     fn run_app<Marker>(system: impl IntoSystem<(), (), Marker>) {
-        let mut app = App::new();
-        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
-            .init_asset::<MyAsset>()
-            .add_systems(Update, system);
+        let mut app = create_app().0;
+        app.init_asset::<MyAsset>().add_systems(Update, system);
         app.update();
     }
 
@@ -329,7 +336,7 @@ mod tests {
     fn handle_filter_pos_ok() {
         fn compatible_filter(
             _query: Query<&mut MyComponent, AssetChanged<MyComponent>>,
-            mut exit: EventWriter<AppExit>,
+            mut exit: MessageWriter<AppExit>,
         ) {
             exit.write(AppExit::Error(NonZero::<u8>::MIN));
         }
@@ -356,7 +363,7 @@ mod tests {
                 .iter()
                 .find_map(|(h, a)| (a.0 == i).then_some(h))
                 .unwrap();
-            let asset = assets.get_mut(id).unwrap();
+            let mut asset = assets.get_mut(id).unwrap();
             println!("setting new value for {}", asset.0);
             asset.1 = "new_value";
         };
@@ -400,13 +407,12 @@ mod tests {
 
     #[test]
     fn added() {
-        let mut app = App::new();
+        let mut app = create_app().0;
 
-        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
-            .init_asset::<MyAsset>()
+        app.init_asset::<MyAsset>()
             .insert_resource(Counter(vec![0, 0, 0, 0]))
             .add_systems(Update, add_some)
-            .add_systems(PostUpdate, count_update.after(AssetEvents));
+            .add_systems(PostUpdate, count_update.after(AssetEventSystems));
 
         // First run of the app, `add_systems(Startup…)` runs.
         app.update(); // run_count == 0
@@ -423,10 +429,9 @@ mod tests {
 
     #[test]
     fn changed() {
-        let mut app = App::new();
+        let mut app = create_app().0;
 
-        app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
-            .init_asset::<MyAsset>()
+        app.init_asset::<MyAsset>()
             .insert_resource(Counter(vec![0, 0]))
             .add_systems(
                 Startup,
@@ -441,7 +446,7 @@ mod tests {
                 },
             )
             .add_systems(Update, update_some)
-            .add_systems(PostUpdate, count_update.after(AssetEvents));
+            .add_systems(PostUpdate, count_update.after(AssetEventSystems));
 
         // First run of the app, `add_systems(Startup…)` runs.
         app.update(); // run_count == 0
