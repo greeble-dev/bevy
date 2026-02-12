@@ -97,17 +97,13 @@ impl MorphTargetImage {
     }
 }
 
-/// A component that controls the [morph targets] of one or more [`Mesh3d`](crate::Mesh3d)
-/// components.
+/// A component that controls the [morph targets] of one or more
+/// [`Mesh3d`](crate::Mesh3d) components.
 ///
-/// To find the weights of its morph targets, a `Mesh3d` component looks for a
-/// [`MeshMorphWeights`] component in the same entity. This points to another
-/// entity, which is expected to contain a `MorphWeights` component.
-///
-/// The intermediate `MeshMorphWeights` component allows multiple `Mesh3d`
-/// components to share one `MorphWeights` component.
-///
-/// The example shows a single mesh entity with a separate weights entity:
+/// `MorphWeights` works together with the [`MeshMorphWeights`] component. When
+/// a `MeshMorphWeights` is set to `MeshMorphWeights::Reference`, it references
+/// another entity that is expected to contain a `MorphWeights` component. This
+/// allows multiple meshes to share a single `MorphWeights` component.
 ///
 /// ```
 /// # use bevy_asset::prelude::*;
@@ -118,42 +114,18 @@ impl MorphTargetImage {
 /// # struct Mesh3d(Handle<Mesh>);
 /// fn setup(mut commands: Commands, mesh_handle: Handle<Mesh>) {
 ///     // Create the `MorphWeights` component.
-///     let weights_component = MorphWeights::new(
-///         vec![0.0, 0.5, 1.0],
-///         None,
-///     ).unwrap();
+///     let weights_component = MorphWeights::new(vec![0.0, 0.5, 1.0], None).unwrap();
 ///
-///     // Spawn an entity to contain the weights.
+///     // Spawn an entity that contains the `MorphWeights` component.
 ///     let weights_entity = commands.spawn(weights_component).id();
 ///
-///     // Spawn an entity with a mesh and a `MeshMorphWeights` component that
-///     // points to `weights_entity`.
+///     // Spawn another entity with a mesh and a `MeshMorphWeights` component
+///     // that references `weights_entity`.
 ///     let mesh_entity = commands.spawn((
 ///         Mesh3d(mesh_handle.clone()),
-///         MeshMorphWeights(weights_entity),
+///         MeshMorphWeights::Reference(weights_entity),
 ///     ));
 /// }
-/// ```
-///
-/// In the simplest case, all the components can be in one entity:
-///
-/// ```
-/// # use bevy_asset::prelude::*;
-/// # use bevy_ecs::prelude::*;
-/// # use bevy_mesh::Mesh;
-/// # use bevy_mesh::morph::*;
-/// # #[derive(Component)]
-/// # struct Mesh3d(Handle<Mesh>);
-/// # fn setup(mut commands: Commands, mesh_entity: Entity) {
-/// # let weights_component = MorphWeights::new(vec![0.0, 0.5, 1.0], None).unwrap();
-/// # let mesh_handle = Handle::<Mesh>::default();
-/// let weights_entity = commands.spawn(weights_component).id();
-///
-/// commands.entity(weights_entity).insert((
-///     Mesh3d(mesh_handle.clone()),
-///     MeshMorphWeights(weights_entity),
-/// ));
-/// # }
 /// ```
 ///
 /// [morph targets]: https://en.wikipedia.org/wiki/Morph_target_animation
@@ -190,25 +162,24 @@ impl MorphWeights {
     pub fn weights_mut(&mut self) -> &mut [f32] {
         &mut self.weights
     }
-    pub fn clear_weights(&mut self) {
-        self.weights.clear();
-    }
-    pub fn extend_weights(&mut self, weights: &[f32]) {
-        self.weights.extend(weights);
-    }
 }
 
-/// Controls the [morph targets] of a [`Mesh3d`](crate::Mesh3d) component by
-/// referencing an entity with a `MorphWeights` component.
-///
-/// See [`MorphWeights`] for examples.
+/// A component that controls the [morph targets] of a mesh. Must be assigned
+/// to an entity with a [`Mesh3d`](crate::Mesh3d) component.
 ///
 /// [morph targets]: https://en.wikipedia.org/wiki/Morph_target_animation
 #[derive(Reflect, Debug, Clone, Component)]
 #[reflect(Debug, Component, Clone)]
 pub enum MeshMorphWeights {
+    Value {
+        weights: Vec<f32>,
+    },
+    /// A reference to an entity containing a [`MorphWeights`] component. This
+    /// allows a single `MorphWeights` component to control the morph targets
+    /// of multiple meshes.
+    ///
+    /// See [`MorphWeights`] for an example.
     Reference(#[entities] Entity),
-    Value(Vec<f32>),
 }
 
 /// Attributes **differences** used for morph targets.

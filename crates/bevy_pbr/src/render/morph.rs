@@ -130,7 +130,7 @@ pub fn extract_morphs(
             MeshMorphWeights::Reference(entity) => {
                 weights_query.get(*entity).map(MorphWeights::weights)
             }
-            MeshMorphWeights::Value(value) => Ok(value.as_slice()),
+            MeshMorphWeights::Value { weights } => Ok(weights.as_slice()),
         }) else {
             continue;
         };
