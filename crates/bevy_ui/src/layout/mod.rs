@@ -1,8 +1,8 @@
 use crate::{
     experimental::{UiChildren, UiRootNodes},
     ui_transform::{UiGlobalTransform, UiTransform},
-    BorderRadius, ComputedNode, ComputedNodeTarget, ContentSize, Display, LayoutConfig, Node,
-    Outline, OverflowAxis, ScrollPosition,
+    ComputedNode, ComputedUiRenderTargetInfo, ContentSize, Display, IgnoreScroll, LayoutConfig,
+    Node, Outline, OverflowAxis, ScrollPosition,
 };
 use bevy_ecs::{
     change_detection::{DetectChanges, DetectChangesMut},
@@ -21,11 +21,11 @@ use ui_surface::UiSurface;
 
 use bevy_text::ComputedTextBlock;
 
-use bevy_text::CosmicFontSystem;
+use bevy_text::FontCx;
 
 mod convert;
 pub mod debug;
-pub(crate) mod ui_surface;
+pub mod ui_surface;
 
 pub struct LayoutContext {
     pub scale_factor: f32,
@@ -37,8 +37,9 @@ impl LayoutContext {
         scale_factor: 1.0,
         physical_size: Vec2::ZERO,
     };
-    /// create new a [`LayoutContext`] from the window's physical size and scale factor
-    fn new(scale_factor: f32, physical_size: Vec2) -> Self {
+    /// Create a new [`LayoutContext`] from the window's physical size and scale factor
+    #[inline]
+    const fn new(scale_factor: f32, physical_size: Vec2) -> Self {
         Self {
             scale_factor,
             physical_size,
@@ -65,7 +66,7 @@ pub enum LayoutError {
     #[error("Invalid hierarchy")]
     InvalidHierarchy,
     #[error("Taffy error: {0}")]
-    TaffyError(taffy::TaffyError),
+    TaffyError(taffy::tree::TaffyError),
 }
 
 /// Updates the UI's layout tree, computes the new layout geometry and then updates the sizes and transforms of all the UI nodes.
@@ -77,7 +78,7 @@ pub fn ui_layout_system(
         Entity,
         Ref<Node>,
         Option<&mut ContentSize>,
-        Ref<ComputedNodeTarget>,
+        Ref<ComputedUiRenderTargetInfo>,
     )>,
     added_node_query: Query<(), Added<Node>>,
     mut node_update_query: Query<(
@@ -86,12 +87,12 @@ pub fn ui_layout_system(
         &mut UiGlobalTransform,
         &Node,
         Option<&LayoutConfig>,
-        Option<&BorderRadius>,
         Option<&Outline>,
         Option<&ScrollPosition>,
+        Option<&IgnoreScroll>,
     )>,
     mut buffer_query: Query<&mut ComputedTextBlock>,
-    mut font_system: ResMut<CosmicFontSystem>,
+    mut font_system: ResMut<FontCx>,
     mut removed_children: RemovedComponents<Children>,
     mut removed_content_sizes: RemovedComponents<ContentSize>,
     mut removed_nodes: RemovedComponents<Node>,
@@ -197,9 +198,9 @@ pub fn ui_layout_system(
             &mut UiGlobalTransform,
             &Node,
             Option<&LayoutConfig>,
-            Option<&BorderRadius>,
             Option<&Outline>,
             Option<&ScrollPosition>,
+            Option<&IgnoreScroll>,
         )>,
         ui_children: &UiChildren,
         inverse_target_scale_factor: f32,
@@ -212,9 +213,9 @@ pub fn ui_layout_system(
             mut global_transform,
             style,
             maybe_layout_config,
-            maybe_border_radius,
             maybe_outline,
             maybe_scroll_position,
+            maybe_scroll_sticky,
         )) = node_update_query.get_mut(entity)
         {
             let use_rounding = maybe_layout_config
@@ -230,9 +231,14 @@ pub fn ui_layout_system(
             // Taffy layout position of the top-left corner of the node, relative to its parent.
             let layout_location = Vec2::new(layout.location.x, layout.location.y);
 
+            // If IgnoreScroll is set, parent scroll position is ignored along the specified axes.
+            let effective_parent_scroll = maybe_scroll_sticky
+                .map(|scroll_sticky| parent_scroll_position * Vec2::from(!scroll_sticky.0))
+                .unwrap_or(parent_scroll_position);
+
             // The position of the center of the node relative to its top-left corner.
             let local_center =
-                layout_location - parent_scroll_position + 0.5 * (layout_size - parent_size);
+                layout_location - effective_parent_scroll + 0.5 * (layout_size - parent_size);
 
             // only trigger change detection when the new values are different
             if node.size != layout_size
@@ -248,18 +254,19 @@ pub fn ui_layout_system(
             node.bypass_change_detection().content_size = content_size;
 
             let taffy_rect_to_border_rect = |rect: taffy::Rect<f32>| BorderRect {
-                left: rect.left,
-                right: rect.right,
-                top: rect.top,
-                bottom: rect.bottom,
+                min_inset: Vec2::new(rect.left, rect.top),
+                max_inset: Vec2::new(rect.right, rect.bottom),
             };
 
             node.bypass_change_detection().border = taffy_rect_to_border_rect(layout.border);
             node.bypass_change_detection().padding = taffy_rect_to_border_rect(layout.padding);
 
-            // Computer the node's new global transform
-            let mut local_transform =
-                transform.compute_affine(inverse_target_scale_factor, layout_size, target_size);
+            // Compute the node's new global transform
+            let mut local_transform = transform.compute_affine(
+                inverse_target_scale_factor.recip(),
+                layout_size,
+                target_size,
+            );
             local_transform.translation += local_center;
             inherited_transform *= local_transform;
 
@@ -267,14 +274,12 @@ pub fn ui_layout_system(
                 *global_transform = inherited_transform.into();
             }
 
-            if let Some(border_radius) = maybe_border_radius {
-                // We don't trigger change detection for changes to border radius
-                node.bypass_change_detection().border_radius = border_radius.resolve(
-                    inverse_target_scale_factor.recip(),
-                    node.size,
-                    target_size,
-                );
-            }
+            // We don't trigger change detection for changes to border radius
+            node.bypass_change_detection().border_radius = style.border_radius.resolve(
+                inverse_target_scale_factor.recip(),
+                node.size,
+                target_size,
+            );
 
             if let Some(outline) = maybe_outline {
                 // don't trigger change detection when only outlines are changed
@@ -352,60 +357,46 @@ pub fn ui_layout_system(
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        layout::ui_surface::UiSurface, prelude::*, ui_layout_system,
+        update::propagate_ui_target_cameras, ContentSize, LayoutContext,
+    };
     use bevy_app::{App, HierarchyPropagatePlugin, PostUpdate, PropagateSet};
-    use taffy::TraversePartialTree;
-
-    use bevy_asset::{AssetEvent, Assets};
-    use bevy_camera::{Camera, Camera2d};
+    use bevy_camera::{Camera, Camera2d, ComputedCameraValues, RenderTargetInfo, Viewport};
     use bevy_ecs::{prelude::*, system::RunSystemOnce};
-    use bevy_image::Image;
     use bevy_math::{Rect, UVec2, Vec2};
     use bevy_platform::collections::HashMap;
-    use bevy_render::texture::ManualTextureViews;
     use bevy_transform::systems::mark_dirty_trees;
     use bevy_transform::systems::{propagate_parent_transforms, sync_simple_transforms};
     use bevy_utils::prelude::default;
-    use bevy_window::{
-        PrimaryWindow, Window, WindowCreated, WindowResized, WindowResolution,
-        WindowScaleFactorChanged,
-    };
-    //use uuid::timestamp::UUID_TICKS_BETWEEN_EPOCHS;
 
-    use crate::{
-        layout::ui_surface::UiSurface, prelude::*, ui_layout_system,
-        update::update_ui_context_system, ContentSize, LayoutContext,
-    };
+    use taffy::TraversePartialTree;
 
     // these window dimensions are easy to convert to and from percentage values
-    const WINDOW_WIDTH: f32 = 1000.;
-    const WINDOW_HEIGHT: f32 = 100.;
+    const TARGET_WIDTH: u32 = 1000;
+    const TARGET_HEIGHT: u32 = 100;
 
     fn setup_ui_test_app() -> App {
         let mut app = App::new();
 
-        app.add_plugins(HierarchyPropagatePlugin::<ComputedNodeTarget>::new(
+        app.add_plugins(HierarchyPropagatePlugin::<ComputedUiTargetCamera>::new(
+            PostUpdate,
+        ));
+        app.add_plugins(HierarchyPropagatePlugin::<ComputedUiRenderTargetInfo>::new(
             PostUpdate,
         ));
         app.init_resource::<UiScale>();
         app.init_resource::<UiSurface>();
-        app.init_resource::<Events<WindowScaleFactorChanged>>();
-        app.init_resource::<Events<WindowResized>>();
-        // Required for the camera system
-        app.init_resource::<Events<WindowCreated>>();
-        app.init_resource::<Events<AssetEvent<Image>>>();
-        app.init_resource::<Assets<Image>>();
-        app.init_resource::<ManualTextureViews>();
         app.init_resource::<bevy_text::TextPipeline>();
-        app.init_resource::<bevy_text::CosmicFontSystem>();
-        app.init_resource::<bevy_text::SwashCache>();
+        app.init_resource::<bevy_text::FontCx>();
+        app.init_resource::<bevy_text::ScaleCx>();
+        app.init_resource::<bevy_transform::StaticTransformOptimizations>();
 
         app.add_systems(
             PostUpdate,
             (
-                // UI is driven by calculated camera target info, so we need to run the camera system first
-                bevy_render::camera::camera_system,
-                update_ui_context_system,
                 ApplyDeferred,
+                propagate_ui_target_cameras,
                 ui_layout_system,
                 mark_dirty_trees,
                 sync_simple_transforms,
@@ -416,21 +407,37 @@ mod tests {
 
         app.configure_sets(
             PostUpdate,
-            PropagateSet::<ComputedNodeTarget>::default()
-                .after(update_ui_context_system)
+            PropagateSet::<ComputedUiTargetCamera>::default()
+                .after(propagate_ui_target_cameras)
+                .before(ui_layout_system),
+        );
+
+        app.configure_sets(
+            PostUpdate,
+            PropagateSet::<ComputedUiRenderTargetInfo>::default()
+                .after(propagate_ui_target_cameras)
                 .before(ui_layout_system),
         );
 
         let world = app.world_mut();
-        // spawn a dummy primary window and camera
+        // spawn a camera with a dummy render target
         world.spawn((
-            Window {
-                resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
-                ..default()
+            Camera2d,
+            Camera {
+                computed: ComputedCameraValues {
+                    target_info: Some(RenderTargetInfo {
+                        physical_size: UVec2::new(TARGET_WIDTH, TARGET_HEIGHT),
+                        scale_factor: 1.,
+                    }),
+                    ..Default::default()
+                },
+                viewport: Some(Viewport {
+                    physical_size: UVec2::new(TARGET_WIDTH, TARGET_HEIGHT),
+                    ..default()
+                }),
+                ..Default::default()
             },
-            PrimaryWindow,
         ));
-        world.spawn(Camera2d);
 
         app
     }
@@ -466,8 +473,8 @@ mod tests {
 
         for ui_entity in [ui_root, ui_child] {
             let layout = ui_surface.get_layout(ui_entity, true).unwrap().0;
-            assert_eq!(layout.size.width, WINDOW_WIDTH);
-            assert_eq!(layout.size.height, WINDOW_HEIGHT);
+            assert_eq!(layout.size.width, TARGET_WIDTH as f32);
+            assert_eq!(layout.size.height, TARGET_HEIGHT as f32);
         }
     }
 
@@ -800,21 +807,14 @@ mod tests {
         #[derive(Component)]
         struct MovingUiNode;
 
-        fn update_camera_viewports(
-            primary_window_query: Query<&Window, With<PrimaryWindow>>,
-            mut cameras: Query<&mut Camera>,
-        ) {
-            let primary_window = primary_window_query
-                .single()
-                .expect("missing primary window");
+        fn update_camera_viewports(mut cameras: Query<&mut Camera>) {
             let camera_count = cameras.iter().len();
             for (camera_index, mut camera) in cameras.iter_mut().enumerate() {
-                let viewport_width =
-                    primary_window.resolution.physical_width() / camera_count as u32;
-                let viewport_height = primary_window.resolution.physical_height();
+                let target_size = camera.physical_target_size().unwrap();
+                let viewport_width = target_size.x / camera_count as u32;
                 let physical_position = UVec2::new(viewport_width * camera_index as u32, 0);
-                let physical_size = UVec2::new(viewport_width, viewport_height);
-                camera.viewport = Some(bevy_camera::Viewport {
+                let physical_size = UVec2::new(target_size.x / camera_count as u32, target_size.y);
+                camera.viewport = Some(Viewport {
                     physical_position,
                     physical_size,
                     ..default()
@@ -884,6 +884,17 @@ mod tests {
             Camera2d,
             Camera {
                 order: 1,
+                computed: ComputedCameraValues {
+                    target_info: Some(RenderTargetInfo {
+                        physical_size: UVec2::new(TARGET_WIDTH, TARGET_HEIGHT),
+                        scale_factor: 1.,
+                    }),
+                    ..default()
+                },
+                viewport: Some(Viewport {
+                    physical_size: UVec2::new(TARGET_WIDTH, TARGET_HEIGHT),
+                    ..default()
+                }),
                 ..default()
             },
         ));
@@ -1064,52 +1075,29 @@ mod tests {
 
         app.add_systems(
             PostUpdate,
-            (
-                // UI is driven by calculated camera target info, so we need to run the camera system first
-                bevy_render::camera::camera_system,
-                update_ui_context_system,
-                ApplyDeferred,
-                ui_layout_system,
-            )
-                .chain(),
+            (propagate_ui_target_cameras, ApplyDeferred, ui_layout_system).chain(),
         );
 
-        app.add_plugins(HierarchyPropagatePlugin::<ComputedNodeTarget>::new(
+        app.add_plugins(HierarchyPropagatePlugin::<ComputedUiTargetCamera>::new(
             PostUpdate,
         ));
 
         app.configure_sets(
             PostUpdate,
-            PropagateSet::<ComputedNodeTarget>::default()
-                .after(update_ui_context_system)
+            PropagateSet::<ComputedUiTargetCamera>::default()
+                .after(propagate_ui_target_cameras)
                 .before(ui_layout_system),
         );
 
         let world = app.world_mut();
         world.init_resource::<UiScale>();
         world.init_resource::<UiSurface>();
-        world.init_resource::<Events<WindowScaleFactorChanged>>();
-        world.init_resource::<Events<WindowResized>>();
-        // Required for the camera system
-        world.init_resource::<Events<WindowCreated>>();
-        world.init_resource::<Events<AssetEvent<Image>>>();
-        world.init_resource::<Assets<Image>>();
-        world.init_resource::<ManualTextureViews>();
 
         world.init_resource::<bevy_text::TextPipeline>();
 
-        world.init_resource::<bevy_text::CosmicFontSystem>();
+        world.init_resource::<bevy_text::FontCx>();
 
-        world.init_resource::<bevy_text::SwashCache>();
-
-        // spawn a dummy primary window and camera
-        world.spawn((
-            Window {
-                resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
-                ..default()
-            },
-            PrimaryWindow,
-        ));
+        world.init_resource::<bevy_text::ScaleCx>();
 
         let ui_root = world
             .spawn(Node {
@@ -1149,7 +1137,7 @@ mod tests {
             params: In<TestSystemParam>,
             mut ui_surface: ResMut<UiSurface>,
             mut computed_text_block_query: Query<&mut bevy_text::ComputedTextBlock>,
-            mut font_system: ResMut<bevy_text::CosmicFontSystem>,
+            mut font_system: ResMut<bevy_text::FontCx>,
         ) {
             ui_surface.upsert_node(
                 &LayoutContext::TEST_CONTEXT,

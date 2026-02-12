@@ -1,5 +1,5 @@
 #![expect(missing_docs, reason = "Not all docs are written yet, see #3492.")]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![doc(
     html_logo_url = "https://bevy.org/assets/icon.png",
@@ -27,14 +27,26 @@ pub mod experimental {
 mod atmosphere;
 mod cluster;
 mod components;
+pub mod contact_shadows;
+use bevy_gltf::{
+    extensions::{GltfExtensionHandler, GltfExtensionHandlers},
+    GltfAssetLabel,
+};
+use bevy_render::sync_component::SyncComponent;
+pub use contact_shadows::{
+    ContactShadows, ContactShadowsBuffer, ContactShadowsPlugin, ContactShadowsUniform,
+    ViewContactShadowsUniformOffset,
+};
 pub mod decal;
 pub mod deferred;
+pub mod diagnostic;
 mod extended_material;
 mod fog;
 mod light_probe;
 mod lightmap;
 mod material;
 mod material_bind_groups;
+mod medium;
 mod mesh_material;
 mod parallax;
 mod pbr_material;
@@ -42,19 +54,16 @@ mod prepass;
 mod render;
 mod ssao;
 mod ssr;
+mod transmission;
 mod volumetric_fog;
 
 use bevy_color::{Color, LinearRgba};
 
 pub use atmosphere::*;
-use bevy_light::SimulationLightSystems;
-pub use bevy_light::{
-    light_consts, AmbientLight, CascadeShadowConfig, CascadeShadowConfigBuilder, Cascades,
-    ClusteredDecal, DirectionalLight, DirectionalLightShadowMap, DirectionalLightTexture,
-    FogVolume, IrradianceVolume, LightPlugin, LightProbe, NotShadowCaster, NotShadowReceiver,
-    PointLight, PointLightShadowMap, PointLightTexture, ShadowFilteringMethod, SpotLight,
-    SpotLightTexture, TransmittedShadowReceiver, VolumetricFog, VolumetricLight,
-};
+use bevy_asset::LoadContext;
+use bevy_gltf::{gltf, GltfMaterial};
+use bevy_light::{AmbientLight, DirectionalLight, PointLight, ShadowFilteringMethod, SpotLight};
+use bevy_shader::{load_shader_library, ShaderRef};
 pub use cluster::*;
 pub use components::*;
 pub use decal::clustered::ClusteredDecalPlugin;
@@ -64,6 +73,7 @@ pub use light_probe::*;
 pub use lightmap::*;
 pub use material::*;
 pub use material_bind_groups::*;
+pub use medium::*;
 pub use mesh_material::*;
 pub use parallax::*;
 pub use pbr_material::*;
@@ -71,6 +81,7 @@ pub use prepass::*;
 pub use render::*;
 pub use ssao::*;
 pub use ssr::*;
+pub use transmission::*;
 pub use volumetric_fog::VolumetricFogPlugin;
 
 /// The PBR prelude.
@@ -79,6 +90,7 @@ pub use volumetric_fog::VolumetricFogPlugin;
 pub mod prelude {
     #[doc(hidden)]
     pub use crate::{
+        contact_shadows::ContactShadowsPlugin,
         fog::{DistanceFog, FogFalloff},
         material::{Material, MaterialPlugin},
         mesh_material::MeshMaterial3d,
@@ -86,68 +98,23 @@ pub mod prelude {
         pbr_material::StandardMaterial,
         ssao::ScreenSpaceAmbientOcclusionPlugin,
     };
-    #[doc(hidden)]
-    pub use bevy_light::{
-        light_consts, AmbientLight, DirectionalLight, EnvironmentMapLight,
-        GeneratedEnvironmentMapLight, LightProbe, PointLight, SpotLight,
-    };
 }
 
-pub mod graph {
-    use bevy_render::render_graph::RenderLabel;
-
-    /// Render graph nodes specific to 3D PBR rendering.
-    #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-    pub enum NodePbr {
-        /// Label for the shadow pass node that draws meshes that were visible
-        /// from the light last frame.
-        EarlyShadowPass,
-        /// Label for the shadow pass node that draws meshes that became visible
-        /// from the light this frame.
-        LateShadowPass,
-        /// Label for the screen space ambient occlusion render node.
-        ScreenSpaceAmbientOcclusion,
-        DeferredLightingPass,
-        /// Label for the volumetric lighting pass.
-        VolumetricFog,
-        /// Label for the shader that transforms and culls meshes that were
-        /// visible last frame.
-        EarlyGpuPreprocess,
-        /// Label for the shader that transforms and culls meshes that became
-        /// visible this frame.
-        LateGpuPreprocess,
-        /// Label for the screen space reflections pass.
-        ScreenSpaceReflections,
-        /// Label for the node that builds indirect draw parameters for meshes
-        /// that were visible last frame.
-        EarlyPrepassBuildIndirectParameters,
-        /// Label for the node that builds indirect draw parameters for meshes
-        /// that became visible this frame.
-        LatePrepassBuildIndirectParameters,
-        /// Label for the node that builds indirect draw parameters for the main
-        /// rendering pass, containing all meshes that are visible this frame.
-        MainBuildIndirectParameters,
-        ClearIndirectParametersMetadata,
-    }
-}
-
-use crate::{deferred::DeferredPbrLightingPlugin, graph::NodePbr};
+use crate::deferred::DeferredPbrLightingPlugin;
 use bevy_app::prelude::*;
 use bevy_asset::{AssetApp, AssetPath, Assets, Handle, RenderAssetUsages};
-use bevy_core_pipeline::core_3d::graph::{Core3d, Node3d};
+use bevy_core_pipeline::mip_generation::experimental::depth::early_downsample_depth;
+use bevy_core_pipeline::schedule::{Core3d, Core3dSystems};
 use bevy_ecs::prelude::*;
 #[cfg(feature = "bluenoise_texture")]
 use bevy_image::{CompressedImageFormats, ImageType};
 use bevy_image::{Image, ImageSampler};
+use bevy_material::AlphaMode;
 use bevy_render::{
-    alpha::AlphaMode,
     camera::sort_cameras,
-    extract_component::ExtractComponentPlugin,
     extract_resource::ExtractResourcePlugin,
-    load_shader_library,
-    render_graph::RenderGraph,
     render_resource::{
-        Extent3d, ShaderRef, TextureDataOrder, TextureDescriptor, TextureDimension, TextureFormat,
+        Extent3d, TextureDataOrder, TextureDescriptor, TextureDimension, TextureFormat,
         TextureUsages,
     },
     sync_component::SyncComponentPlugin,
@@ -160,8 +127,8 @@ fn shader_ref(path: PathBuf) -> ShaderRef {
     ShaderRef::Path(AssetPath::from_path_buf(path).with_source("embedded"))
 }
 
-pub const TONEMAPPING_LUT_TEXTURE_BINDING_INDEX: u32 = 18;
-pub const TONEMAPPING_LUT_SAMPLER_BINDING_INDEX: u32 = 19;
+pub const TONEMAPPING_LUT_TEXTURE_BINDING_INDEX: u32 = 19;
+pub const TONEMAPPING_LUT_SAMPLER_BINDING_INDEX: u32 = 20;
 
 /// Sets up the entire PBR infrastructure of bevy.
 pub struct PbrPlugin {
@@ -177,6 +144,8 @@ pub struct PbrPlugin {
     pub use_gpu_instance_buffer_builder: bool,
     /// Debugging flags that can optionally be set when constructing the renderer.
     pub debug_flags: RenderDebugFlags,
+    /// Renders GLTFs with PBR.
+    pub gltf_render_enabled: bool,
 }
 
 impl Default for PbrPlugin {
@@ -186,6 +155,7 @@ impl Default for PbrPlugin {
             add_default_deferred_lighting_plugin: true,
             use_gpu_instance_buffer_builder: true,
             debug_flags: RenderDebugFlags::default(),
+            gltf_render_enabled: true,
         }
     }
 }
@@ -204,7 +174,6 @@ impl Plugin for PbrPlugin {
         load_shader_library!(app, "render/utils.wgsl");
         load_shader_library!(app, "render/clustered_forward.wgsl");
         load_shader_library!(app, "render/pbr_lighting.wgsl");
-        load_shader_library!(app, "render/pbr_transmission.wgsl");
         load_shader_library!(app, "render/shadows.wgsl");
         load_shader_library!(app, "deferred/pbr_deferred_types.wgsl");
         load_shader_library!(app, "deferred/pbr_deferred_functions.wgsl");
@@ -233,41 +202,51 @@ impl Plugin for PbrPlugin {
                     debug_flags: self.debug_flags,
                 },
                 MaterialPlugin::<StandardMaterial> {
-                    prepass_enabled: self.prepass_enabled,
                     debug_flags: self.debug_flags,
                     ..Default::default()
                 },
                 ScreenSpaceAmbientOcclusionPlugin,
-                ExtractResourcePlugin::<AmbientLight>::default(),
                 FogPlugin,
                 ExtractResourcePlugin::<DefaultOpaqueRendererMethod>::default(),
-                ExtractComponentPlugin::<ShadowFilteringMethod>::default(),
+                SyncComponentPlugin::<ShadowFilteringMethod, Self>::default(),
                 LightmapPlugin,
                 LightProbePlugin,
-                LightPlugin,
                 GpuMeshPreprocessPlugin {
                     use_gpu_instance_buffer_builder: self.use_gpu_instance_buffer_builder,
                 },
                 VolumetricFogPlugin,
                 ScreenSpaceReflectionsPlugin,
+                ScreenSpaceTransmissionPlugin,
                 ClusteredDecalPlugin,
+                ContactShadowsPlugin,
             ))
             .add_plugins((
                 decal::ForwardDecalPlugin,
-                SyncComponentPlugin::<DirectionalLight>::default(),
-                SyncComponentPlugin::<PointLight>::default(),
-                SyncComponentPlugin::<SpotLight>::default(),
-                ExtractComponentPlugin::<AmbientLight>::default(),
+                SyncComponentPlugin::<DirectionalLight, Self>::default(),
+                SyncComponentPlugin::<PointLight, Self>::default(),
+                SyncComponentPlugin::<SpotLight, Self>::default(),
+                SyncComponentPlugin::<AmbientLight, Self>::default(),
             ))
-            .add_plugins(AtmospherePlugin)
-            .configure_sets(
-                PostUpdate,
-                (
-                    SimulationLightSystems::AddClusters,
-                    SimulationLightSystems::AssignLightsToClusters,
-                )
-                    .chain(),
-            );
+            .add_plugins((ScatteringMediumPlugin, AtmospherePlugin));
+
+        if self.gltf_render_enabled {
+            #[cfg(target_family = "wasm")]
+            bevy_tasks::block_on(async {
+                app.world_mut()
+                    .resource_mut::<GltfExtensionHandlers>()
+                    .0
+                    .write()
+                    .await
+                    .push(Box::new(GltfExtensionHandlerPbr))
+            });
+
+            #[cfg(not(target_family = "wasm"))]
+            app.world_mut()
+                .resource_mut::<GltfExtensionHandlers>()
+                .0
+                .write_blocking()
+                .push(Box::new(GltfExtensionHandlerPbr));
+        }
 
         if self.add_default_deferred_lighting_plugin {
             app.add_plugins(DeferredPbrLightingPlugin);
@@ -282,7 +261,8 @@ impl Plugin for PbrPlugin {
                     base_color: Color::srgb(1.0, 0.0, 0.5),
                     ..Default::default()
                 },
-            );
+            )
+            .unwrap();
 
         let has_bluenoise = app
             .get_sub_app(RenderApp)
@@ -333,6 +313,9 @@ impl Plugin for PbrPlugin {
                 (
                     extract_clusters,
                     extract_lights,
+                    extract_ambient_light_resource,
+                    extract_ambient_light,
+                    extract_shadow_filtering_method,
                     late_sweep_material_instances,
                 ),
             )
@@ -354,17 +337,19 @@ impl Plugin for PbrPlugin {
             .add_observer(remove_light_view_entities);
         render_app.world_mut().add_observer(extracted_light_removed);
 
-        let early_shadow_pass_node = EarlyShadowPassNode::from_world(render_app.world_mut());
-        let late_shadow_pass_node = LateShadowPassNode::from_world(render_app.world_mut());
-        let mut graph = render_app.world_mut().resource_mut::<RenderGraph>();
-        let draw_3d_graph = graph.get_sub_graph_mut(Core3d).unwrap();
-        draw_3d_graph.add_node(NodePbr::EarlyShadowPass, early_shadow_pass_node);
-        draw_3d_graph.add_node(NodePbr::LateShadowPass, late_shadow_pass_node);
-        draw_3d_graph.add_node_edges((
-            NodePbr::EarlyShadowPass,
-            NodePbr::LateShadowPass,
-            Node3d::StartMainPass,
-        ));
+        render_app.add_systems(
+            Core3d,
+            (
+                shadow_pass::<EARLY_SHADOW_PASS>
+                    .after(early_prepass_build_indirect_parameters)
+                    .before(early_downsample_depth)
+                    .before(shadow_pass::<LATE_SHADOW_PASS>),
+                shadow_pass::<LATE_SHADOW_PASS>
+                    .after(late_prepass_build_indirect_parameters)
+                    .before(main_build_indirect_parameters)
+                    .before(Core3dSystems::MainPass),
+            ),
+        );
     }
 
     fn finish(&self, app: &mut App) {
@@ -398,4 +383,134 @@ pub fn stbn_placeholder() -> Image {
         asset_usage: RenderAssetUsages::RENDER_WORLD,
         copy_on_resize: false,
     }
+}
+
+fn standard_material_from_gltf_material(material: &GltfMaterial) -> StandardMaterial {
+    StandardMaterial {
+        base_color: material.base_color,
+        base_color_channel: material.base_color_channel.clone(),
+        base_color_texture: material.base_color_texture.clone(),
+        emissive: material.emissive,
+        emissive_channel: material.emissive_channel.clone(),
+        emissive_texture: material.emissive_texture.clone(),
+        perceptual_roughness: material.perceptual_roughness,
+        metallic: material.metallic,
+        metallic_roughness_channel: material.metallic_roughness_channel.clone(),
+        metallic_roughness_texture: material.metallic_roughness_texture.clone(),
+        reflectance: material.reflectance,
+        specular_tint: material.specular_tint,
+        specular_transmission: material.specular_transmission,
+        #[cfg(feature = "pbr_transmission_textures")]
+        specular_transmission_channel: material.specular_transmission_channel.clone(),
+        #[cfg(feature = "pbr_transmission_textures")]
+        specular_transmission_texture: material.specular_transmission_texture.clone(),
+        thickness: material.thickness,
+        #[cfg(feature = "pbr_transmission_textures")]
+        thickness_channel: material.thickness_channel.clone(),
+        #[cfg(feature = "pbr_transmission_textures")]
+        thickness_texture: material.thickness_texture.clone(),
+        ior: material.ior,
+        attenuation_distance: material.attenuation_distance,
+        attenuation_color: material.attenuation_color,
+        normal_map_channel: material.normal_map_channel.clone(),
+        normal_map_texture: material.normal_map_texture.clone(),
+        occlusion_channel: material.occlusion_channel.clone(),
+        occlusion_texture: material.occlusion_texture.clone(),
+        #[cfg(feature = "pbr_specular_textures")]
+        specular_channel: material.specular_channel.clone(),
+        #[cfg(feature = "pbr_specular_textures")]
+        specular_texture: material.specular_texture.clone(),
+        #[cfg(feature = "pbr_specular_textures")]
+        specular_tint_channel: material.specular_tint_channel.clone(),
+        #[cfg(feature = "pbr_specular_textures")]
+        specular_tint_texture: material.specular_tint_texture.clone(),
+        clearcoat: material.clearcoat,
+        clearcoat_perceptual_roughness: material.clearcoat_perceptual_roughness,
+        #[cfg(feature = "pbr_multi_layer_material_textures")]
+        clearcoat_roughness_channel: material.clearcoat_roughness_channel.clone(),
+        #[cfg(feature = "pbr_multi_layer_material_textures")]
+        clearcoat_roughness_texture: material.clearcoat_roughness_texture.clone(),
+        #[cfg(feature = "pbr_multi_layer_material_textures")]
+        clearcoat_normal_channel: material.clearcoat_normal_channel.clone(),
+        #[cfg(feature = "pbr_multi_layer_material_textures")]
+        clearcoat_normal_texture: material.clearcoat_normal_texture.clone(),
+        anisotropy_strength: material.anisotropy_strength,
+        anisotropy_rotation: material.anisotropy_rotation,
+        #[cfg(feature = "pbr_anisotropy_texture")]
+        anisotropy_channel: material.anisotropy_channel.clone(),
+        #[cfg(feature = "pbr_anisotropy_texture")]
+        anisotropy_texture: material.anisotropy_texture.clone(),
+        double_sided: material.double_sided,
+        cull_mode: material.cull_mode,
+        unlit: material.unlit,
+        alpha_mode: material.alpha_mode,
+        uv_transform: material.uv_transform,
+        ..Default::default()
+    }
+}
+
+#[derive(Default, Clone)]
+struct GltfExtensionHandlerPbr;
+
+impl GltfExtensionHandler for GltfExtensionHandlerPbr {
+    fn dyn_clone(&self) -> Box<dyn GltfExtensionHandler> {
+        Box::new((*self).clone())
+    }
+    fn on_root(&mut self, load_context: &mut LoadContext<'_>, _gltf: &gltf::Gltf) {
+        // create the `StandardMaterial` for the glTF `DefaultMaterial` so
+        // it can be accessed when meshes don't have materials.
+        let std_label = format!("{}#std", GltfAssetLabel::DefaultMaterial);
+
+        load_context.add_labeled_asset(
+            std_label,
+            standard_material_from_gltf_material(&GltfMaterial::default()),
+        );
+    }
+
+    fn on_material(
+        &mut self,
+        load_context: &mut LoadContext<'_>,
+        _gltf_material: &gltf::Material,
+        _material: Handle<GltfMaterial>,
+        material_asset: &GltfMaterial,
+        material_label: &str,
+    ) {
+        let std_label = format!("{}#std", material_label);
+
+        load_context.add_labeled_asset(
+            std_label,
+            standard_material_from_gltf_material(material_asset),
+        );
+    }
+
+    fn on_spawn_mesh_and_material(
+        &mut self,
+        load_context: &mut LoadContext<'_>,
+        _primitive: &gltf::Primitive,
+        _mesh: &gltf::Mesh,
+        _material: &gltf::Material,
+        entity: &mut EntityWorldMut,
+        material_label: &str,
+    ) {
+        let std_label = format!("{}#std", material_label);
+        let handle = load_context.get_label_handle::<StandardMaterial>(std_label);
+
+        entity.insert(MeshMaterial3d(handle));
+    }
+}
+
+impl SyncComponent<PbrPlugin> for DirectionalLight {
+    type Out = Self;
+}
+impl SyncComponent<PbrPlugin> for PointLight {
+    type Out = Self;
+}
+impl SyncComponent<PbrPlugin> for SpotLight {
+    type Out = Self;
+}
+impl SyncComponent<PbrPlugin> for AmbientLight {
+    type Out = Self;
+}
+impl SyncComponent<PbrPlugin> for ShadowFilteringMethod {
+    type Out = Self;
 }

@@ -43,7 +43,7 @@ impl<'a> Debug for FormattedBitSet<'a> {
 ///
 /// Used internally to ensure soundness during system initialization and execution.
 /// See the [`is_compatible`](Access::is_compatible) and [`get_conflicts`](Access::get_conflicts) functions.
-#[derive(Eq, PartialEq, Default)]
+#[derive(Eq, PartialEq, Default, Hash)]
 pub struct Access {
     /// All accessed components, or forbidden components if
     /// `Self::component_read_and_writes_inverted` is set.
@@ -161,8 +161,8 @@ impl Access {
         access
     }
 
-    /// Creates an [`Access`] with read access to all components.
-    /// This is equivalent to calling `read_all()` on `Access::new()`,
+    /// Creates an [`Access`] with read and write access to all components.
+    /// This is equivalent to calling `write_all()` on `Access::new()`,
     /// but is available in a `const` context.
     pub(crate) const fn new_write_all() -> Self {
         let mut access = Self::new();
@@ -263,10 +263,10 @@ impl Access {
     /// This is for components whose values are not accessed (and thus will never cause conflicts),
     /// but whose presence in an archetype may affect query results.
     ///
-    /// Currently, this is only used for [`Has<T>`] and [`Allows<T>`].
+    /// Currently, this is only used for [`Has<T>`] and [`Allow<T>`].
     ///
     /// [`Has<T>`]: crate::query::Has
-    /// [`Allows<T>`]: crate::query::filter::Allows
+    /// [`Allow<T>`]: crate::query::filter::Allow
     pub fn add_archetypal(&mut self, index: ComponentId) {
         self.archetypal.grow_and_insert(index.index());
     }
@@ -1320,6 +1320,12 @@ impl FilteredAccessSet {
     #[inline]
     pub fn combined_access(&self) -> &Access {
         &self.combined_access
+    }
+
+    /// Returns a reference to the filtered accesses of the set.
+    #[inline]
+    pub fn filtered_accesses(&self) -> &[FilteredAccess] {
+        &self.filtered_accesses
     }
 
     /// Returns `true` if this and `other` can be active at the same time.

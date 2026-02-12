@@ -6,6 +6,7 @@
 //! [`Material2d`]: bevy::sprite::Material2d
 
 use bevy::{
+    asset::RenderAssetUsages,
     color::palettes::basic::YELLOW,
     core_pipeline::core_2d::{Transparent2d, CORE_2D_DEPTH_FORMAT},
     math::{ops, FloatOrd},
@@ -13,7 +14,7 @@ use bevy::{
     prelude::*,
     render::{
         mesh::RenderMesh,
-        render_asset::{RenderAssetUsages, RenderAssets},
+        render_asset::RenderAssets,
         render_phase::{
             AddRenderCommand, DrawFunctions, PhaseItemExtraIndex, SetItemPipeline,
             ViewSortedRenderPhases,
@@ -25,12 +26,12 @@ use bevy::{
             SpecializedRenderPipelines, StencilFaceState, StencilState, TextureFormat,
             VertexFormat, VertexState, VertexStepMode,
         },
-        sync_component::SyncComponentPlugin,
+        sync_component::{SyncComponent, SyncComponentPlugin},
         sync_world::{MainEntityHashMap, RenderEntity},
         view::{ExtractedView, RenderVisibleEntities, ViewTarget},
         Extract, Render, RenderApp, RenderStartup, RenderSystems,
     },
-    sprite::{
+    sprite_render::{
         extract_mesh2d, init_mesh_2d_pipeline, DrawMesh2d, Material2dBindGroupId, Mesh2dPipeline,
         Mesh2dPipelineKey, Mesh2dTransforms, MeshFlags, RenderMesh2dInstance, SetMesh2dBindGroup,
         SetMesh2dViewBindGroup,
@@ -123,6 +124,10 @@ fn star(
 /// A marker component for colored 2d meshes
 #[derive(Component, Default)]
 pub struct ColoredMesh2d;
+
+impl SyncComponent for ColoredMesh2d {
+    type Out = Self;
+}
 
 /// Custom pipeline for 2d meshes with vertex colors
 #[derive(Resource)]
@@ -352,7 +357,7 @@ pub fn extract_colored_mesh2d(
         }
 
         let transforms = Mesh2dTransforms {
-            world_from_local: (&transform.affine()).into(),
+            world_from_local: transform.affine().into(),
             flags: MeshFlags::empty().bits(),
         };
 

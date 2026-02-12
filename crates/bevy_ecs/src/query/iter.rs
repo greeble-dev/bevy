@@ -2,9 +2,12 @@ use super::{QueryData, QueryFilter, ReadOnlyQueryData};
 use crate::{
     archetype::{Archetype, ArchetypeEntity, Archetypes},
     bundle::Bundle,
-    component::Tick,
+    change_detection::Tick,
     entity::{ContainsEntity, Entities, Entity, EntityEquivalent, EntitySet, EntitySetIterator},
-    query::{ArchetypeFilter, DebugCheckedUnwrap, QueryState, StorageId},
+    query::{
+        ArchetypeFilter, ArchetypeQueryData, ContiguousQueryData, DebugCheckedUnwrap, QueryState,
+        StorageId,
+    },
     storage::{Table, TableRow, Tables},
     world::{
         unsafe_world_cell::UnsafeWorldCell, EntityMut, EntityMutExcept, EntityRef, EntityRefExcept,
@@ -239,14 +242,14 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIter<'w, 's, D, F> {
 
             // SAFETY: set_table was called prior.
             // Caller assures `row` in range of the current archetype.
-            let item = D::fetch(
+            if let Some(item) = D::fetch(
                 &self.query_state.fetch_state,
                 &mut self.cursor.fetch,
                 *entity,
                 row,
-            );
-
-            accum = func(accum, item);
+            ) {
+                accum = func(accum, item);
+            }
         }
         accum
     }
@@ -307,16 +310,16 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIter<'w, 's, D, F> {
 
             // SAFETY: set_archetype was called prior, `index` is an archetype index in range of the current archetype
             // Caller assures `index` in range of the current archetype.
-            let item = unsafe {
+            if let Some(item) = unsafe {
                 D::fetch(
                     &self.query_state.fetch_state,
                     &mut self.cursor.fetch,
                     archetype_entity.id(),
                     archetype_entity.table_row(),
                 )
-            };
-
-            accum = func(accum, item);
+            } {
+                accum = func(accum, item);
+            }
         }
         accum
     }
@@ -384,14 +387,14 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIter<'w, 's, D, F> {
 
             // SAFETY: set_table was called prior.
             // Caller assures `row` in range of the current archetype.
-            let item = D::fetch(
+            if let Some(item) = D::fetch(
                 &self.query_state.fetch_state,
                 &mut self.cursor.fetch,
                 entity,
                 row,
-            );
-
-            accum = func(accum, item);
+            ) {
+                accum = func(accum, item);
+            }
         }
         accum
     }
@@ -918,7 +921,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Iterator for QueryIter<'w, 's, D, F> 
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let max_size = self.cursor.max_remaining(self.tables, self.archetypes);
-        let archetype_query = F::IS_ARCHETYPAL;
+        let archetype_query = D::IS_ARCHETYPAL && F::IS_ARCHETYPAL;
         let min_size = if archetype_query { max_size } else { 0 };
         (min_size as usize, Some(max_size as usize))
     }
@@ -992,6 +995,91 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter> Clone for QueryIter<'w, 's, D
     }
 }
 
+/// Iterator for contiguous chunks of memory
+pub struct QueryContiguousIter<'w, 's, D: ContiguousQueryData, F: ArchetypeFilter> {
+    tables: &'w Tables,
+    storage_id_iter: core::slice::Iter<'s, StorageId>,
+    query_state: &'s QueryState<D, F>,
+    fetch: D::Fetch<'w>,
+    // NOTE: no need for F::Fetch because it always returns true
+}
+
+impl<'w, 's, D: ContiguousQueryData, F: ArchetypeFilter> QueryContiguousIter<'w, 's, D, F> {
+    /// # Safety
+    /// - `world` must have permission to access any of the components registered in `query_state`.
+    /// - `world` must be the same one used to initialize `query_state`.
+    pub(crate) unsafe fn new(
+        world: UnsafeWorldCell<'w>,
+        query_state: &'s QueryState<D, F>,
+        last_run: Tick,
+        this_run: Tick,
+    ) -> Option<Self> {
+        query_state.is_dense.then(|| Self {
+            // SAFETY: We only access table data that has been registered in `query_state`
+            tables: unsafe { &world.storages().tables },
+            storage_id_iter: query_state.matched_storage_ids.iter(),
+            // SAFETY: The invariants are upheld by the caller.
+            fetch: unsafe { D::init_fetch(world, &query_state.fetch_state, last_run, this_run) },
+            query_state,
+        })
+    }
+}
+
+impl<'w, 's, D: ContiguousQueryData, F: ArchetypeFilter> Iterator
+    for QueryContiguousIter<'w, 's, D, F>
+{
+    type Item = D::Contiguous<'w, 's>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // SAFETY: Query is dense
+            let table_id = unsafe { self.storage_id_iter.next()?.table_id };
+            // SAFETY: `table_id` was returned by `self.storage_id_iter` which always returns a
+            // valid id
+            let table = unsafe { self.tables.get(table_id).debug_checked_unwrap() };
+            if table.is_empty() {
+                continue;
+            }
+            // SAFETY:
+            // - `table` is from the same world as `self.query_state` (`self.storage_id_iter` is
+            // from the same world as `self.query_state`, see [`Self::new`])
+            // - `self.fetch` was initialized with `self.query_state` (in [`Self::new`])
+            unsafe {
+                D::set_table(&mut self.fetch, &self.query_state.fetch_state, table);
+            }
+
+            // no filtering because `F` implements `ArchetypeFilter` which ensures that `QueryFilter::fetch`
+            // always returns true
+
+            // SAFETY:
+            // - [`D::set_table`] is executed prior.
+            // - `table.entities()` return a valid entity array
+            // - the caller of [`Self::new`] ensures that the world has permission to access any of
+            // the components registered in `self.query_state`
+            let item = unsafe {
+                D::fetch_contiguous(
+                    &self.query_state.fetch_state,
+                    &mut self.fetch,
+                    table.entities(),
+                )
+            };
+
+            return Some(item);
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, self.storage_id_iter.size_hint().1)
+    }
+}
+
+// [`QueryIterationCursor::next_contiguous`] always returns None when exhausted
+impl<'w, 's, D: ContiguousQueryData, F: ArchetypeFilter> FusedIterator
+    for QueryContiguousIter<'w, 's, D, F>
+{
+}
+
 /// An [`Iterator`] over sorted query results of a [`Query`](crate::system::Query).
 ///
 /// This struct is created by the [`QueryIter::sort`], [`QueryIter::sort_unstable`],
@@ -1040,13 +1128,13 @@ where
     /// # Safety
     /// `entity` must stem from `self.entity_iter`, and not have been passed before.
     #[inline(always)]
-    unsafe fn fetch_next(&mut self, entity: Entity) -> D::Item<'w, 's> {
+    unsafe fn fetch_next(&mut self, entity: Entity) -> Option<D::Item<'w, 's>> {
         let (location, archetype, table);
         // SAFETY:
         // `tables` and `archetypes` belong to the same world that the [`QueryIter`]
         // was initialized for.
         unsafe {
-            location = self.entities.get(entity).debug_checked_unwrap();
+            location = self.entities.get_spawned(entity).debug_checked_unwrap();
             archetype = self
                 .archetypes
                 .get(location.archetype_id)
@@ -1089,13 +1177,20 @@ where
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let entity = self.entity_iter.next()?;
-        // SAFETY: `entity` is passed from `entity_iter` the first time.
-        unsafe { self.fetch_next(entity).into() }
+        while let Some(entity) = self.entity_iter.next() {
+            // SAFETY: `entity` is passed from `entity_iter` the first time.
+            if let Some(item) = unsafe { self.fetch_next(entity) } {
+                return Some(item);
+            }
+        }
+        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.entity_iter.size_hint()
+        let (min_size, max_size) = self.entity_iter.size_hint();
+        let archetype_query = D::IS_ARCHETYPAL;
+        let min_size = if archetype_query { min_size } else { 0 };
+        (min_size, max_size)
     }
 }
 
@@ -1106,16 +1201,18 @@ where
 {
     #[inline(always)]
     fn next_back(&mut self) -> Option<Self::Item> {
-        let entity = self.entity_iter.next_back()?;
-        // SAFETY: `entity` is passed from `entity_iter` the first time.
-        unsafe { self.fetch_next(entity).into() }
+        while let Some(entity) = self.entity_iter.next_back() {
+            // SAFETY: `entity` is passed from `entity_iter` the first time.
+            if let Some(item) = unsafe { self.fetch_next(entity) } {
+                return Some(item);
+            }
+        }
+        None
     }
 }
 
-impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator> ExactSizeIterator
-    for QuerySortedIter<'w, 's, D, F, I>
-where
-    I: ExactSizeIterator<Item = Entity>,
+impl<D: ArchetypeQueryData, F: QueryFilter, I: ExactSizeIterator<Item = Entity>> ExactSizeIterator
+    for QuerySortedIter<'_, '_, D, F, I>
 {
 }
 
@@ -1210,7 +1307,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item: EntityEquivalent>>
     ) -> Option<D::Item<'w, 's>> {
         for entity_borrow in entity_iter {
             let entity = entity_borrow.entity();
-            let Some(location) = entities.get(entity) else {
+            let Ok(location) = entities.get_spawned(entity) else {
                 continue;
             };
 
@@ -1248,9 +1345,12 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item: EntityEquivalent>>
                 // SAFETY:
                 // - set_archetype was called prior, `location.archetype_row` is an archetype index in range of the current archetype
                 // - fetch is only called once for each entity.
-                return Some(unsafe {
+                let item = unsafe {
                     D::fetch(&query_state.fetch_state, fetch, entity, location.table_row)
-                });
+                };
+                if let Some(item) = item {
+                    return Some(item);
+                }
             }
         }
         None
@@ -2000,13 +2100,13 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item = Entity>>
     /// It is always safe for shared access.
     /// `entity` must stem from `self.entity_iter`, and not have been passed before.
     #[inline(always)]
-    unsafe fn fetch_next_aliased_unchecked(&mut self, entity: Entity) -> D::Item<'w, 's> {
+    unsafe fn fetch_next_aliased_unchecked(&mut self, entity: Entity) -> Option<D::Item<'w, 's>> {
         let (location, archetype, table);
         // SAFETY:
         // `tables` and `archetypes` belong to the same world that the [`QueryIter`]
         // was initialized for.
         unsafe {
-            location = self.entities.get(entity).debug_checked_unwrap();
+            location = self.entities.get_spawned(entity).debug_checked_unwrap();
             archetype = self
                 .archetypes
                 .get(location.archetype_id)
@@ -2042,16 +2142,19 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: Iterator<Item = Entity>>
     /// Get next result from the query
     #[inline(always)]
     pub fn fetch_next(&mut self) -> Option<D::Item<'_, 's>> {
-        let entity = self.entity_iter.next()?;
-
-        // SAFETY:
-        // We have collected the entity_iter once to drop all internal lens query item
-        // references.
-        // We are limiting the returned reference to self,
-        // making sure this method cannot be called multiple times without getting rid
-        // of any previously returned unique references first, thus preventing aliasing.
-        // `entity` is passed from `entity_iter` the first time.
-        unsafe { D::shrink(self.fetch_next_aliased_unchecked(entity)).into() }
+        while let Some(entity) = self.entity_iter.next() {
+            // SAFETY:
+            // We have collected the entity_iter once to drop all internal lens query item
+            // references.
+            // We are limiting the returned reference to self,
+            // making sure this method cannot be called multiple times without getting rid
+            // of any previously returned unique references first, thus preventing aliasing.
+            // `entity` is passed from `entity_iter` the first time.
+            if let Some(item) = unsafe { self.fetch_next_aliased_unchecked(entity) } {
+                return Some(D::shrink(item));
+            }
+        }
+        None
     }
 }
 
@@ -2061,16 +2164,19 @@ impl<'w, 's, D: QueryData, F: QueryFilter, I: DoubleEndedIterator<Item = Entity>
     /// Get next result from the query
     #[inline(always)]
     pub fn fetch_next_back(&mut self) -> Option<D::Item<'_, 's>> {
-        let entity = self.entity_iter.next_back()?;
-
-        // SAFETY:
-        // We have collected the entity_iter once to drop all internal lens query item
-        // references.
-        // We are limiting the returned reference to self,
-        // making sure this method cannot be called multiple times without getting rid
-        // of any previously returned unique references first, thus preventing aliasing.
-        // `entity` is passed from `entity_iter` the first time.
-        unsafe { D::shrink(self.fetch_next_aliased_unchecked(entity)).into() }
+        while let Some(entity) = self.entity_iter.next_back() {
+            // SAFETY:
+            // We have collected the entity_iter once to drop all internal lens query item
+            // references.
+            // We are limiting the returned reference to self,
+            // making sure this method cannot be called multiple times without getting rid
+            // of any previously returned unique references first, thus preventing aliasing.
+            // `entity` is passed from `entity_iter` the first time.
+            if let Some(item) = unsafe { self.fetch_next_aliased_unchecked(entity) } {
+                return Some(D::shrink(item));
+            }
+        }
+        None
     }
 }
 
@@ -2081,15 +2187,22 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, I: Iterator<Item = Entity>> I
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let entity = self.entity_iter.next()?;
-        // SAFETY:
-        // It is safe to alias for ReadOnlyWorldQuery.
-        // `entity` is passed from `entity_iter` the first time.
-        unsafe { self.fetch_next_aliased_unchecked(entity).into() }
+        while let Some(entity) = self.entity_iter.next() {
+            // SAFETY:
+            // It is safe to alias for ReadOnlyWorldQuery.
+            // `entity` is passed from `entity_iter` the first time.
+            if let Some(item) = unsafe { self.fetch_next_aliased_unchecked(entity) } {
+                return Some(D::shrink(item));
+            }
+        }
+        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.entity_iter.size_hint()
+        let (min_size, max_size) = self.entity_iter.size_hint();
+        let archetype_query = D::IS_ARCHETYPAL;
+        let min_size = if archetype_query { min_size } else { 0 };
+        (min_size, max_size)
     }
 }
 
@@ -2098,16 +2211,23 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, I: DoubleEndedIterator<Item =
 {
     #[inline(always)]
     fn next_back(&mut self) -> Option<Self::Item> {
-        let entity = self.entity_iter.next_back()?;
-        // SAFETY:
-        // It is safe to alias for ReadOnlyWorldQuery.
-        // `entity` is passed from `entity_iter` the first time.
-        unsafe { self.fetch_next_aliased_unchecked(entity).into() }
+        while let Some(entity) = self.entity_iter.next_back() {
+            // SAFETY:
+            // It is safe to alias for ReadOnlyWorldQuery.
+            // `entity` is passed from `entity_iter` the first time.
+            if let Some(item) = unsafe { self.fetch_next_aliased_unchecked(entity) } {
+                return Some(D::shrink(item));
+            }
+        }
+        None
     }
 }
 
-impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, I: ExactSizeIterator<Item = Entity>>
-    ExactSizeIterator for QuerySortedManyIter<'w, 's, D, F, I>
+impl<
+        D: ReadOnlyQueryData + ArchetypeQueryData,
+        F: QueryFilter,
+        I: ExactSizeIterator<Item = Entity>,
+    > ExactSizeIterator for QuerySortedManyIter<'_, '_, D, F, I>
 {
 }
 
@@ -2327,16 +2447,15 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, const K: usize> Iterator
                 Some(acc + choose(n as usize, K - i)?)
             });
 
-        let archetype_query = F::IS_ARCHETYPAL;
+        let archetype_query = D::IS_ARCHETYPAL && F::IS_ARCHETYPAL;
         let known_max = max_combinations.unwrap_or(usize::MAX);
         let min_combinations = if archetype_query { known_max } else { 0 };
         (min_combinations, max_combinations)
     }
 }
 
-impl<'w, 's, D: QueryData, F: QueryFilter> ExactSizeIterator for QueryIter<'w, 's, D, F>
-where
-    F: ArchetypeFilter,
+impl<'w, 's, D: ArchetypeQueryData, F: ArchetypeFilter> ExactSizeIterator
+    for QueryIter<'w, 's, D, F>
 {
     fn len(&self) -> usize {
         self.size_hint().0
@@ -2454,13 +2573,13 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
                 //  - `set_table` must have been called previously either in `next` or before it.
                 //  - `*entity` and `index` are in the current table.
                 unsafe {
-                    Some(D::fetch(
+                    D::fetch(
                         &query_state.fetch_state,
                         &mut self.fetch,
                         *entity,
                         // SAFETY: This is from an exclusive range, so it can't be max.
                         TableRow::new(NonMaxU32::new_unchecked(index)),
-                    ))
+                    )
                 }
             } else {
                 // SAFETY: This must have been called previously in `next` as `current_row > 0`
@@ -2470,12 +2589,12 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
                 //  - `set_archetype` must have been called previously either in `next` or before it.
                 //  - `archetype_entity.id()` and `archetype_entity.table_row()` are in the current archetype.
                 unsafe {
-                    Some(D::fetch(
+                    D::fetch(
                         &query_state.fetch_state,
                         &mut self.fetch,
                         archetype_entity.id(),
                         archetype_entity.table_row(),
-                    ))
+                    )
                 }
             }
         } else {
@@ -2485,7 +2604,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
 
     /// How many values will this cursor return at most?
     ///
-    /// Note that if `F::IS_ARCHETYPAL`, the return value
+    /// Note that if `D::IS_ARCHETYPAL && F::IS_ARCHETYPAL`, the return value
     /// will be **the exact count of remaining values**.
     fn max_remaining(&self, tables: &'w Tables, archetypes: &'w Archetypes) -> u32 {
         let ids = self.storage_id_iter.clone();
@@ -2502,7 +2621,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
     // NOTE: If you are changing query iteration code, remember to update the following places, where relevant:
     // QueryIter, QueryIterationCursor, QuerySortedIter, QueryManyIter, QuerySortedManyIter, QueryCombinationIter,
     // QueryState::par_fold_init_unchecked_manual, QueryState::par_many_fold_init_unchecked_manual,
-    // QueryState::par_many_unique_fold_init_unchecked_manual
+    // QueryState::par_many_unique_fold_init_unchecked_manual, QueryContiguousIter::next
     /// # Safety
     /// `tables` and `archetypes` must belong to the same world that the [`QueryIterationCursor`]
     /// was initialized for.
@@ -2515,6 +2634,8 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
         query_state: &'s QueryState<D, F>,
     ) -> Option<D::Item<'w, 's>> {
         if self.is_dense {
+            // NOTE: if you are changing this branch you would probably have to change
+            // QueryContiguousIter::next as well
             loop {
                 // we are on the beginning of the query, or finished processing a table, so skip to the next
                 if self.current_row == self.current_len {
@@ -2540,8 +2661,9 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
                     unsafe { self.table_entities.get_unchecked(self.current_row as usize) };
                 // SAFETY: The row is less than the u32 len, so it must not be max.
                 let row = unsafe { TableRow::new(NonMaxU32::new_unchecked(self.current_row)) };
+                self.current_row += 1;
+
                 if !F::filter_fetch(&query_state.filter_state, &mut self.filter, *entity, row) {
-                    self.current_row += 1;
                     continue;
                 }
 
@@ -2552,9 +2674,9 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
                 // - fetch is only called once for each `entity`.
                 let item =
                     unsafe { D::fetch(&query_state.fetch_state, &mut self.fetch, *entity, row) };
-
-                self.current_row += 1;
-                return Some(item);
+                if let Some(item) = item {
+                    return Some(item);
+                }
             }
         } else {
             loop {
@@ -2592,13 +2714,14 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
                     self.archetype_entities
                         .get_unchecked(self.current_row as usize)
                 };
+                self.current_row += 1;
+
                 if !F::filter_fetch(
                     &query_state.filter_state,
                     &mut self.filter,
                     archetype_entity.id(),
                     archetype_entity.table_row(),
                 ) {
-                    self.current_row += 1;
                     continue;
                 }
 
@@ -2615,8 +2738,9 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryIterationCursor<'w, 's, D, F> {
                         archetype_entity.table_row(),
                     )
                 };
-                self.current_row += 1;
-                return Some(item);
+                if let Some(item) = item {
+                    return Some(item);
+                }
             }
         }
     }
@@ -2658,7 +2782,7 @@ mod tests {
 
     use crate::component::Component;
     use crate::entity::Entity;
-    use crate::prelude::World;
+    use crate::prelude::{With, World};
 
     #[derive(Component, Debug, PartialEq, PartialOrd, Clone, Copy)]
     struct A(f32);
@@ -2666,16 +2790,19 @@ mod tests {
     #[component(storage = "SparseSet")]
     struct Sparse(usize);
 
+    #[derive(Component)]
+    struct Marker;
+
     #[test]
     fn query_iter_sorts() {
         let mut world = World::new();
         for i in 0..100 {
-            world.spawn(A(i as f32));
-            world.spawn((A(i as f32), Sparse(i)));
-            world.spawn(Sparse(i));
+            world.spawn((A(i as f32), Marker));
+            world.spawn((A(i as f32), Sparse(i), Marker));
+            world.spawn((Sparse(i), Marker));
         }
 
-        let mut query = world.query::<Entity>();
+        let mut query = world.query_filtered::<Entity, With<Marker>>();
 
         let sort = query.iter(&world).sort::<Entity>().collect::<Vec<_>>();
         assert_eq!(sort.len(), 300);

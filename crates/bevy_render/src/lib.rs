@@ -20,7 +20,7 @@
         reason = "rustdoc_internals is needed for fake_variadic"
     )
 )]
-#![cfg_attr(any(docsrs, docsrs_dep), feature(doc_auto_cfg, rustdoc_internals))]
+#![cfg_attr(any(docsrs, docsrs_dep), feature(doc_cfg, rustdoc_internals))]
 #![doc(
     html_logo_url = "https://bevy.org/assets/icon.png",
     html_favicon_url = "https://bevy.org/assets/icon.png"
@@ -35,24 +35,24 @@ extern crate core;
 // Required to make proc macros work in bevy itself.
 extern crate self as bevy_render;
 
-pub mod alpha;
 pub mod batching;
 pub mod camera;
 pub mod diagnostic;
 pub mod erased_render_asset;
-pub mod experimental;
+pub mod error_handler;
 pub mod extract_component;
 pub mod extract_instances;
 mod extract_param;
+pub mod extract_plugin;
 pub mod extract_resource;
 pub mod globals;
 pub mod gpu_component_array_buffer;
 pub mod gpu_readback;
 pub mod mesh;
+pub mod occlusion_culling;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pipelined_rendering;
 pub mod render_asset;
-pub mod render_graph;
 pub mod render_phase;
 pub mod render_resource;
 pub mod renderer;
@@ -62,10 +62,6 @@ pub mod sync_component;
 pub mod sync_world;
 pub mod texture;
 pub mod view;
-mod wgpu_wrapper;
-pub use bevy_camera::primitives;
-#[cfg(feature = "bevy_light")]
-mod extract_impls;
 
 /// The render prelude.
 ///
@@ -73,90 +69,51 @@ mod extract_impls;
 pub mod prelude {
     #[doc(hidden)]
     pub use crate::{
-        alpha::AlphaMode,
-        camera::NormalizedRenderTargetExt as _,
-        mesh::{
-            morph::MorphWeights, primitives::MeshBuilder, primitives::Meshable, Mesh, Mesh2d,
-            Mesh3d,
-        },
-        render_resource::Shader,
-        texture::{ImagePlugin, ManualTextureViews},
-        view::{InheritedVisibility, Msaa, ViewVisibility, Visibility},
+        camera::NormalizedRenderTargetExt as _, texture::ManualTextureViews, view::Msaa,
         ExtractSchedule,
     };
-    // TODO: Remove this in a follow-up
-    #[doc(hidden)]
-    pub use bevy_camera::{
-        Camera, ClearColor, ClearColorConfig, OrthographicProjection, PerspectiveProjection,
-        Projection,
-    };
-}
-
-#[doc(hidden)]
-pub mod _macro {
-    pub use bevy_asset;
 }
 
 pub use extract_param::Extract;
+pub use extract_plugin::{ExtractSchedule, MainWorld};
 
 use crate::{
     camera::CameraPlugin,
+    error_handler::{RenderErrorHandler, RenderState},
+    extract_plugin::ExtractPlugin,
     gpu_readback::GpuReadbackPlugin,
-    mesh::{MeshPlugin, RenderMesh},
+    mesh::{MeshRenderAssetPlugin, RenderMesh},
     render_asset::prepare_assets,
-    render_resource::{init_empty_bind_group_layout, PipelineCache, Shader, ShaderLoader},
-    renderer::{render_system, RenderInstance},
+    render_resource::PipelineCache,
+    renderer::{render_system, RenderAdapterInfo},
     settings::RenderCreation,
     storage::StoragePlugin,
+    texture::TexturePlugin,
     view::{ViewPlugin, WindowRenderPlugin},
 };
 use alloc::sync::Arc;
 use batching::gpu_preprocessing::BatchingPlugin;
-use bevy_app::{App, AppLabel, Plugin, SubApp};
+use bevy_app::{App, AppLabel, Plugin};
 use bevy_asset::{AssetApp, AssetServer};
-use bevy_ecs::{
-    prelude::*,
-    schedule::{ScheduleBuildSettings, ScheduleLabel},
-};
-use bevy_image::{CompressedImageFormatSupport, CompressedImageFormats};
-use bevy_utils::prelude::default;
+use bevy_derive::Deref;
+use bevy_ecs::{prelude::*, schedule::ScheduleLabel};
+use bevy_platform::time::Instant;
+use bevy_shader::{load_shader_library, Shader, ShaderLoader};
+use bevy_time::TimeSender;
 use bevy_window::{PrimaryWindow, RawHandleWrapperHolder};
 use bitflags::bitflags;
-use core::ops::{Deref, DerefMut};
-use experimental::occlusion_culling::OcclusionCullingPlugin;
 use globals::GlobalsPlugin;
+use occlusion_culling::OcclusionCullingPlugin;
 use render_asset::{
     extract_render_asset_bytes_per_frame, reset_render_asset_bytes_per_frame,
     RenderAssetBytesPerFrame, RenderAssetBytesPerFrameLimiter,
 };
-use renderer::{RenderAdapter, RenderDevice, RenderQueue};
 use settings::RenderResources;
 use std::sync::Mutex;
-use sync_world::{despawn_temporary_render_entities, entity_sync_system, SyncWorldPlugin};
-use tracing::debug;
-pub use wgpu_wrapper::WgpuWrapper;
-
-/// Inline shader as an `embedded_asset` and load it permanently.
-///
-/// This works around a limitation of the shader loader not properly loading
-/// dependencies of shaders.
-#[macro_export]
-macro_rules! load_shader_library {
-    ($asset_server_provider: expr, $path: literal $(, $settings: expr)?) => {
-        $crate::_macro::bevy_asset::embedded_asset!($asset_server_provider, $path);
-        let handle: $crate::_macro::bevy_asset::prelude::Handle<$crate::prelude::Shader> =
-            $crate::_macro::bevy_asset::load_embedded_asset!(
-                $asset_server_provider,
-                $path
-                $(,$settings)?
-            );
-        core::mem::forget(handle);
-    }
-}
 
 /// Contains the default Bevy rendering backend based on wgpu.
 ///
-/// Rendering is done in a [`SubApp`], which exchanges data with the main app
+/// Rendering is done in a [`SubApp`](bevy_app::SubApp), which exchanges data with the main app
 /// between main schedule iterations.
 ///
 /// Rendering can be executed between iterations of the main schedule,
@@ -228,19 +185,24 @@ pub enum RenderSystems {
     Render,
     /// Cleanup render resources here.
     Cleanup,
-    /// Final cleanup occurs: all entities will be despawned.
+    /// Final cleanup occurs: any entities with
+    /// [`TemporaryRenderEntity`](sync_world::TemporaryRenderEntity) will be despawned.
     ///
     /// Runs after [`Cleanup`](RenderSystems::Cleanup).
     PostCleanup,
 }
 
-/// Deprecated alias for [`RenderSystems`].
-#[deprecated(since = "0.17.0", note = "Renamed to `RenderSystems`.")]
-pub type RenderSet = RenderSystems;
-
-/// The startup schedule of the [`RenderApp`]
+/// The startup schedule of the [`RenderApp`].
+/// This can potentially run multiple times, and not on a fresh render world.
+/// Every time a new [`RenderDevice`](renderer::RenderDevice) is acquired,
+/// this schedule runs to initialize any gpu resources needed for rendering on it.
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone, Default)]
 pub struct RenderStartup;
+
+/// The render recovery schedule. This schedule runs the [`Render`] schedule if
+/// we are in [`RenderState::Ready`], and is otherwise hidden from users.
+#[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
+struct RenderRecovery;
 
 /// The main render schedule.
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone, Default)]
@@ -292,47 +254,8 @@ impl Render {
     }
 }
 
-/// Schedule which extract data from the main world and inserts it into the render world.
-///
-/// This step should be kept as short as possible to increase the "pipelining potential" for
-/// running the next frame while rendering the current frame.
-///
-/// This schedule is run on the main world, but its buffers are not applied
-/// until it is returned to the render world.
-#[derive(ScheduleLabel, PartialEq, Eq, Debug, Clone, Hash, Default)]
-pub struct ExtractSchedule;
-
-/// The simulation [`World`] of the application, stored as a resource.
-///
-/// This resource is only available during [`ExtractSchedule`] and not
-/// during command application of that schedule.
-/// See [`Extract`] for more details.
-#[derive(Resource, Default)]
-pub struct MainWorld(World);
-
-impl Deref for MainWorld {
-    type Target = World;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for MainWorld {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-pub mod graph {
-    use crate::render_graph::RenderLabel;
-
-    #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-    pub struct CameraDriverLabel;
-}
-
-#[derive(Resource)]
-struct FutureRenderResources(Arc<Mutex<Option<RenderResources>>>);
+#[derive(Resource, Default, Clone, Deref)]
+pub(crate) struct FutureRenderResources(Arc<Mutex<Option<RenderResources>>>);
 
 /// A label for the rendering sub-app.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, AppLabel)]
@@ -343,124 +266,28 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_asset::<Shader>()
             .init_asset_loader::<ShaderLoader>();
+        load_shader_library!(app, "maths.wgsl");
+        load_shader_library!(app, "color_operations.wgsl");
+        load_shader_library!(app, "bindless.wgsl");
 
-        match &self.render_creation {
-            RenderCreation::Manual(resources) => {
-                let future_render_resources_wrapper = Arc::new(Mutex::new(Some(resources.clone())));
-                app.insert_resource(FutureRenderResources(
-                    future_render_resources_wrapper.clone(),
-                ));
-                // SAFETY: Plugins should be set up on the main thread.
-                unsafe { initialize_render_app(app) };
-            }
-            RenderCreation::Automatic(render_creation) => {
-                if let Some(backends) = render_creation.backends {
-                    let future_render_resources_wrapper = Arc::new(Mutex::new(None));
-                    app.insert_resource(FutureRenderResources(
-                        future_render_resources_wrapper.clone(),
-                    ));
-
-                    let primary_window = app
-                        .world_mut()
-                        .query_filtered::<&RawHandleWrapperHolder, With<PrimaryWindow>>()
-                        .single(app.world())
-                        .ok()
-                        .cloned();
-                    let settings = render_creation.clone();
-                    let async_renderer = async move {
-                        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-                            backends,
-                            flags: settings.instance_flags,
-                            memory_budget_thresholds: settings.instance_memory_budget_thresholds,
-                            backend_options: wgpu::BackendOptions {
-                                gl: wgpu::GlBackendOptions {
-                                    gles_minor_version: settings.gles3_minor_version,
-                                    fence_behavior: wgpu::GlFenceBehavior::Normal,
-                                },
-                                dx12: wgpu::Dx12BackendOptions {
-                                    shader_compiler: settings.dx12_shader_compiler.clone(),
-                                },
-                                noop: wgpu::NoopBackendOptions { enable: false },
-                            },
-                        });
-
-                        let surface = primary_window.and_then(|wrapper| {
-                            let maybe_handle = wrapper.0.lock().expect(
-                                "Couldn't get the window handle in time for renderer initialization",
-                            );
-                            if let Some(wrapper) = maybe_handle.as_ref() {
-                                // SAFETY: Plugins should be set up on the main thread.
-                                let handle = unsafe { wrapper.get_handle() };
-                                Some(
-                                    instance
-                                        .create_surface(handle)
-                                        .expect("Failed to create wgpu surface"),
-                                )
-                            } else {
-                                None
-                            }
-                        });
-
-                        let force_fallback_adapter = std::env::var("WGPU_FORCE_FALLBACK_ADAPTER")
-                            .map_or(settings.force_fallback_adapter, |v| {
-                                !(v.is_empty() || v == "0" || v == "false")
-                            });
-
-                        let desired_adapter_name = std::env::var("WGPU_ADAPTER_NAME")
-                            .as_deref()
-                            .map_or(settings.adapter_name.clone(), |x| Some(x.to_lowercase()));
-
-                        let request_adapter_options = wgpu::RequestAdapterOptions {
-                            power_preference: settings.power_preference,
-                            compatible_surface: surface.as_ref(),
-                            force_fallback_adapter,
-                        };
-
-                        let (device, queue, adapter_info, render_adapter) =
-                            renderer::initialize_renderer(
-                                &instance,
-                                &settings,
-                                &request_adapter_options,
-                                desired_adapter_name,
-                            )
-                            .await;
-                        debug!("Configured wgpu adapter Limits: {:#?}", device.limits());
-                        debug!("Configured wgpu adapter Features: {:#?}", device.features());
-                        let mut future_render_resources_inner =
-                            future_render_resources_wrapper.lock().unwrap();
-                        *future_render_resources_inner = Some(RenderResources(
-                            device,
-                            queue,
-                            adapter_info,
-                            render_adapter,
-                            RenderInstance(Arc::new(WgpuWrapper::new(instance))),
-                        ));
-                    };
-                    // In wasm, spawn a task and detach it for execution
-                    #[cfg(target_arch = "wasm32")]
-                    bevy_tasks::IoTaskPool::get()
-                        .spawn_local(async_renderer)
-                        .detach();
-                    // Otherwise, just block for it to complete
-                    #[cfg(not(target_arch = "wasm32"))]
-                    futures_lite::future::block_on(async_renderer);
-
-                    // SAFETY: Plugins should be set up on the main thread.
-                    unsafe { initialize_render_app(app) };
-                }
-            }
+        if insert_future_resources(&self.render_creation, app.world_mut()) {
+            // We only create the render world and set up extraction if we
+            // have a rendering backend available.
+            app.add_plugins(ExtractPlugin {
+                pre_extract: error_handler::update_state,
+            });
         };
 
         app.add_plugins((
             WindowRenderPlugin,
             CameraPlugin,
             ViewPlugin,
-            MeshPlugin,
+            MeshRenderAssetPlugin,
             GlobalsPlugin,
+            TexturePlugin,
             BatchingPlugin {
                 debug_flags: self.debug_flags,
             },
-            SyncWorldPlugin,
             StoragePlugin,
             GpuReadbackPlugin::default(),
             OcclusionCullingPlugin,
@@ -468,171 +295,136 @@ impl Plugin for RenderPlugin {
             diagnostic::RenderDiagnosticsPlugin,
         ));
 
-        app.init_resource::<RenderAssetBytesPerFrame>();
+        let asset_server = app.world().resource::<AssetServer>().clone();
+        app.init_resource::<RenderAssetBytesPerFrame>()
+            .init_resource::<RenderErrorHandler>();
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.init_resource::<RenderAssetBytesPerFrameLimiter>();
-            render_app
-                .add_systems(ExtractSchedule, extract_render_asset_bytes_per_frame)
-                .add_systems(
-                    Render,
-                    reset_render_asset_bytes_per_frame.in_set(RenderSystems::Cleanup),
-                );
+            render_app.init_resource::<renderer::PendingCommandBuffers>();
+            render_app.insert_resource(asset_server);
+            render_app.insert_resource(RenderState::Initializing);
+            render_app.add_systems(
+                ExtractSchedule,
+                (
+                    extract_render_asset_bytes_per_frame,
+                    PipelineCache::extract_shaders,
+                ),
+            );
 
-            render_app.add_systems(RenderStartup, init_empty_bind_group_layout);
+            render_app.init_schedule(RenderStartup);
+            render_app.update_schedule = Some(RenderRecovery.intern());
+            render_app.add_systems(
+                RenderRecovery,
+                (run_render_schedule.run_if(renderer_is_ready), send_time).chain(),
+            );
+            render_app.add_systems(
+                Render,
+                (
+                    (PipelineCache::process_pipeline_queue_system, render_system)
+                        .chain()
+                        .in_set(RenderSystems::Render),
+                    reset_render_asset_bytes_per_frame.in_set(RenderSystems::Cleanup),
+                ),
+            );
         }
     }
 
     fn ready(&self, app: &App) -> bool {
+        // This is a little tricky. `FutureRenderResources` is added in `build`, which runs synchronously before `ready`.
+        // It is only added if there is a wgpu backend and thus the renderer can be created.
+        // Hence, if we try and get the resource and it is not present, that means we are ready, because we dont need it.
+        // On the other hand, if the resource is present, then we try and lock on it. The lock can fail, in which case
+        // we currently can assume that means the `FutureRenderResources` is in the act of being populated, because
+        // that is the only other place the lock may be held. If it is being populated, we can assume we're ready. This
+        // happens via the `and_then` falling through to the same `unwrap_or(true)` case as when there's no resource.
+        // If the lock succeeds, we can straightforwardly check if it is populated. If it is not, then we're not ready.
         app.world()
             .get_resource::<FutureRenderResources>()
-            .and_then(|frr| frr.0.try_lock().map(|locked| locked.is_some()).ok())
+            .and_then(|frr| frr.try_lock().map(|locked| locked.is_some()).ok())
             .unwrap_or(true)
     }
 
     fn finish(&self, app: &mut App) {
-        load_shader_library!(app, "maths.wgsl");
-        load_shader_library!(app, "color_operations.wgsl");
-        load_shader_library!(app, "bindless.wgsl");
         if let Some(future_render_resources) =
             app.world_mut().remove_resource::<FutureRenderResources>()
         {
-            let RenderResources(device, queue, adapter_info, render_adapter, instance) =
-                future_render_resources.0.lock().unwrap().take().unwrap();
+            let bevy_app::SubApps { main, sub_apps } = app.sub_apps_mut();
+            let render = sub_apps.get_mut(&RenderApp.intern()).unwrap();
+            let render_resources = future_render_resources.0.lock().unwrap().take().unwrap();
 
-            let compressed_image_format_support = CompressedImageFormatSupport(
-                CompressedImageFormats::from_features(device.features()),
+            render_resources.unpack_into(
+                main.world_mut(),
+                render.world_mut(),
+                self.synchronous_pipeline_compilation,
             );
-
-            app.insert_resource(device.clone())
-                .insert_resource(queue.clone())
-                .insert_resource(adapter_info.clone())
-                .insert_resource(render_adapter.clone())
-                .insert_resource(compressed_image_format_support);
-
-            let render_app = app.sub_app_mut(RenderApp);
-
-            render_app
-                .insert_resource(instance)
-                .insert_resource(PipelineCache::new(
-                    device.clone(),
-                    render_adapter.clone(),
-                    self.synchronous_pipeline_compilation,
-                ))
-                .insert_resource(device)
-                .insert_resource(queue)
-                .insert_resource(render_adapter)
-                .insert_resource(adapter_info);
         }
     }
 }
 
-/// A "scratch" world used to avoid allocating new worlds every frame when
-/// swapping out the [`MainWorld`] for [`ExtractSchedule`].
-#[derive(Resource, Default)]
-struct ScratchMainWorld(World);
-
-/// Executes the [`ExtractSchedule`] step of the renderer.
-/// This updates the render world with the extracted ECS data of the current frame.
-fn extract(main_world: &mut World, render_world: &mut World) {
-    // temporarily add the app world to the render world as a resource
-    let scratch_world = main_world.remove_resource::<ScratchMainWorld>().unwrap();
-    let inserted_world = core::mem::replace(main_world, scratch_world.0);
-    render_world.insert_resource(MainWorld(inserted_world));
-    render_world.run_schedule(ExtractSchedule);
-
-    // move the app world back, as if nothing happened.
-    let inserted_world = render_world.remove_resource::<MainWorld>().unwrap();
-    let scratch_world = core::mem::replace(main_world, inserted_world.0);
-    main_world.insert_resource(ScratchMainWorld(scratch_world));
+fn renderer_is_ready(state: Res<RenderState>) -> bool {
+    matches!(*state, RenderState::Ready)
 }
 
-/// # Safety
-/// This function must be called from the main thread.
-unsafe fn initialize_render_app(app: &mut App) {
-    app.init_resource::<ScratchMainWorld>();
+fn run_render_schedule(world: &mut World) {
+    world.run_schedule(Render);
+}
 
-    let mut render_app = SubApp::new();
-    render_app.update_schedule = Some(Render.intern());
-
-    let mut extract_schedule = Schedule::new(ExtractSchedule);
-    // We skip applying any commands during the ExtractSchedule
-    // so commands can be applied on the render thread.
-    extract_schedule.set_build_settings(ScheduleBuildSettings {
-        auto_insert_apply_deferred: false,
-        ..default()
-    });
-    extract_schedule.set_apply_final_deferred(false);
-
-    render_app
-        .add_schedule(extract_schedule)
-        .add_schedule(Render::base_schedule())
-        .init_resource::<render_graph::RenderGraph>()
-        .insert_resource(app.world().resource::<AssetServer>().clone())
-        .add_systems(ExtractSchedule, PipelineCache::extract_shaders)
-        .add_systems(
-            Render,
-            (
-                // This set applies the commands from the extract schedule while the render schedule
-                // is running in parallel with the main app.
-                apply_extract_commands.in_set(RenderSystems::ExtractCommands),
-                (PipelineCache::process_pipeline_queue_system, render_system)
-                    .chain()
-                    .in_set(RenderSystems::Render),
-                despawn_temporary_render_entities.in_set(RenderSystems::PostCleanup),
-            ),
-        );
-
-    // We want the closure to have a flag to only run the RenderStartup schedule once, but the only
-    // way to have the closure store this flag is by capturing it. This variable is otherwise
-    // unused.
-    let mut should_run_startup = true;
-    render_app.set_extract(move |main_world, render_world| {
-        if should_run_startup {
-            // Run the `RenderStartup` if it hasn't run yet. This does mean `RenderStartup` blocks
-            // the rest of the app extraction, but this is necessary since extraction itself can
-            // depend on resources initialized in `RenderStartup`.
-            render_world.run_schedule(RenderStartup);
-            should_run_startup = false;
+fn send_time(time_sender: Res<TimeSender>) {
+    // update the time and send it to the app world regardless of whether we render
+    if let Err(error) = time_sender.0.try_send(Instant::now()) {
+        match error {
+            bevy_time::TrySendError::Full(_) => {
+                panic!(
+                    "The TimeSender channel should always be empty during render. \
+                            You might need to add the bevy::core::time_system to your app."
+                );
+            }
+            bevy_time::TrySendError::Disconnected(_) => {
+                // ignore disconnected errors, the main world probably just got dropped during shutdown
+            }
         }
-
-        {
-            #[cfg(feature = "trace")]
-            let _stage_span = tracing::info_span!("entity_sync").entered();
-            entity_sync_system(main_world, render_world);
-        }
-
-        // run extract schedule
-        extract(main_world, render_world);
-    });
-
-    let (sender, receiver) = bevy_time::create_time_channels();
-    render_app.insert_resource(sender);
-    app.insert_resource(receiver);
-    app.insert_sub_app(RenderApp, render_app);
+    }
 }
 
-/// Applies the commands from the extract schedule. This happens during
-/// the render schedule rather than during extraction to allow the commands to run in parallel with the
-/// main app when pipelined rendering is enabled.
-fn apply_extract_commands(render_world: &mut World) {
-    render_world.resource_scope(|render_world, mut schedules: Mut<Schedules>| {
-        schedules
-            .get_mut(ExtractSchedule)
-            .unwrap()
-            .apply_deferred(render_world);
-    });
+/// Inserts a [`FutureRenderResources`] created from this [`RenderCreation`].
+///
+/// Returns true if creation was successful, false otherwise.
+fn insert_future_resources(render_creation: &RenderCreation, main_world: &mut World) -> bool {
+    let primary_window = main_world
+        .query_filtered::<&RawHandleWrapperHolder, With<PrimaryWindow>>()
+        .single(main_world)
+        .ok()
+        .cloned();
+
+    #[cfg(feature = "raw_vulkan_init")]
+    let raw_vulkan_init_settings = main_world
+        .get_resource::<renderer::raw_vulkan_init::RawVulkanInitSettings>()
+        .cloned()
+        .unwrap_or_default();
+
+    let future_resources = FutureRenderResources::default();
+    let success = render_creation.create_render(
+        future_resources.clone(),
+        primary_window,
+        #[cfg(feature = "raw_vulkan_init")]
+        raw_vulkan_init_settings,
+    );
+    if success {
+        // Note that `future_resources` is not necessarily populated here yet.
+        main_world.insert_resource(future_resources);
+    }
+    success
 }
 
-/// If the [`RenderAdapter`] is a Qualcomm Adreno, returns its model number.
+/// If the [`RenderAdapterInfo`] is a Qualcomm Adreno, returns its model number.
 ///
 /// This lets us work around hardware bugs.
-pub fn get_adreno_model(adapter: &RenderAdapter) -> Option<u32> {
+pub fn get_adreno_model(adapter_info: &RenderAdapterInfo) -> Option<u32> {
     if !cfg!(target_os = "android") {
         return None;
     }
 
-    let adapter_name = adapter.get_info().name;
-    let adreno_model = adapter_name.strip_prefix("Adreno (TM) ")?;
+    let adreno_model = adapter_info.name.strip_prefix("Adreno (TM) ")?;
 
     // Take suffixes into account (like Adreno 642L).
     Some(
@@ -644,16 +436,15 @@ pub fn get_adreno_model(adapter: &RenderAdapter) -> Option<u32> {
 }
 
 /// Get the Mali driver version if the adapter is a Mali GPU.
-pub fn get_mali_driver_version(adapter: &RenderAdapter) -> Option<u32> {
+pub fn get_mali_driver_version(adapter_info: &RenderAdapterInfo) -> Option<u32> {
     if !cfg!(target_os = "android") {
         return None;
     }
 
-    let driver_name = adapter.get_info().name;
-    if !driver_name.contains("Mali") {
+    if !adapter_info.name.contains("Mali") {
         return None;
     }
-    let driver_info = adapter.get_info().driver_info;
+    let driver_info = &adapter_info.driver_info;
     if let Some(start_pos) = driver_info.find("v1.r")
         && let Some(end_pos) = driver_info[start_pos..].find('p')
     {

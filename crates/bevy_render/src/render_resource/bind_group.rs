@@ -1,14 +1,14 @@
-use crate::WgpuWrapper;
 use crate::{
-    define_atomic_id,
     render_asset::RenderAssets,
-    render_resource::{BindGroupLayout, Buffer, Sampler, TextureView},
-    renderer::RenderDevice,
+    render_resource::{BindGroupLayout, Buffer, PipelineCache, Sampler, TextureView},
+    renderer::{RenderDevice, WgpuWrapper},
     texture::GpuImage,
 };
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::system::{SystemParam, SystemParamItem};
+use bevy_material::descriptor::BindGroupLayoutDescriptor;
 pub use bevy_render_macros::AsBindGroup;
+use bevy_utils::define_atomic_id;
 use core::ops::Deref;
 use encase::ShaderType;
 use thiserror::Error;
@@ -112,7 +112,7 @@ impl Deref for BindGroup {
 /// # use bevy_image::Image;
 /// # use bevy_color::LinearRgba;
 /// # use bevy_asset::Handle;
-/// # use bevy_render::storage::ShaderStorageBuffer;
+/// # use bevy_render::storage::ShaderBuffer;
 ///
 /// #[derive(AsBindGroup)]
 /// struct CoolMaterial {
@@ -122,7 +122,7 @@ impl Deref for BindGroup {
 ///     #[sampler(2)]
 ///     color_texture: Handle<Image>,
 ///     #[storage(3, read_only)]
-///     storage_buffer: Handle<ShaderStorageBuffer>,
+///     storage_buffer: Handle<ShaderBuffer>,
 ///     #[storage(4, read_only, buffer)]
 ///     raw_buffer: Buffer,
 ///     #[storage_texture(5)]
@@ -482,26 +482,24 @@ impl Deref for BindGroup {
 /// }
 ///
 /// // Materials keys are intended to be small, cheap to hash, and
-/// // uniquely identify a specific material permutation, which
-/// // is why they are required to be `bytemuck::Pod` and `bytemuck::Zeroable`
-/// // when using the `AsBindGroup` derive macro.
+/// // uniquely identify a specific material permutation.
 /// #[repr(C)]
-/// #[derive(Copy, Clone, Hash, Eq, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+/// #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 /// struct CoolMaterialKey {
-///     is_shaded: u32,
+///     is_shaded: bool,
 /// }
 ///
 /// impl From<&CoolMaterial> for CoolMaterialKey {
 ///     fn from(material: &CoolMaterial) -> CoolMaterialKey {
 ///         CoolMaterialKey {
-///             is_shaded: material.is_shaded as u32,
+///             is_shaded: material.is_shaded,
 ///         }
 ///     }
 /// }
 /// ```
 pub trait AsBindGroup {
     /// Data that will be stored alongside the "prepared" bind group.
-    type Data: bytemuck::Pod + bytemuck::Zeroable + Send + Sync;
+    type Data: Send + Sync;
 
     type Param: SystemParam + 'static;
 
@@ -526,17 +524,18 @@ pub trait AsBindGroup {
     }
 
     /// label
-    fn label() -> Option<&'static str> {
-        None
-    }
+    fn label() -> &'static str;
 
     /// Creates a bind group for `self` matching the layout defined in [`AsBindGroup::bind_group_layout`].
     fn as_bind_group(
         &self,
-        layout: &BindGroupLayout,
+        layout_descriptor: &BindGroupLayoutDescriptor,
         render_device: &RenderDevice,
+        pipeline_cache: &PipelineCache,
         param: &mut SystemParamItem<'_, '_, Self::Param>,
     ) -> Result<PreparedBindGroup, AsBindGroupError> {
+        let layout = &pipeline_cache.get_bind_group_layout(layout_descriptor);
+
         let UnpreparedBindGroup { bindings } =
             Self::unprepared_bind_group(self, layout, render_device, param, false)?;
 
@@ -587,6 +586,19 @@ pub trait AsBindGroup {
             Self::label(),
             &Self::bind_group_layout_entries(render_device, false),
         )
+    }
+
+    /// Creates the bind group layout descriptor matching all bind groups returned by
+    /// [`AsBindGroup::as_bind_group`]
+    /// TODO: we only need `RenderDevice` to determine if bindless is supported
+    fn bind_group_layout_descriptor(render_device: &RenderDevice) -> BindGroupLayoutDescriptor
+    where
+        Self: Sized,
+    {
+        BindGroupLayoutDescriptor {
+            label: Self::label().into(),
+            entries: Self::bind_group_layout_entries(render_device, false),
+        }
     }
 
     /// Returns a vec of bind group layout entries.
@@ -699,6 +711,10 @@ mod test {
 
     #[test]
     fn texture_visibility() {
+        #[expect(
+            dead_code,
+            reason = "This is a derive macro compilation test. It will not be constructed."
+        )]
         #[derive(AsBindGroup)]
         pub struct TextureVisibilityTest {
             #[texture(0, visibility(all))]

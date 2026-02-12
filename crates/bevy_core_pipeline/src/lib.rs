@@ -1,50 +1,39 @@
 #![expect(missing_docs, reason = "Not all docs are written yet, see #3492.")]
 #![forbid(unsafe_code)]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(
     html_logo_url = "https://bevy.org/assets/icon.png",
     html_favicon_url = "https://bevy.org/assets/icon.png"
 )]
 
-pub mod auto_exposure;
 pub mod blit;
-pub mod bloom;
 pub mod core_2d;
 pub mod core_3d;
 pub mod deferred;
-pub mod dof;
-pub mod experimental;
-pub mod motion_blur;
-pub mod msaa_writeback;
+pub mod fullscreen_material;
+pub mod mip_generation;
 pub mod oit;
-pub mod post_process;
 pub mod prepass;
+pub mod schedule;
 pub mod tonemapping;
 pub mod upscaling;
 
+pub use bevy_light::Skybox;
 pub use fullscreen_vertex_shader::FullscreenShader;
-pub use skybox::Skybox;
+pub use schedule::{Core2d, Core2dSystems, Core3d, Core3dSystems};
 
 mod fullscreen_vertex_shader;
 mod skybox;
 
-/// The core pipeline prelude.
-///
-/// This includes the most common types in this crate, re-exported for your convenience.
-pub mod prelude {
-    #[doc(hidden)]
-    pub use crate::{core_2d::Camera2d, core_3d::Camera3d};
-}
-
+use crate::schedule::camera_driver;
 use crate::{
-    blit::BlitPlugin, bloom::BloomPlugin, core_2d::Core2dPlugin, core_3d::Core3dPlugin,
-    deferred::copy_lighting_id::CopyDeferredLightingIdPlugin, dof::DepthOfFieldPlugin,
-    experimental::mip_generation::MipGenerationPlugin, motion_blur::MotionBlurPlugin,
-    msaa_writeback::MsaaWritebackPlugin, post_process::PostProcessingPlugin,
+    blit::BlitPlugin, core_2d::Core2dPlugin, core_3d::Core3dPlugin,
+    deferred::copy_lighting_id::CopyDeferredLightingIdPlugin, mip_generation::MipGenerationPlugin,
     tonemapping::TonemappingPlugin, upscaling::UpscalingPlugin,
 };
 use bevy_app::{App, Plugin};
 use bevy_asset::embedded_asset;
+use bevy_render::renderer::RenderGraph;
 use bevy_render::RenderApp;
 use oit::OrderIndependentTransparencyPlugin;
 
@@ -58,19 +47,16 @@ impl Plugin for CorePipelinePlugin {
         app.add_plugins((Core2dPlugin, Core3dPlugin, CopyDeferredLightingIdPlugin))
             .add_plugins((
                 BlitPlugin,
-                MsaaWritebackPlugin,
                 TonemappingPlugin,
                 UpscalingPlugin,
-                BloomPlugin,
-                MotionBlurPlugin,
-                DepthOfFieldPlugin,
-                PostProcessingPlugin,
                 OrderIndependentTransparencyPlugin,
                 MipGenerationPlugin,
             ));
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
-        render_app.init_resource::<FullscreenShader>();
+        render_app
+            .init_resource::<FullscreenShader>()
+            .add_systems(RenderGraph, camera_driver);
     }
 }

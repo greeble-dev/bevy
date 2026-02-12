@@ -12,22 +12,19 @@ use bevy::{
     color::palettes::css::*,
     pbr::wireframe::{NoWireframe, Wireframe, WireframeColor, WireframeConfig, WireframePlugin},
     prelude::*,
-    render::{
-        render_resource::WgpuFeatures,
-        settings::{RenderCreation, WgpuSettings},
-        RenderPlugin,
-    },
+    render::{render_resource::WgpuFeatures, settings::WgpuSettings, RenderPlugin},
 };
 
 fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins.set(RenderPlugin {
-                render_creation: RenderCreation::Automatic(WgpuSettings {
+                render_creation: WgpuSettings {
                     // WARN this is a native only feature. It will not work with webgl or webgpu
                     features: WgpuFeatures::POLYGON_MODE_LINE,
                     ..default()
-                }),
+                }
+                .into(),
                 ..default()
             }),
             // You need to add this plugin to enable wireframe rendering
@@ -103,8 +100,8 @@ fn setup(
         Text::default(),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
-            left: Val::Px(12.0),
+            top: px(12),
+            left: px(12),
             ..default()
         },
     ));

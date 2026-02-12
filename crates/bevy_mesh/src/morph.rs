@@ -14,7 +14,7 @@ const MAX_TEXTURE_WIDTH: u32 = 2048;
 const MAX_COMPONENTS: u32 = MAX_TEXTURE_WIDTH * MAX_TEXTURE_WIDTH;
 
 /// Max target count available for [morph targets](MorphWeights).
-pub const MAX_MORPH_WEIGHTS: usize = 64;
+pub const MAX_MORPH_WEIGHTS: usize = 256;
 
 #[derive(Error, Clone, Debug)]
 pub enum MorphBuildError {
@@ -97,7 +97,7 @@ impl MorphTargetImage {
     }
 }
 
-/// A component that controls the [morph targets] of one or more `Mesh3d`
+/// A component that controls the [morph targets] of one or more [`Mesh3d`](crate::Mesh3d)
 /// components.
 ///
 /// To find the weights of its morph targets, a `Mesh3d` component looks for a
@@ -179,7 +179,7 @@ impl MorphWeights {
             first_mesh,
         })
     }
-    /// The first child `Mesh3d` primitive controlled by these weights.
+    /// The first child [`Mesh3d`](crate::Mesh3d) primitive controlled by these weights.
     /// This can be used to look up metadata information such as [`Mesh::morph_target_names`].
     pub fn first_mesh(&self) -> Option<&Handle<Mesh>> {
         self.first_mesh.as_ref()
@@ -198,8 +198,8 @@ impl MorphWeights {
     }
 }
 
-/// Controls the [morph targets] of a `Mesh3d` component by referencing an
-/// entity with a `MorphWeights` component.
+/// Controls the [morph targets] of a [`Mesh3d`](crate::Mesh3d) component by
+/// referencing an entity with a `MorphWeights` component.
 ///
 /// See [`MorphWeights`] for examples.
 ///

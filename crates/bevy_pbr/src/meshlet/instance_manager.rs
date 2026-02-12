@@ -2,18 +2,18 @@ use super::{meshlet_mesh_manager::MeshletMeshManager, MeshletMesh, MeshletMesh3d
 use crate::DUMMY_MESH_MATERIAL;
 use crate::{
     meshlet::asset::MeshletAabb, MaterialBindingId, MeshFlags, MeshTransforms, MeshUniform,
-    NotShadowCaster, NotShadowReceiver, PreviousGlobalTransform, RenderMaterialBindings,
-    RenderMaterialInstances,
+    PreviousGlobalTransform, RenderMaterialBindings, RenderMaterialInstances,
 };
 use bevy_asset::{AssetEvent, AssetServer, Assets, UntypedAssetId};
 use bevy_camera::visibility::RenderLayers;
 use bevy_ecs::{
     entity::{Entities, Entity, EntityHashMap},
-    event::EventReader,
+    message::MessageReader,
     query::Has,
     resource::Resource,
     system::{Local, Query, Res, ResMut, SystemState},
 };
+use bevy_light::{NotShadowCaster, NotShadowReceiver};
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_render::{render_resource::StorageBuffer, sync_world::MainEntity, MainWorld};
 use bevy_transform::components::GlobalTransform;
@@ -110,8 +110,8 @@ impl InstanceManager {
             flags |= MeshFlags::SIGN_DETERMINANT_MODEL_3X3;
         }
         let transforms = MeshTransforms {
-            world_from_local: (&transform).into(),
-            previous_world_from_local: (&previous_transform).into(),
+            world_from_local: transform.into(),
+            previous_world_from_local: previous_transform.into(),
             flags: flags.bits(),
         };
 
@@ -207,7 +207,7 @@ pub fn extract_meshlet_mesh_entities(
                 )>,
                 Res<AssetServer>,
                 ResMut<Assets<MeshletMesh>>,
-                EventReader<AssetEvent<MeshletMesh>>,
+                MessageReader<AssetEvent<MeshletMesh>>,
             )>,
         >,
     >,

@@ -75,7 +75,7 @@ pub fn prepare_morphs(
 }
 
 const fn can_align(step: usize, target: usize) -> bool {
-    step % target == 0 || target % step == 0
+    step.is_multiple_of(target) || target.is_multiple_of(step)
 }
 
 const WGPU_MIN_ALIGN: usize = 256;
@@ -122,15 +122,20 @@ pub fn extract_morphs(
     morph_indices.current.clear();
     uniform.current_buffer.clear();
 
-    for (entity, view_visibility, morph_weights) in &query {
+    for (entity, view_visibility, mesh_weights) in &query {
         if !view_visibility.get() {
             continue;
         }
-        let Ok(weights) = weights_query.get(morph_weights.0) else {
+        let Ok(weights) = weights_query.get(mesh_weights.0) else {
             continue;
         };
         let start = uniform.current_buffer.len();
-        let legal_weights = weights.weights().iter().take(MAX_MORPH_WEIGHTS).copied();
+        let legal_weights = weights
+            .weights()
+            .iter()
+            .chain(iter::repeat(&0.0))
+            .take(MAX_MORPH_WEIGHTS)
+            .copied();
         uniform.current_buffer.extend(legal_weights);
         add_to_alignment::<f32>(&mut uniform.current_buffer);
 

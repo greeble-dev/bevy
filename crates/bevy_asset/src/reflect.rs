@@ -4,7 +4,9 @@ use core::any::{Any, TypeId};
 use bevy_ecs::world::{unsafe_world_cell::UnsafeWorldCell, World};
 use bevy_reflect::{FromReflect, FromType, PartialReflect, Reflect};
 
-use crate::{Asset, AssetId, Assets, Handle, UntypedAssetId, UntypedHandle};
+use crate::{
+    Asset, AssetId, Assets, Handle, InvalidGenerationError, UntypedAssetId, UntypedHandle,
+};
 
 /// Type data for the [`TypeRegistry`](bevy_reflect::TypeRegistry) used to operate on reflected [`Asset`]s.
 ///
@@ -24,7 +26,8 @@ pub struct ReflectAsset {
     // - may only be used to access **at most one** access at once
     get_unchecked_mut: unsafe fn(UnsafeWorldCell<'_>, UntypedAssetId) -> Option<&mut dyn Reflect>,
     add: fn(&mut World, &dyn PartialReflect) -> UntypedHandle,
-    insert: fn(&mut World, UntypedAssetId, &dyn PartialReflect),
+    insert:
+        fn(&mut World, UntypedAssetId, &dyn PartialReflect) -> Result<(), InvalidGenerationError>,
     len: fn(&World) -> usize,
     ids: for<'w> fn(&'w World) -> Box<dyn Iterator<Item = UntypedAssetId> + 'w>,
     remove: fn(&mut World, UntypedAssetId) -> Option<Box<dyn Reflect>>,
@@ -56,11 +59,11 @@ impl ReflectAsset {
         world: &'w mut World,
         asset_id: impl Into<UntypedAssetId>,
     ) -> Option<&'w mut dyn Reflect> {
-        // SAFETY: unique world access
         #[expect(
             unsafe_code,
             reason = "Use of unsafe `Self::get_unchecked_mut()` function."
         )]
+        // SAFETY: unique world access
         unsafe {
             (self.get_unchecked_mut)(world.as_unsafe_world_cell(), asset_id.into())
         }
@@ -116,8 +119,8 @@ impl ReflectAsset {
         world: &mut World,
         asset_id: impl Into<UntypedAssetId>,
         value: &dyn PartialReflect,
-    ) {
-        (self.insert)(world, asset_id.into(), value);
+    ) -> Result<(), InvalidGenerationError> {
+        (self.insert)(world, asset_id.into(), value)
     }
 
     /// Equivalent of [`Assets::remove`]
@@ -161,7 +164,7 @@ impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
                 #[expect(unsafe_code, reason = "Uses `UnsafeWorldCell::get_resource_mut()`.")]
                 let assets = unsafe { world.get_resource_mut::<Assets<A>>().unwrap().into_inner() };
                 let asset = assets.get_mut(asset_id.typed_debug_checked());
-                asset.map(|asset| asset as &mut dyn Reflect)
+                asset.map(|asset| asset.into_inner() as &mut dyn Reflect)
             },
             add: |world, value| {
                 let mut assets = world.resource_mut::<Assets<A>>();
@@ -173,7 +176,7 @@ impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
                 let mut assets = world.resource_mut::<Assets<A>>();
                 let value: A = FromReflect::from_reflect(value)
                     .expect("could not call `FromReflect::from_reflect` in `ReflectAsset::set`");
-                assets.insert(asset_id.typed_debug_checked(), value);
+                assets.insert(asset_id.typed_debug_checked(), value)
             },
             len: |world| {
                 let assets = world.resource::<Assets<A>>();
@@ -261,8 +264,7 @@ mod tests {
     use alloc::{string::String, vec::Vec};
     use core::any::TypeId;
 
-    use crate::{Asset, AssetApp, AssetPlugin, ReflectAsset};
-    use bevy_app::App;
+    use crate::{tests::create_app, Asset, AssetApp, ReflectAsset};
     use bevy_ecs::reflect::AppTypeRegistry;
     use bevy_reflect::Reflect;
 
@@ -273,9 +275,8 @@ mod tests {
 
     #[test]
     fn test_reflect_asset_operations() {
-        let mut app = App::new();
-        app.add_plugins(AssetPlugin::default())
-            .init_asset::<AssetType>()
+        let mut app = create_app().0;
+        app.init_asset::<AssetType>()
             .register_asset_reflect::<AssetType>();
 
         let reflect_asset = {
