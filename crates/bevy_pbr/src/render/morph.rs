@@ -126,12 +126,16 @@ pub fn extract_morphs(
         if !view_visibility.get() {
             continue;
         }
-        let Ok(weights) = weights_query.get(mesh_weights.0) else {
+        let Ok(weights) = (match mesh_weights {
+            MeshMorphWeights::Reference(entity) => {
+                weights_query.get(*entity).map(MorphWeights::weights)
+            }
+            MeshMorphWeights::Value(value) => Ok(value.as_slice()),
+        }) else {
             continue;
         };
         let start = uniform.current_buffer.len();
         let legal_weights = weights
-            .weights()
             .iter()
             .chain(iter::repeat(&0.0))
             .take(MAX_MORPH_WEIGHTS)

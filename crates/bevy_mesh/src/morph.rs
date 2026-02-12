@@ -206,7 +206,10 @@ impl MorphWeights {
 /// [morph targets]: https://en.wikipedia.org/wiki/Morph_target_animation
 #[derive(Reflect, Debug, Clone, Component)]
 #[reflect(Debug, Component, Clone)]
-pub struct MeshMorphWeights(#[entities] pub Entity);
+pub enum MeshMorphWeights {
+    Reference(#[entities] Entity),
+    Value(Vec<f32>),
+}
 
 /// Attributes **differences** used for morph targets.
 ///

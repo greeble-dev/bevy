@@ -1660,7 +1660,7 @@ fn load_node(
                 let target_count = primitive.morph_targets().len();
                 if target_count != 0 {
                     max_morph_target_count = max_morph_target_count.max(target_count);
-                    mesh_entity.insert(MeshMorphWeights(parent_entity));
+                    mesh_entity.insert(MeshMorphWeights::Reference(parent_entity));
                 }
 
                 let mut bounds_min = Vec3::from_slice(&bounds.min);
