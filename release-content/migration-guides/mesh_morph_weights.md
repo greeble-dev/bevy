@@ -31,7 +31,7 @@ enum MeshMorphWeights {
 If you were using `MeshMorphWeights` on its own, then you just need to
 use `MeshMorphWeights::Value`.
 
-If you were using `MorphWeights` and `MeshMorphWeights` and relying on the 
+If you were using `MorphWeights` and `MeshMorphWeights` and relying on the
 automatic copying, then you need to use `MeshMorphWeights::Reference` and point
 it to the entity with `MorphWeights`.
 
