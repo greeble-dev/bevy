@@ -2234,7 +2234,8 @@ pub fn queue_shadows(
 
                 let (vertex_slab, index_slab) =
                     mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
-                let morph_target_slab = mesh_allocator.mesh_morph_target_slab(&mesh_instance.mesh_asset_id);
+                let morph_target_slab =
+                    mesh_allocator.mesh_morph_target_slab(&mesh_instance.mesh_asset_id);
 
                 let batch_set_key = ShadowBatchSetKey {
                     pipeline: pipeline_id,
