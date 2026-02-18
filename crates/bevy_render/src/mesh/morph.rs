@@ -20,8 +20,8 @@ use crate::{
     renderer::{RenderDevice, RenderQueue},
 };
 
-/// An image formatted for use with [`MorphWeights`] for rendering the morph
-/// target, containing the vertex displacements.
+/// An image formatted for use with [`bevy_mesh::morph::MorphWeights`] for
+/// rendering the morph target, containing the vertex displacements.
 ///
 /// We only use these if storage buffers aren't supported on the current
 /// platform. Otherwise, we store the mesh displacements in a storage buffer,

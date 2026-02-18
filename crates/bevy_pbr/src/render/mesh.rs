@@ -3239,9 +3239,7 @@ fn prepare_mesh_bind_groups_for_phase(
     if weights_uniform.current_buffer.buffer().is_some() {
         match (render_morph_target_allocator, &mut groups.morph_targets) {
             (
-                &RenderMorphTargetAllocator::Image {
-                    ref mesh_id_to_image,
-                },
+                RenderMorphTargetAllocator::Image { mesh_id_to_image },
                 &mut MeshMorphTargetBindGroups::Uniform(ref mut morph_targets),
             ) => {
                 prepare_mesh_morph_target_bind_groups_for_phase_using_uniforms(
@@ -3338,7 +3336,7 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_uniforms(
                 motion_vectors: layouts.morphed_skinned_motion(
                     render_device,
                     pipeline_cache,
-                    &model,
+                    model,
                     skin,
                     weights,
                     targets,
@@ -3349,7 +3347,7 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_uniforms(
                 no_motion_vectors: layouts.morphed_skinned(
                     render_device,
                     pipeline_cache,
-                    &model,
+                    model,
                     skin,
                     weights,
                     targets,
@@ -3361,7 +3359,7 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_uniforms(
                 motion_vectors: layouts.morphed_motion(
                     render_device,
                     pipeline_cache,
-                    &model,
+                    model,
                     weights,
                     prev_weights,
                     targets,
@@ -3370,7 +3368,7 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_uniforms(
                 no_motion_vectors: layouts.morphed(
                     render_device,
                     pipeline_cache,
-                    &model,
+                    model,
                     weights,
                     targets,
                     maybe_morph_descriptors,
@@ -3417,7 +3415,7 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_storage(
                     motion_vectors: layouts.morphed_skinned_motion(
                         render_device,
                         pipeline_cache,
-                        &model,
+                        model,
                         skin,
                         weights,
                         targets,
@@ -3428,7 +3426,7 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_storage(
                     no_motion_vectors: layouts.morphed_skinned(
                         render_device,
                         pipeline_cache,
-                        &model,
+                        model,
                         skin,
                         weights,
                         targets,
@@ -3439,7 +3437,7 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_storage(
                     motion_vectors: layouts.morphed_motion(
                         render_device,
                         pipeline_cache,
-                        &model,
+                        model,
                         weights,
                         prev_weights,
                         targets,
@@ -3448,7 +3446,7 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_storage(
                     no_motion_vectors: layouts.morphed(
                         render_device,
                         pipeline_cache,
-                        &model,
+                        model,
                         weights,
                         targets,
                         maybe_morph_descriptors,

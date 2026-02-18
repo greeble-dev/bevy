@@ -2419,8 +2419,6 @@ impl Mesh {
 
     /// Consumes the mesh and returns a mesh with the given [morph targets].
     ///
-    /// This requires a "morph target image". See [`MorphTargetImage`](crate::morph::MorphTargetImage) for info.
-    ///
     /// (Alternatively, you can use [`Mesh::set_morph_targets`] to mutate an existing mesh in-place)
     ///
     /// [morph targets]: https://en.wikipedia.org/wiki/Morph_target_animation
