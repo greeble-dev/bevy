@@ -860,6 +860,7 @@ impl Mesh {
     /// # Panics
     /// Panics when the mesh data has already been extracted to the render
     /// world.
+    #[cfg(feature = "morph")]
     pub fn get_morph_targets(&self) -> Option<&[MorphAttributes]> {
         self.morph_targets
             .as_ref_option()
@@ -2364,6 +2365,7 @@ impl Mesh {
     /// # Panics
     /// Panics when the mesh data has already been extracted to `RenderWorld`. To handle
     /// this as an error use [`Mesh::try_set_morph_targets`]
+    #[cfg(feature = "morph")]
     pub fn set_morph_targets(&mut self, morph_targets: Vec<MorphAttributes>) {
         self.try_set_morph_targets(morph_targets)
             .expect(MESH_EXTRACTED_ERROR);
@@ -2372,6 +2374,7 @@ impl Mesh {
     /// Set the [morph target] displacements for this mesh.
     ///
     /// [morph targets]: https://en.wikipedia.org/wiki/Morph_target_animation
+    #[cfg(feature = "morph")]
     pub fn try_set_morph_targets(
         &mut self,
         morph_targets: Vec<MorphAttributes>,
@@ -2386,6 +2389,7 @@ impl Mesh {
     /// # Panics
     /// Panics when the mesh data has already been extracted to `RenderWorld`. To handle
     /// this as an error use [`Mesh::try_morph_targets`]
+    #[cfg(feature = "morph")]
     pub fn morph_targets(&self) -> Option<&Vec<MorphAttributes>> {
         self.morph_targets
             .as_ref_option()
@@ -2397,6 +2401,7 @@ impl Mesh {
     ///
     /// Returns an error if the mesh data has been extracted to `RenderWorld`or
     /// if the morph targets do not exist.
+    #[cfg(feature = "morph")]
     pub fn try_morph_targets(&self) -> Result<&Vec<MorphAttributes>, MeshAccessError> {
         self.morph_targets.as_ref()
     }
@@ -2412,6 +2417,7 @@ impl Mesh {
     /// Panics when the mesh data has already been extracted to `RenderWorld`. To handle
     /// this as an error use [`Mesh::try_with_morph_targets`]
     #[must_use]
+    #[cfg(feature = "morph")]
     pub fn with_morph_targets(mut self, morph_targets: Vec<MorphAttributes>) -> Self {
         self.set_morph_targets(morph_targets);
         self
@@ -2424,6 +2430,7 @@ impl Mesh {
     /// [morph targets]: https://en.wikipedia.org/wiki/Morph_target_animation
     ///
     /// Returns an error if the mesh data has been extracted to `RenderWorld`.
+    #[cfg(feature = "morph")]
     pub fn try_with_morph_targets(
         mut self,
         morph_targets: Vec<MorphAttributes>,

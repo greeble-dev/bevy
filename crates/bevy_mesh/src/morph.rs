@@ -130,8 +130,6 @@ pub enum MeshMorphWeights {
 }
 
 /// Attributes **differences** used for morph targets.
-///
-/// See [`MorphTargetImage`] for more information.
 #[derive(Copy, Clone, PartialEq, Debug, Reflect, ShaderType, Pod, Zeroable, Default)]
 #[reflect(Clone, Default)]
 #[repr(C)]
