@@ -3236,12 +3236,7 @@ fn prepare_mesh_bind_groups_for_phase(
 
     // Create the morphed bind groups just like we did for the skinned bind
     // group.
-    if let Some(weights) = weights_uniform.current_buffer.buffer() {
-        let prev_weights = weights_uniform.prev_buffer.buffer().unwrap_or(weights);
-        let maybe_morph_descriptors = weights_uniform
-            .descriptors_buffer
-            .as_ref()
-            .and_then(|descriptors_buffer| descriptors_buffer.buffer());
+    if weights_uniform.current_buffer.buffer().is_some() {
         match (render_morph_target_allocator, &mut groups.morph_targets) {
             (
                 &RenderMorphTargetAllocator::Image {
@@ -3339,7 +3334,6 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_uniforms(
         };
         let targets = MorphTargetsResource::Texture(&morph_targets_image.texture_view);
         let bind_group_pair = if is_skinned(&gpu_mesh.layout) {
-            let prev_skin = &skins_uniform.prev_buffer;
             MeshBindGroupPair {
                 motion_vectors: layouts.morphed_skinned_motion(
                     render_device,
@@ -3415,7 +3409,6 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_storage(
         let Some(buffer) = mesh_allocator.buffer_for_slab(morph_target_slab_id) else {
             continue;
         };
-        let prev_skin = &skins_uniform.prev_buffer;
         let targets = MorphTargetsResource::Storage(buffer);
         morph_target_storage_bind_groups.insert(
             morph_target_slab_id,
