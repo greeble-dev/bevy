@@ -1,8 +1,8 @@
 pub mod allocator;
+#[cfg(feature = "morph")]
 pub mod morph;
 
 use crate::{
-    mesh::morph::RenderMorphTargetAllocator,
     render_asset::{AssetExtractionError, PrepareAssetError, RenderAsset, RenderAssetPlugin},
     renderer::{RenderDevice, RenderQueue},
     texture::GpuImage,
@@ -20,6 +20,9 @@ use bevy_ecs::{
 };
 pub use bevy_mesh::*;
 use wgpu::IndexFormat;
+
+#[cfg(feature = "morph")]
+use crate::mesh::morph::RenderMorphTargetAllocator;
 
 /// Makes sure that [`Mesh`]es are extracted and prepared for the GPU.
 /// Does *not* add the [`Mesh`] as an asset. Use [`MeshPlugin`] for that.
@@ -40,12 +43,12 @@ impl Plugin for MeshRenderAssetPlugin {
     }
 
     fn finish(&self, app: &mut App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+        let Some(_render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
 
         #[cfg(feature = "morph")]
-        render_app.init_resource::<RenderMorphTargetAllocator>();
+        _render_app.init_resource::<RenderMorphTargetAllocator>();
     }
 }
 
@@ -101,6 +104,15 @@ pub enum RenderMeshBufferInfo {
 
 impl RenderAsset for RenderMesh {
     type SourceAsset = Mesh;
+
+    #[cfg(not(feature = "morph"))]
+    type Param = (
+        SRes<RenderDevice>,
+        SRes<RenderQueue>,
+        SResMut<MeshVertexBufferLayouts>,
+        (),
+    );
+    #[cfg(feature = "morph")]
     type Param = (
         SRes<RenderDevice>,
         SRes<RenderQueue>,
@@ -137,8 +149,13 @@ impl RenderAsset for RenderMesh {
     /// Converts the extracted mesh into a [`RenderMesh`].
     fn prepare_asset(
         mesh: Self::SourceAsset,
-        mesh_id: AssetId<Self::SourceAsset>,
-        (render_device, render_queue, mesh_vertex_buffer_layouts, render_morph_targets_allocator): &mut SystemParamItem<Self::Param>,
+        _mesh_id: AssetId<Self::SourceAsset>,
+        (
+            _render_device,
+            _render_queue,
+            mesh_vertex_buffer_layouts,
+            _render_morph_targets_allocator,
+        ): &mut SystemParamItem<Self::Param>,
         _: Option<&Self>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
         let buffer_info = match mesh.indices() {
@@ -163,10 +180,10 @@ impl RenderAsset for RenderMesh {
         // Place the morph displacements in a slab if necessary.
         #[cfg(feature = "morph")]
         if let Some(morph_targets) = mesh.morph_targets() {
-            render_morph_targets_allocator.allocate(
-                render_device,
-                render_queue,
-                mesh_id,
+            _render_morph_targets_allocator.allocate(
+                _render_device,
+                _render_queue,
+                _mesh_id,
                 morph_targets,
                 mesh.count_vertices(),
             );
@@ -181,10 +198,11 @@ impl RenderAsset for RenderMesh {
     }
 
     fn unload_asset(
-        mesh_id: AssetId<Self::SourceAsset>,
-        (_, _, _, render_morph_targets_allocator): &mut SystemParamItem<Self::Param>,
+        _mesh_id: AssetId<Self::SourceAsset>,
+        (_, _, _, _render_morph_targets_allocator): &mut SystemParamItem<Self::Param>,
     ) {
         // Free the morph targets from the slab if necessary.
-        render_morph_targets_allocator.free(mesh_id);
+        #[cfg(feature = "morph")]
+        _render_morph_targets_allocator.free(_mesh_id);
     }
 }

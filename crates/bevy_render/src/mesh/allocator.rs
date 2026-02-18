@@ -1,7 +1,7 @@
 //! Manages mesh vertex and index buffers.
 
 use alloc::vec::Vec;
-use bevy_mesh::{morph::MorphAttributes, Indices};
+use bevy_mesh::Indices;
 use core::{
     fmt::{self, Display, Formatter},
     ops::Range,
@@ -25,6 +25,9 @@ use wgpu::{
     BufferDescriptor, BufferSize, BufferUsages, CommandEncoderDescriptor, DownlevelFlags,
     COPY_BUFFER_ALIGNMENT,
 };
+
+#[cfg(feature = "morph")]
+use bevy_mesh::morph::MorphAttributes;
 
 use crate::{
     mesh::{Mesh, MeshVertexBufferLayouts, RenderMesh},
@@ -146,6 +149,7 @@ impl Default for MeshAllocatorSettings {
 ///
 /// All morph displacements currently have the same element layout, so we only
 /// need one of these.
+#[cfg(feature = "morph")]
 static MORPH_ATTRIBUTE_ELEMENT_LAYOUT: ElementLayout = ElementLayout {
     class: ElementClass::MorphTarget,
     size: size_of::<MorphAttributes>() as u64,
@@ -205,6 +209,7 @@ impl Slab {
     }
 
     /// Returns the type of buffer that this is: vertex, index, or morph target.
+    #[cfg(feature = "morph")]
     pub fn element_class(&self) -> ElementClass {
         match self {
             Slab::General(general_slab) => general_slab.element_layout.class,
@@ -270,6 +275,7 @@ enum ElementClass {
     Vertex,
     /// A vertex index.
     Index,
+    #[cfg(feature = "morph")]
     /// Displacement data for a morph target.
     MorphTarget,
 }
@@ -483,6 +489,7 @@ impl MeshAllocator {
     }
 
     /// Returns an iterator over all slabs that contain morph targets.
+    #[cfg(feature = "morph")]
     pub fn morph_target_slabs(&self) -> impl Iterator<Item = SlabId> {
         self.slabs.iter().filter_map(|(slab_id, slab)| {
             if matches!(slab.element_class(), ElementClass::MorphTarget) {
@@ -575,6 +582,7 @@ impl MeshAllocator {
             }
 
             // Allocate morph target data.
+            #[cfg(feature = "morph")]
             if let Some(morph_targets) = mesh.get_morph_targets() {
                 self.allocate(
                     mesh_id,
@@ -595,6 +603,7 @@ impl MeshAllocator {
         for (mesh_id, mesh) in &extracted_meshes.extracted {
             self.copy_mesh_vertex_data(mesh_id, mesh, render_device, render_queue);
             self.copy_mesh_index_data(mesh_id, mesh, render_device, render_queue);
+            #[cfg(feature = "morph")]
             self.copy_mesh_morph_target_data(mesh_id, mesh, render_device, render_queue);
         }
     }
@@ -652,6 +661,7 @@ impl MeshAllocator {
 
     /// Copies morph target array data from a mesh into the appropriate spot in
     /// the slab.
+    #[cfg(feature = "morph")]
     fn copy_mesh_morph_target_data(
         &mut self,
         mesh_id: &AssetId<Mesh>,
@@ -1010,6 +1020,7 @@ impl MeshAllocator {
             ElementClass::Index => {
                 self.mesh_id_to_index_slab.insert(*mesh_id, slab_id);
             }
+            #[cfg(feature = "morph")]
             ElementClass::MorphTarget => {
                 self.mesh_id_to_morph_target_slab.insert(*mesh_id, slab_id);
             }
@@ -1148,6 +1159,7 @@ impl ElementClass {
         match *self {
             ElementClass::Vertex => BufferUsages::VERTEX,
             ElementClass::Index => BufferUsages::INDEX,
+            #[cfg(feature = "morph")]
             ElementClass::MorphTarget => BufferUsages::STORAGE,
         }
     }
