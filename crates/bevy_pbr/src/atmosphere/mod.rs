@@ -144,6 +144,9 @@ impl Plugin for AtmospherePlugin {
             return;
         }
 
+        // Check the `RenderDevice` in addition to the `RenderAdapter`. The
+        // former takes the `WGPU_SETTINGS_PRIO` environment variable into
+        // account, and the latter doesn't.
         let render_device = render_app.world().resource::<RenderDevice>();
         if render_device.limits().max_storage_textures_per_shader_stage == 0 {
             warn!("AtmospherePlugin not loaded. GPU lacks support: `max_storage_textures_per_shader_stage` is 0");

@@ -23,7 +23,7 @@ You can disable PBR rendering by initializing `PbrPlugin` as so:
 
 ```rs
 PbrPlugin {
-    gltf_render_enabled: false,
+    gltf_enable_standard_materials: false,
     ..Default::default()
 }
 ```
