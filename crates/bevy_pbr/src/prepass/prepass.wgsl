@@ -43,7 +43,9 @@ fn morph_vertex(vertex_in: Vertex) -> Vertex {
 // bother morphing the normals and tangents.
 fn morph_prev_vertex(vertex_in: Vertex) -> Vertex {
     var vertex = vertex_in;
-    let weight_count = morph::layer_count();
+    let first_vertex = mesh[vertex.instance_index].first_vertex_index;
+    let vertex_index = vertex.index - first_vertex;
+    let weight_count = morph::layer_count(vertex.instance_index);
     for (var i: u32 = 0u; i < weight_count; i ++) {
         let weight = morph::prev_weight_at(i, vertex.instance_index);
         if weight == 0.0 {
