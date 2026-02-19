@@ -1430,7 +1430,7 @@ pub fn prepare_uinodes(
 
                 let mut existing_batch = batches.last_mut();
 
-                if batch_image_handle == None
+                if batch_image_handle.is_none()
                     || existing_batch.is_none()
                     || (batch_image_handle != Some(AssetId::default())
                         && extracted_uinode.image != AssetId::default()
