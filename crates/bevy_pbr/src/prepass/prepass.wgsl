@@ -159,11 +159,15 @@ fn vertex(vertex_no_morph: Vertex) -> VertexOutput {
         vertex_no_morph.instance_index
     );
 #else   // HAS_PREVIOUS_SKIN
-    let prev_model = mesh_functions::get_previous_world_from_local(prev_vertex.instance_index);
+    // Use vertex_no_morph.instance_index instead of prev_vertex.instance_index to work around a wgpu dx12 bug.
+    // See https://github.com/gfx-rs/naga/issues/2416
+    let prev_model = mesh_functions::get_previous_world_from_local(vertex_no_morph.instance_index);
 #endif  // HAS_PREVIOUS_SKIN
 
 #else   // SKINNED
-    let prev_model = mesh_functions::get_previous_world_from_local(prev_vertex.instance_index);
+    // Use vertex_no_morph.instance_index instead of prev_vertex.instance_index to work around a wgpu dx12 bug.
+    // See https://github.com/gfx-rs/naga/issues/2416
+    let prev_model = mesh_functions::get_previous_world_from_local(vertex_no_morph.instance_index);
 #endif  // SKINNED
 
     out.previous_world_position = mesh_functions::mesh_position_local_to_world(
