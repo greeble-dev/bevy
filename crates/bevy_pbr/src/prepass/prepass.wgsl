@@ -15,23 +15,25 @@
 #endif
 
 #ifdef MORPH_TARGETS
-fn morph_vertex(vertex_in: Vertex) -> Vertex {
+// The instance_index parameter must match vertex_in.instance_index. This is a work around for a wgpu dx12 bug.
+// See https://github.com/gfx-rs/naga/issues/2416
+fn morph_vertex(vertex_in: Vertex, instance_index: u32) -> Vertex {
     var vertex = vertex_in;
-    let first_vertex = mesh[vertex.instance_index].first_vertex_index;
+    let first_vertex = mesh[instance_index].first_vertex_index;
     let vertex_index = vertex.index - first_vertex;
 
-    let weight_count = morph::layer_count(vertex.instance_index);
+    let weight_count = morph::layer_count(instance_index);
     for (var i: u32 = 0u; i < weight_count; i ++) {
-        let weight = morph::weight_at(i, vertex.instance_index);
+        let weight = morph::weight_at(i, instance_index);
         if weight == 0.0 {
             continue;
         }
-        vertex.position += weight * morph_position(vertex_index, i, vertex.instance_index);
+        vertex.position += weight * morph_position(vertex_index, i, instance_index);
 #ifdef VERTEX_NORMALS
-        vertex.normal += weight * morph_normal(vertex_index, i, vertex.instance_index);
+        vertex.normal += weight * morph_normal(vertex_index, i, instance_index);
 #endif
 #ifdef VERTEX_TANGENTS
-        vertex.tangent += vec4(weight * morph_tangent(vertex_index, i, vertex.instance_index), 0.0);
+        vertex.tangent += vec4(weight * morph_tangent(vertex_index, i, instance_index), 0.0);
 #endif
     }
     return vertex;
@@ -41,17 +43,20 @@ fn morph_vertex(vertex_in: Vertex) -> Vertex {
 //
 // This function is used for motion vector calculation, and, as such, it doesn't
 // bother morphing the normals and tangents.
-fn morph_prev_vertex(vertex_in: Vertex) -> Vertex {
+//
+// The instance_index parameter must match vertex_in.instance_index. This is a work around for a wgpu dx12 bug.
+// See https://github.com/gfx-rs/naga/issues/2416
+fn morph_prev_vertex(vertex_in: Vertex, instance_index: u32) -> Vertex {
     var vertex = vertex_in;
-    let first_vertex = mesh[vertex.instance_index].first_vertex_index;
+    let first_vertex = mesh[instance_index].first_vertex_index;
     let vertex_index = vertex.index - first_vertex;
-    let weight_count = morph::layer_count(vertex.instance_index);
+    let weight_count = morph::layer_count(instance_index);
     for (var i: u32 = 0u; i < weight_count; i ++) {
-        let weight = morph::prev_weight_at(i, vertex.instance_index);
+        let weight = morph::prev_weight_at(i, instance_index);
         if weight == 0.0 {
             continue;
         }
-        vertex.position += weight * morph_position(vertex_index, i, vertex.instance_index);
+        vertex.position += weight * morph_position(vertex_index, i, instance_index);
         // Don't bother morphing normals and tangents; we don't need them for
         // motion vector calculation.
     }
@@ -64,7 +69,7 @@ fn vertex(vertex_no_morph: Vertex) -> VertexOutput {
     var out: VertexOutput;
 
 #ifdef MORPH_TARGETS
-    var vertex = morph_vertex(vertex_no_morph);
+    var vertex = morph_vertex(vertex_no_morph, vertex_no_morph.instance_index);
 #else
     var vertex = vertex_no_morph;
 #endif
