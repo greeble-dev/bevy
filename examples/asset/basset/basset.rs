@@ -279,7 +279,7 @@ mod demo {
         async fn save(
             &self,
             writer: &mut Writer,
-            asset: SavedAsset<'_, Self::Asset>,
+            asset: SavedAsset<'_, '_, Self::Asset>,
             _settings: &Self::Settings,
         ) -> Result<StringAssetSettings, Self::Error> {
             writer.write_all(asset.0.as_bytes()).await?;
@@ -330,7 +330,7 @@ mod demo {
         async fn save(
             &self,
             writer: &mut Writer,
-            asset: SavedAsset<'_, Self::Asset>,
+            asset: SavedAsset<'_, '_, Self::Asset>,
             _settings: &Self::Settings,
         ) -> Result<(), Self::Error> {
             writer.write_all(asset.0.to_string().as_bytes()).await?;

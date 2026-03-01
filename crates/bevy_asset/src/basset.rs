@@ -94,9 +94,14 @@ impl From<LabeledAsset> for PartialErasedLoadedLabeledAsset {
     }
 }
 
+// Similar to `ErasedLoadedAsset`, but stores sub-assets as a distinct `PartialErasedLoadedLabeledAsset`
+// type. This avoids the awkwardly recursive nature of `ErasedLoadedAsset` storing
+// sub-assets as `ErasedLoadedAsset`.
 pub struct PartialErasedLoadedAsset {
     pub(crate) value: Box<dyn AssetContainer>,
-    pub(crate) labeled_assets: HashMap<CowArc<'static, str>, PartialErasedLoadedLabeledAsset>,
+    pub(crate) labeled_assets: Vec<PartialErasedLoadedLabeledAsset>,
+    pub(crate) label_to_asset_index: HashMap<CowArc<'static, str>, usize>,
+    pub(crate) asset_id_to_asset_index: HashMap<UntypedAssetId, usize>,
 }
 
 // XXX TODO: Duplicates a lot of `ErasedLoadedAsset`.
@@ -119,21 +124,25 @@ impl PartialErasedLoadedAsset {
         &self,
         id: UntypedAssetId,
     ) -> Option<&PartialErasedLoadedLabeledAsset> {
-        self.labeled_assets.values().find(|a| a.id == id)
+        self.asset_id_to_asset_index
+            .get(&id)
+            .map(|&index| &self.labeled_assets[index])
     }
 }
 
 impl From<ErasedLoadedAsset> for PartialErasedLoadedAsset {
     fn from(value: ErasedLoadedAsset) -> Self {
-        let mut labeled_assets = HashMap::new();
-
-        for (label, value) in value.labeled_assets.into_iter() {
-            labeled_assets.insert(label, Into::<PartialErasedLoadedLabeledAsset>::into(value));
-        }
+        let labeled_assets = value
+            .labeled_assets
+            .into_iter()
+            .map(PartialErasedLoadedLabeledAsset::from)
+            .collect();
 
         Self {
             value: value.value,
             labeled_assets,
+            label_to_asset_index: value.label_to_asset_index,
+            asset_id_to_asset_index: value.asset_id_to_asset_index,
         }
     }
 }

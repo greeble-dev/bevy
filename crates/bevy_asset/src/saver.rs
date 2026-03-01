@@ -396,7 +396,7 @@ impl<'a> SavedAssetBuilder<'a> {
                 .expect("asset type has been initialized")
                 .reserve_handle_internal(
                     false,
-                    Some(self.asset_path.clone().with_label(label.to_string())),
+                    Some(self.asset_path.clone().with_label(label.to_string()).into()),
                     None,
                 ),
         );
@@ -443,7 +443,7 @@ impl<'a> SavedAssetBuilder<'a> {
                 .expect("asset type has been initialized")
                 .reserve_handle_internal(
                     false,
-                    Some(self.asset_path.clone().with_label(label.to_string())),
+                    Some(self.asset_path.clone().with_label(label.to_string()).into()),
                     None,
                 ),
         );
@@ -619,7 +619,7 @@ pub(crate) mod tests {
                 dependencies: asset
                     .dependencies
                     .iter()
-                    .map(|handle| handle.path().unwrap().path())
+                    .map(|handle| handle.path().unwrap().path().unwrap().path()) // XXX TODO: Review unwraps.
                     .map(|path| path.to_str().unwrap().to_string())
                     .collect(),
                 embedded_dependencies: vec![],

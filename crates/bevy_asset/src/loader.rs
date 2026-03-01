@@ -294,19 +294,8 @@ impl ErasedLoadedAsset {
         mut self,
         label: impl Into<CowArc<'static, str>>,
     ) -> Result<ErasedLoadedAsset, ErasedLoadedAsset> {
-        match self.labeled_assets.remove(&label.into()) {
-            Some(labeled_asset) => Ok(labeled_asset.asset),
-            None => Err(self),
-        }
-    }
-
-    /// XXX TODO: Document.
-    pub fn take_labeled(
-        mut self,
-        label: impl Into<CowArc<'static, str>>,
-    ) -> Result<ErasedLoadedAsset, ErasedLoadedAsset> {
-        match self.labeled_assets.remove(&label.into()) {
-            Some(labeled_asset) => Ok(labeled_asset.asset),
+        match self.label_to_asset_index.get(&label.into()) {
+            Some(index) => Ok(self.labeled_assets.remove(*index).asset),
             None => Err(self),
         }
     }
@@ -593,6 +582,8 @@ impl<'a> LoadContext<'a> {
             dependencies: self.dependencies,
             loader_dependencies: self.loader_dependencies,
             labeled_assets: self.labeled_assets,
+            label_to_asset_index: self.label_to_asset_index,
+            asset_id_to_asset_index: self.asset_id_to_asset_index,
         }
     }
     /// Gets the source asset path for this load context.
