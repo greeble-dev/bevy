@@ -398,7 +398,6 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
 }
 
 pub(crate) struct MemoryAndFileCache<K: CacheKey, V: FileCacheValue + MemoryCacheValue> {
-    name: &'static str,
     memory: Arc<RwLock<MemoryCache<K, V>>>,
     file: Option<FileCache<K, V>>,
 }
@@ -410,7 +409,6 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
         validate: bool,
     ) -> Self {
         MemoryAndFileCache {
-            name,
             memory: Arc::new(RwLock::new(MemoryCache::new(name, validate))),
             file: file_cache_path.map(|p| FileCache::new(name, p, validate)),
         }
@@ -523,6 +521,7 @@ impl ContentCache {
 pub struct DependencyCacheKey(pub BassetHash);
 
 impl DependencyCacheKey {
+    #[expect(unused, reason = "XXX TODO?")]
     pub fn as_bytes(&self) -> [u8; 32] {
         self.0.as_bytes()
     }
@@ -580,6 +579,7 @@ fn content_hash(bytes: &[u8]) -> ContentHash {
 pub struct ActionCacheKey(pub BassetHash);
 
 impl ActionCacheKey {
+    #[expect(unused, reason = "XXX TODO?")]
     fn as_bytes(&self) -> [u8; 32] {
         self.0.as_bytes()
     }

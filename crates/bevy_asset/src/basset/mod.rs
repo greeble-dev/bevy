@@ -1,7 +1,5 @@
 //! Basset proof of concept.
 
-#![expect(dead_code, reason = "TODO")]
-
 use crate::{
     basset::{
         cache::{
@@ -59,13 +57,12 @@ pub struct ApplyContext<'a> {
 
     // Equivalent to `ErasedLoadedAsset::loader_dependencies.
     loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
-
-    shared: &'a BassetShared,
 }
 
 // XXX TODO: Oof, that name.
 pub struct PartialErasedLoadedLabeledAsset {
     pub(crate) value: Box<dyn AssetContainer>,
+    #[expect(unused, reason = "XXX TODO?")]
     pub(crate) id: UntypedAssetId,
 }
 
@@ -101,6 +98,7 @@ impl From<LabeledAsset> for PartialErasedLoadedLabeledAsset {
 pub struct PartialErasedLoadedAsset {
     pub(crate) value: Box<dyn AssetContainer>,
     pub(crate) labeled_assets: Vec<PartialErasedLoadedLabeledAsset>,
+    #[expect(unused, reason = "XXX TODO?")]
     pub(crate) label_to_asset_index: HashMap<CowArc<'static, str>, usize>,
     pub(crate) asset_id_to_asset_index: HashMap<UntypedAssetId, usize>,
 }
@@ -700,7 +698,6 @@ async fn load_action(
     let apply_context = ApplyContext {
         asset_server,
         loader_dependencies: HashMap::default(),
-        shared: &shared,
     };
 
     if let Some(action_cache) = &shared.action_cache {

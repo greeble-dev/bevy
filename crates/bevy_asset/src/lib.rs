@@ -266,7 +266,8 @@ pub struct AssetPlugin {
     /// [`AssetSource`](io::AssetSource). Subfolders within these folders are also valid.
     pub unapproved_path_mode: UnapprovedPathMode,
 
-    // XXX TODO: Review.
+    // XXX TODO: Review. Only lives here temporarily until it's passed into
+    // `AssetServer`.
     pub basset_shared: Arc<BassetShared>,
 }
 
