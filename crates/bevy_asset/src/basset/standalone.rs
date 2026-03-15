@@ -131,8 +131,7 @@ pub async fn write_standalone_asset(
 
     saver
         .save(&mut asset_bytes, asset, saver_settings, dummy_path)
-        .await
-        .map_err(Into::<BevyError>::into)?;
+        .await?;
 
     // XXX TODO: Think through loader settings. Firstly, if the asset was loaded
     // with certain settings then we should preserve them here? There might also

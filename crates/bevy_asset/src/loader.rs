@@ -290,6 +290,10 @@ impl ErasedLoadedAsset {
     }
 
     /// XXX TODO: Document.
+    #[expect(
+        clippy::result_large_err,
+        reason = "Returning the passed in ErasedLoadedAsset"
+    )]
     pub fn take_labeled(
         mut self,
         label: impl Into<CowArc<'static, str>>,
