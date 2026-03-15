@@ -3,7 +3,8 @@
 use crate::{
     basset::{
         blob::{BlobReader, BlobWriter},
-        ActionCacheKey, ApplyContext, DependencyCacheKey, ImmediateDependeeActionKeys,
+        cache::ImmediateDependeeActionKeys,
+        ActionCacheKey, ApplyContext, DependencyCacheKey,
     },
     io::SliceReader,
     meta::{AssetHash, Settings},
