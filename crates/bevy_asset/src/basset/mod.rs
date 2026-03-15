@@ -2,10 +2,23 @@
 
 #![expect(dead_code, reason = "TODO")]
 
+use crate::{
+    basset::standalone::{read_standalone_asset, write_standalone_asset, StandaloneAssetInfo},
+    Asset, AssetApp, AssetContainer, AssetServer, LabeledAsset, UntypedAssetId,
+};
+use alloc::{
+    // XXX TODO: Review if `std` imports should be `alloc`/`core`.
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
+use async_fs::File;
+use atomicow::CowArc;
 use bevy_app::{App, Plugin};
 use bevy_asset::{
     io::Reader,
-    io::SliceReader,
     meta::{AssetAction, AssetHash, AssetMeta, AssetMetaDyn, Settings},
     saver::{AssetSaver, ErasedAssetSaver},
     AssetAction2, AssetLoader, AssetPath, AssetRef, AsyncWriteExt, DeserializeMetaError,
@@ -18,29 +31,18 @@ use bevy_platform::{
 };
 use bevy_reflect::TypePath;
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture, IoTaskPool};
-
-use async_fs::File;
-use atomicow::CowArc;
 use core::{
     fmt::{Debug, Display},
     result::Result,
 };
+use core::{hash::Hash, marker::PhantomData};
 use downcast_rs::{impl_downcast, Downcast};
 use serde::{Deserialize, Serialize};
+use std::{format, path::PathBuf};
 use tracing::{debug, warn};
 
-// XXX TODO: Review if `std` imports should be `alloc`/`core`.
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-    sync::Arc,
-    vec,
-    vec::Vec,
-};
-use core::{hash::Hash, marker::PhantomData};
-use std::{format, io::Write, path::PathBuf};
-
-use crate::{Asset, AssetApp, AssetContainer, AssetServer, LabeledAsset, UntypedAssetId};
+mod blob;
+mod standalone;
 
 pub struct BassetPlugin;
 
@@ -729,9 +731,6 @@ async fn action_key_from_dependency_cache(
     }
 }
 
-const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
-const STANDALONE_VERSION: u16 = 1;
-
 #[derive(Default, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 struct ImmediateDependeeActionKeys {
     // XXX TODO: Could store some debug info on the input?
@@ -745,144 +744,6 @@ impl ImmediateDependeeActionKeys {
 
         Self { list }
     }
-}
-
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-struct StandaloneAssetInfo {
-    action_key: ActionCacheKey,
-    dependency_key: DependencyCacheKey,
-    immediate_dependee_action_keys: ImmediateDependeeActionKeys,
-}
-
-async fn read_standalone_asset(
-    original_path: &AssetRef<'static>,
-    blob: &[u8],
-    context: &ApplyContext<'_>,
-    expected_info: &StandaloneAssetInfo,
-) -> Result<ErasedLoadedAsset, BevyError> {
-    let mut blob = BlobReader::new(blob);
-
-    let magic = blob.bytes(STANDALONE_MAGIC.len()).expect("TODO");
-
-    if magic != STANDALONE_MAGIC {
-        return Err("TODO".into());
-    }
-
-    let version = blob.u16().expect("TODO");
-
-    if version != STANDALONE_VERSION {
-        return Err("TODO".into());
-    }
-
-    // XXX TODO: Some awkward duplication here. We get the loader name so we can
-    // deserialize the meta, but that meta already contains the loader name.
-    // Don't see an obvious solution.
-
-    let loader_name = blob.string().expect("TODO");
-    let meta_bytes = blob.bytes_sized().expect("TODO");
-    let info_bytes = blob.bytes_sized().expect("TODO");
-    let asset_bytes = blob.bytes_sized().expect("TODO");
-
-    let loader = context
-        .asset_server
-        .get_asset_loader_with_type_name(loader_name)
-        .await
-        .expect("TODO");
-
-    let meta = loader.deserialize_meta(meta_bytes).expect("TODO");
-
-    let info = ron::de::from_bytes::<StandaloneAssetInfo>(info_bytes).expect("TODO");
-
-    assert_eq!(&info, expected_info);
-
-    let mut reader = SliceReader::new(asset_bytes);
-
-    let load_dependencies = false;
-    let populate_hashes = false;
-
-    // Don't update the dependency cache - this asset loader loader doesn't
-    // know about the dependencies of the action that produced this asset.
-    //
-    // XXX TODO: Maybe better if we sidestepped `load_with_settings_loader_and_reader`
-    // for clarity? Or generally rethink how the dependency cache gets filled out.
-    let update_dependency_cache = false;
-
-    let mut asset = context
-        .asset_server
-        .load_with_settings_loader_and_reader(
-            original_path,
-            meta.loader_settings().expect("meta is set to Load"),
-            &*loader,
-            &mut reader,
-            load_dependencies,
-            populate_hashes,
-            update_dependency_cache,
-        )
-        .await
-        .map_err(Into::<BevyError>::into)?;
-
-    // Apply the correct dependencies.
-
-    let mut loader_dependencies = HashMap::<AssetRef<'static>, AssetHash>::new();
-
-    for (dependee, _) in &info.immediate_dependee_action_keys.list {
-        // XXX TODO: Fake hash for now. Not sure if we need this long-term as
-        // the hash is only used for processing.
-        let hash = [0u8; 32];
-
-        loader_dependencies.insert(dependee.clone(), hash);
-    }
-
-    // Check that the recorded dependencies are correct - they should be a
-    // superset of what the loader used. If this fails then either we didn't
-    // record the dependency correctly, or the loader is unexpectedly reading
-    // different dependencies.
-
-    for dependee in asset.loader_dependencies.keys() {
-        assert!(loader_dependencies.contains_key(dependee), "{dependee}");
-    }
-
-    asset.loader_dependencies = loader_dependencies;
-
-    Ok(asset)
-}
-
-async fn write_standalone_asset(
-    asset: &ErasedLoadedAsset,
-    loader: &dyn ErasedAssetLoader,
-    saver: &dyn ErasedAssetSaver,
-    saver_settings: &dyn Settings,
-    info: &StandaloneAssetInfo,
-) -> Result<Box<[u8]>, BevyError> {
-    let mut asset_bytes = Vec::<u8>::new();
-
-    let dummy_path = AssetPath::parse("NOT IMPLEMENTED"); // XXX TODO?
-
-    saver
-        .save(&mut asset_bytes, asset, saver_settings, dummy_path)
-        .await
-        .map_err(Into::<BevyError>::into)?;
-
-    // XXX TODO: Think through loader settings. Firstly, if the asset was loaded
-    // with certain settings then we should preserve them here? There might also
-    // be situations where a saver/loader pair are expecting certain settings?
-    // Could get messy.
-
-    let meta_bytes = loader.default_meta().serialize();
-    let info_bytes = ron::ser::to_string(&info).expect("TODO").into_bytes();
-
-    let mut writer = Vec::<u8>::new();
-
-    let mut blob = BlobWriter::new(&mut writer);
-
-    blob.bytes(STANDALONE_MAGIC);
-    blob.u16(STANDALONE_VERSION);
-    blob.string(loader.type_path());
-    blob.bytes_sized(&meta_bytes);
-    blob.bytes_sized(&info_bytes);
-    blob.bytes_sized(&asset_bytes);
-
-    Ok(writer.into())
 }
 
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -1492,84 +1353,6 @@ async fn load_action(
     }
 
     Ok(asset)
-}
-
-// Helper for reading things out of a byte slice.
-//
-// XXX TODO: Surely this exists somewhere as a library? Or are there better
-// approaches? Contrast with `MeshletMeshLoader` - fairly similar, but uses
-// `Reader` directly plus a few helpers. Also see `byteorder` crate
-// (https://docs.rs/byteorder/latest/byteorder/trait.ReadBytesExt.html)
-struct BlobReader<'a> {
-    data: &'a [u8],
-    cursor: usize,
-}
-
-impl<'a> BlobReader<'a> {
-    fn new(data: &'a [u8]) -> Self {
-        Self { data, cursor: 0 }
-    }
-
-    fn bytes(&mut self, num: usize) -> Option<&'a [u8]> {
-        let range = self.cursor..(self.cursor + num);
-        self.cursor = range.end;
-        self.data.get(range)
-    }
-
-    fn bytes_const<const NUM: usize>(&mut self) -> Option<&'a [u8; NUM]> {
-        <&[u8; NUM]>::try_from(self.bytes(NUM)?).ok()
-    }
-
-    fn bytes_sized(&mut self) -> Option<&'a [u8]> {
-        let len = self.u64()? as usize;
-        self.bytes(len)
-    }
-
-    fn u64(&mut self) -> Option<u64> {
-        let bytes = *self.bytes_const::<{ size_of::<u64>() }>()?;
-        Some(u64::from_le_bytes(bytes))
-    }
-
-    fn u16(&mut self) -> Option<u16> {
-        let bytes = *self.bytes_const::<{ size_of::<u16>() }>()?;
-        Some(u16::from_le_bytes(bytes))
-    }
-
-    fn string(&mut self) -> Option<&'a str> {
-        let len = self.u64()? as usize;
-        str::from_utf8(self.bytes(len)?).ok()
-    }
-}
-
-struct BlobWriter<'a> {
-    writer: &'a mut dyn Write,
-}
-
-impl<'a> BlobWriter<'a> {
-    fn new(writer: &'a mut dyn Write) -> Self {
-        Self { writer }
-    }
-
-    fn bytes(&mut self, bytes: &[u8]) {
-        self.writer.write_all(bytes).expect("TODO");
-    }
-
-    fn bytes_sized(&mut self, bytes: &[u8]) {
-        self.u64(bytes.len() as u64);
-        self.bytes(bytes);
-    }
-
-    fn u64(&mut self, value: u64) {
-        self.writer.write_all(&value.to_le_bytes()).expect("TODO");
-    }
-
-    fn u16(&mut self, value: u16) {
-        self.writer.write_all(&value.to_le_bytes()).expect("TODO");
-    }
-
-    fn string(&mut self, string: &str) {
-        self.bytes_sized(string.as_bytes());
-    }
 }
 
 // TODO: Review this. Awkward hack so that `BassetLoader::default_meta` and
