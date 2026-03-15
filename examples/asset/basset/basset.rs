@@ -222,7 +222,7 @@ mod action {
 }
 
 mod demo {
-    use bevy_asset::{io::Writer, saver::SavedAsset, AsyncWriteExt};
+    use bevy_asset::{io::Writer, saver::SavedAsset, AssetPath, AsyncWriteExt};
 
     use super::*;
 
@@ -281,6 +281,7 @@ mod demo {
             writer: &mut Writer,
             asset: SavedAsset<'_, '_, Self::Asset>,
             _settings: &Self::Settings,
+            _asset_path: AssetPath<'_>,
         ) -> Result<StringAssetSettings, Self::Error> {
             writer.write_all(asset.0.as_bytes()).await?;
 
@@ -332,6 +333,7 @@ mod demo {
             writer: &mut Writer,
             asset: SavedAsset<'_, '_, Self::Asset>,
             _settings: &Self::Settings,
+            _asset_path: AssetPath<'_>,
         ) -> Result<(), Self::Error> {
             writer.write_all(asset.0.to_string().as_bytes()).await?;
 

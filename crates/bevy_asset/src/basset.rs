@@ -856,8 +856,10 @@ async fn write_standalone_asset(
 ) -> Result<Box<[u8]>, BevyError> {
     let mut asset_bytes = Vec::<u8>::new();
 
+    let dummy_path = AssetPath::parse("NOT IMPLEMENTED"); // XXX TODO?
+
     saver
-        .save(&mut asset_bytes, asset, saver_settings)
+        .save(&mut asset_bytes, asset, saver_settings, dummy_path)
         .await
         .map_err(Into::<BevyError>::into)?;
 
