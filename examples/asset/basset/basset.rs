@@ -730,7 +730,7 @@ fn main() {
 
     let basset_shared = Arc::new(
         BassetShared::new(
-            Some("examples/asset/basset/cache".into()),
+            Some("target/basset/cache".into()),
             args.validate_dependency_cache,
             args.validate_action_cache,
         )
