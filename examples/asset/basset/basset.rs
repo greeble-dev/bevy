@@ -144,7 +144,7 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct MeshletFromMeshParams {
-        mesh: AssetRef<'static>,
+        mesh: AssetRef<'static>, // XXX TODO: Better if we had a typed asset ref?
         #[serde(default)]
         vertex_position_quantization_factor: Option<u8>,
     }

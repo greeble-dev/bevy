@@ -752,6 +752,7 @@ pub struct AssetAction2<'a> {
     // XXX TODO: Review if these should be Arc/CowArc, similar to AssetPath.
     name: Box<str>,
     params: Box<ron::value::RawValue>,
+    // XXX TODO: Review if this is justified.
     label: Option<SerializableLabel<'a>>,
 }
 

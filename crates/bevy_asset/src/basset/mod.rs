@@ -221,6 +221,7 @@ impl ApplyContext<'_> {
 }
 
 /// XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
+/// XXX TODO: Why doesn't this implement serialize/deserialize?
 pub trait BassetActionParams: Downcast + Send + Sync + 'static {}
 
 // XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
