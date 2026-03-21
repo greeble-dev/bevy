@@ -39,6 +39,7 @@ use tracing::{debug, warn};
 
 mod blob;
 mod cache;
+mod dependency_graph;
 mod standalone;
 
 pub struct BassetPlugin;
@@ -357,6 +358,7 @@ impl BassetShared {
         // holds the full asset - the label selects after getting from the cache. No if
         // the cache holds the sub-asset. Or should this function just disallow
         // paths with labels?
+        // XXX TODO: Double check that we're using the correct hash for actions.
         hasher.update(path.to_string().as_bytes());
 
         // XXX TODO: We should be including the settings in the dependency key. But
@@ -368,24 +370,22 @@ impl BassetShared {
         }
         */
 
-        // XXX TODO: Should this include loader versions? Think so, since loader
-        // could change dependency list.
-
         if let Some(really_a_path) = path.path() {
             let content_hash = self
                 .content_cache
                 .get(really_a_path, asset_server)
                 .await
-                .expect("TODO");
+                .expect("XXX TODO");
 
             hasher.update(&content_hash.as_bytes());
         }
 
-        // XXX TODO: Loader version?
+        // XXX TODO: Loader version.
 
         DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
     }
 
+    /*
     pub(crate) fn action_key(
         dependency_key: &DependencyCacheKey,
         immediate_dependee_action_keys: &HashMap<AssetRef<'static>, ActionCacheKey>,
@@ -409,6 +409,7 @@ impl BassetShared {
 
         result
     }
+    */
 
     // XXX TODO: Should take the dependency key directly. Right now we're looking up
     // the content key inside this function, but we don't know if that's the same

@@ -542,15 +542,20 @@ impl CacheKey for DependencyCacheKey {
 #[derive(Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DependencyCacheValue {
     // XXX TODO: Could store some debug info on the input?
-    list: Vec<AssetRef<'static>>,
+    // XXX TODO: Guarantee sorting?
+    list: Vec<(AssetRef<'static>, DependencyCacheKey)>,
 }
 
 impl DependencyCacheValue {
-    pub(crate) fn new(list: impl Iterator<Item = AssetRef<'static>>) -> Self {
+    pub(crate) fn new(list: impl Iterator<Item = (AssetRef<'static>, DependencyCacheKey)>) -> Self {
         let mut list = list.collect::<Vec<_>>();
         list.sort();
 
         Self { list }
+    }
+
+    pub(crate) fn list<'a>(&'a self) -> &'a Vec<(AssetRef<'static>, DependencyCacheKey)> {
+        &self.list
     }
 }
 
@@ -582,6 +587,27 @@ impl ActionCacheKey {
     #[expect(unused, reason = "XXX TODO?")]
     fn as_bytes(&self) -> [u8; 32] {
         self.0.as_bytes()
+    }
+
+    pub(crate) fn new(
+        dependency_key: DependencyCacheKey,
+        dependees: impl Iterator<Item = ActionCacheKey>,
+    ) -> Self {
+        // XXX TODO: In theory we could make the action key the same as the
+        // dependency key if there's no dependees - that would save a hash.
+        // But maybe it's risky if the values are wrongly treated as
+        // interchangeable.
+
+        // XXX TODO: Should hasher be seeded?
+        let mut hasher = blake3::Hasher::new();
+
+        hasher.update(&dependency_key.as_bytes());
+
+        for dependee in dependees {
+            hasher.update(&dependee.as_bytes());
+        }
+
+        Self(BassetHash::new(*hasher.finalize().as_bytes()))
     }
 }
 
