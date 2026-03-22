@@ -247,7 +247,7 @@ impl<'a> AssetPath<'a> {
     /// Gets the "asset source", if one was defined. If none was defined, the default source
     /// will be used.
     #[inline]
-    pub fn source(&self) -> &AssetSourceId<'_> {
+    pub fn source(&self) -> &AssetSourceId<'a> {
         &self.source
     }
 
@@ -271,7 +271,7 @@ impl<'a> AssetPath<'a> {
 
     /// Gets the path to the asset in the "virtual filesystem" without a label (if a label is currently set).
     #[inline]
-    pub fn without_label(&self) -> AssetPath<'_> {
+    pub fn without_label(&self) -> AssetPath<'a> {
         Self {
             source: self.source.clone(),
             path: self.path.clone(),
@@ -793,7 +793,7 @@ impl<'a> AssetAction2<'a> {
         self.label.as_ref().map(|l| l.0.clone())
     }
 
-    pub fn without_label(&self) -> AssetAction2<'_> {
+    pub fn without_label(&self) -> AssetAction2<'a> {
         Self {
             name: self.name.clone(),
             params: self.params.clone(),
@@ -893,6 +893,14 @@ impl<'a> AssetRef<'a> {
         }
     }
 
+    pub fn is_path(&self) -> bool {
+        matches!(self, AssetRef::Path(_))
+    }
+
+    pub fn is_action(&self) -> bool {
+        matches!(self, AssetRef::Action(_))
+    }
+
     pub fn label(&self) -> Option<&str> {
         match self {
             Self::Path(path) => path.label(),
@@ -907,12 +915,12 @@ impl<'a> AssetRef<'a> {
         }
     }
 
-    pub fn without_label(&self) -> AssetRef<'_> {
+    pub fn without_label(&self) -> AssetRef<'a> {
         match self {
             // XXX TODO: Review lifetime correctness. Suspect the original
             // `without_label` could be wrong and should return an `AssetRef<'a>`?
-            Self::Path(path) => AssetRef::<'_>::Path(path.without_label()),
-            Self::Action(action) => AssetRef::<'_>::Action(action.without_label()),
+            Self::Path(path) => AssetRef::<'a>::Path(path.without_label()),
+            Self::Action(action) => AssetRef::<'a>::Action(action.without_label()),
         }
     }
 
