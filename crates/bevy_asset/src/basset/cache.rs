@@ -1,10 +1,7 @@
 //! XXX TODO
 
-use crate::{
-    basset::{standalone::StandaloneAssetInfo, BassetShared},
-    AssetPath, AssetRef, AssetServer, AsyncWriteExt,
-};
-use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
+use crate::{AssetPath, AssetRef, AssetServer, AsyncWriteExt};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use async_fs::File;
 use bevy_ecs::error::BevyError;
 use bevy_platform::{
@@ -20,144 +17,6 @@ use core::{hash::Hash, marker::PhantomData};
 use serde::{Deserialize, Serialize};
 use std::{format, path::PathBuf};
 use tracing::debug;
-
-// XXX TODO: Remove this at some point? It's a recursive version that doesn't
-// work (due to async + recursion = trouble), but might be useful reference.
-/*
-async fn action_key_from_dependency_cache(
-    path: &AssetRef<'static>,
-    asset_dependency_key: &DependencyCacheKey,
-    shared: &BassetShared,
-    asset_server: &AssetServer,
-) -> Option<ActionCacheKey> {
-    let dependency_list = shared
-        .dependency_cache
-        .get(asset_dependency_key, path)
-        .await?;
-
-    let mut hasher = blake3::Hasher::new();
-
-    // XXX TODO: Action key also needs loader version.
-    // XXX TODO: Anything else?
-
-    hasher.update(&asset_dependency_key.0);
-
-    // XXX TODO: How are we stabilising the order of dependencies?
-
-    for dependee in &dependency_list.list {
-        let dependee_dependency_key = dependency_key(dependee, shared, asset_server).await;
-
-        // XXX TODO: Avoid cycles.
-        // XXX TODO: Maybe avoid recursion?
-
-        let dependee_action_key = action_key_from_dependency_cache(
-            dependee,
-            &dependee_dependency_key,
-            shared,
-            asset_server,
-        )
-        .await?;
-
-        hasher.update(&dependee_action_key.0);
-    }
-
-    Some(ActionCacheKey(*hasher.finalize().as_bytes()))
-}
-*/
-
-pub(crate) async fn action_key_from_dependency_cache(
-    path: &AssetRef<'static>,
-    asset_dependency_key: &DependencyCacheKey,
-    asset_server: &AssetServer,
-) -> Option<StandaloneAssetInfo> {
-    // XXX TODO: How are we handling duplicates and cycles? Maybe need a local path -> action cache.
-    // XXX TODO: Rewrite this to use a couple of arrays instead of needing an
-    // array per `Entry`. One array of `Option<ActionCacheKey` that gets filled
-    // out, and another array of `(AssetRef, usize, Range)` where the usize is
-    // the destination key for that `AssetRef`, and the `Range` points to the
-    // source dependee keys.
-
-    struct Entry {
-        path: AssetRef<'static>,
-        dependency_key: DependencyCacheKey,
-        pending_dependees: Vec<AssetRef<'static>>,
-        completed_dependees: HashMap<AssetRef<'static>, ActionCacheKey>,
-    }
-
-    let shared = asset_server.basset_shared().clone();
-
-    let dependency_cache = shared.dependency_cache.as_ref()?;
-
-    let initial_dependee_list = dependency_cache.get(asset_dependency_key, path).await?;
-
-    let mut stack = vec![Entry {
-        path: path.clone(),
-        dependency_key: *asset_dependency_key,
-        pending_dependees: initial_dependee_list.list.clone(),
-        completed_dependees: HashMap::new(),
-    }];
-
-    loop {
-        let mut top = stack.pop().expect("Should never be empty at this point");
-
-        if let Some(next_dependee) = top.pending_dependees.pop() {
-            let dependee_dependency_key = shared
-                .dependency_key(&next_dependee, None, asset_server)
-                .await;
-
-            let dependee_dependee_list = dependency_cache
-                .get(&dependee_dependency_key, &next_dependee)
-                .await?;
-
-            stack.push(Entry {
-                path: next_dependee,
-                dependency_key: dependee_dependency_key,
-                pending_dependees: dependee_dependee_list.list.clone(),
-                completed_dependees: HashMap::new(),
-            });
-
-            continue;
-        }
-
-        let action_key = BassetShared::action_key(&top.dependency_key, &top.completed_dependees);
-
-        if let Some(mut parent) = stack.pop() {
-            // XXX TODO: If already inserted, verify the action key matches.
-            parent.completed_dependees.insert(top.path, action_key);
-
-            stack.push(parent);
-
-            continue;
-        }
-
-        let immediate_dependee_action_keys = ImmediateDependeeActionKeys::new(
-            top.completed_dependees.iter().map(|(p, k)| (p.clone(), *k)),
-        );
-
-        return Some(StandaloneAssetInfo {
-            action_key,
-            dependency_key: *asset_dependency_key,
-            immediate_dependee_action_keys,
-        });
-    }
-}
-
-// XXX TODO: Where should this go? Used by both standalone asset and dependency
-// cache.
-#[derive(Default, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub(crate) struct ImmediateDependeeActionKeys {
-    // XXX TODO: Could store some debug info on the input?
-    pub(crate) list: Vec<(AssetRef<'static>, ActionCacheKey)>,
-}
-
-impl ImmediateDependeeActionKeys {
-    pub(crate) fn new(list: impl Iterator<Item = (AssetRef<'static>, ActionCacheKey)>) -> Self {
-        let mut list = list.collect::<Vec<_>>();
-        list.sort();
-
-        Self { list }
-    }
-}
 
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct BassetHash([u8; 32]);
@@ -350,7 +209,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    pub(crate) async fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
+    pub(crate) fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
         let value_path = self.value_path(&key);
 
         // XXX TODO: Review faff that avoids lifetime issues.
@@ -358,11 +217,14 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
 
         log(self.name, asset_path, key.as_hash(), "File cache put.");
 
-        if self.validate
-            && let Some(existing) = self.unvalidated_get(&key).await
-        {
-            assert_eq!(&value, &existing, "{key:?}");
-        }
+        // XXX TODO: Restore validation, but without needing this function to
+        // be async.
+        //
+        //if self.validate
+        //    && let Some(existing) = self.unvalidated_get(&key).await
+        //{
+        //    assert_eq!(&value, &existing, "{key:?}");
+        //}
 
         IoTaskPool::get()
             .spawn(async move {
@@ -440,7 +302,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    pub(crate) async fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
+    pub(crate) fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
         // XXX TODO: Avoid `blob.clone()` if there's no file cache?
         self.memory
             .write()
@@ -448,7 +310,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
             .put(key, value.clone(), asset_path);
 
         if let Some(file) = &self.file {
-            file.put(key, value, asset_path).await;
+            file.put(key, value, asset_path);
         }
     }
 }
@@ -521,7 +383,6 @@ impl ContentCache {
 pub struct DependencyCacheKey(pub BassetHash);
 
 impl DependencyCacheKey {
-    #[expect(unused, reason = "XXX TODO?")]
     pub fn as_bytes(&self) -> [u8; 32] {
         self.0.as_bytes()
     }
@@ -584,7 +445,6 @@ fn content_hash(bytes: &[u8]) -> ContentHash {
 pub struct ActionCacheKey(pub BassetHash);
 
 impl ActionCacheKey {
-    #[expect(unused, reason = "XXX TODO?")]
     fn as_bytes(&self) -> [u8; 32] {
         self.0.as_bytes()
     }

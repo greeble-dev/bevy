@@ -1671,8 +1671,12 @@ impl AssetServer {
             });
 
         if update_dependency_cache && let Ok(asset) = &result {
+            // XXX TODO: If the loader is `ActionLoader` then this will redundantly
+            // register the dependencies again. Need to rethink if we should be
+            // trying to hide actions behind a generic loader, or if loading
+            // actions should be more explicit. See similar comments on `LoadContext`.
             self.basset_shared()
-                .register_dependees(
+                .register_dependencies(
                     &asset_path.clone_owned(), // XXX TODO: Avoid clone?
                     Some(settings),
                     asset.loader_dependencies.keys().cloned(),

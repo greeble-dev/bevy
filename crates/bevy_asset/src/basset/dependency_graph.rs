@@ -1,5 +1,3 @@
-use std::sync::{PoisonError, RwLock};
-
 use crate::{
     basset::{
         cache::{ActionCacheKey, DependencyCacheKey, DependencyCacheValue, MemoryAndFileCache},
@@ -14,12 +12,17 @@ use petgraph::{
     acyclic::Acyclic, data::Build, graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef,
     Direction,
 };
+use std::{
+    path::PathBuf,
+    sync::{Mutex, PoisonError},
+};
 
 enum InternalGraphNode {
-    Valid(ActionCacheKey),
+    Valid(ActionCacheKey, DependencyCacheKey),
     Unknown,
 }
 
+#[derive(Default)]
 struct InternalGraph {
     graph: Acyclic<StableDiGraph<InternalGraphNode, ()>>,
     path_to_node: HashMap<AssetRef<'static>, NodeIndex>,
@@ -30,7 +33,7 @@ impl InternalGraph {
         &mut self,
         path: &AssetRef<'static>,
         dependency_key: DependencyCacheKey,
-        dependees: &[AssetRef<'static>],
+        dependency_value: &DependencyCacheValue,
     ) -> Option<ActionCacheKey> {
         // XXX TODO: Validate the existing entry? Or is it an error to set twice?
         // XXX TODO: Try to optimise this by reusing the entry?
@@ -41,9 +44,10 @@ impl InternalGraph {
 
         // Gather the node id and action key of each dependee, returning `None`
         // if any are absent or unknown.
-        let resolved = dependees
+        let resolved = dependency_value
+            .list()
             .iter()
-            .map(|dependee_path| {
+            .map(|(dependee_path, dependee_key)| {
                 self.path_to_node
                     .get(dependee_path)
                     .copied()
@@ -54,7 +58,9 @@ impl InternalGraph {
                             .expect("Graph node should always exist XXX TODO: Document?");
 
                         match dependee_node {
-                            InternalGraphNode::Valid(action_key) => {
+                            InternalGraphNode::Valid(action_key, existing_dependee_key) => {
+                                // XXX TODO: Should go behind validation flag?
+                                assert_eq!(dependee_key, existing_dependee_key);
                                 Some((dependee_node_id, *action_key))
                             }
                             InternalGraphNode::Unknown => None,
@@ -66,7 +72,9 @@ impl InternalGraph {
         let (node_id, action_key) = if let Some(resolved) = resolved {
             let action_key = ActionCacheKey::new(dependency_key, resolved.iter().map(|(_, k)| *k));
 
-            let node_id = self.graph.add_node(InternalGraphNode::Valid(action_key));
+            let node_id = self
+                .graph
+                .add_node(InternalGraphNode::Valid(action_key, dependency_key));
 
             for (dependee_node_id, _) in resolved.iter() {
                 self.graph
@@ -89,7 +97,7 @@ impl InternalGraph {
     fn get(&self, path: &AssetRef<'static>) -> Option<ActionCacheKey> {
         self.path_to_node.get(path).and_then(|&node_id| {
             match self.graph.node_weight(node_id).expect("XXX TODO") {
-                InternalGraphNode::Valid(action_key) => Some(*action_key),
+                InternalGraphNode::Valid(action_key, _) => Some(*action_key),
                 InternalGraphNode::Unknown => None,
             }
         })
@@ -115,16 +123,31 @@ impl InternalGraph {
     }
 }
 
-struct DependencyGraph {
-    // XXX TODO: RwLock?
-    graph: RwLock<InternalGraph>,
+pub(crate) struct DependencyGraph {
+    // XXX TODO: Would have prefered `RwLock`, but `petgraph::Acyclic` is not
+    // `Sync` due to using `RefCell`.
+    graph: Mutex<InternalGraph>,
     // XXX TODO?
     //versions: ?
-    cache: MemoryAndFileCache<DependencyCacheKey, Arc<DependencyCacheValue>>,
+    cache: Option<MemoryAndFileCache<DependencyCacheKey, Arc<DependencyCacheValue>>>,
 }
 
 impl DependencyGraph {
-    async fn action_key(
+    pub(crate) fn new(dependency_cache_path: Option<PathBuf>, validate: bool) -> Self {
+        Self {
+            graph: Default::default(),
+            // XXX TODO: Add an option to disable the dependency memory cache?
+            cache: Some(MemoryAndFileCache::new(
+                "dependency_cache",
+                dependency_cache_path,
+                validate,
+            )),
+        }
+    }
+
+    // XXX TODO: Should this take an `AssetRef` or an `AssetAction2`? Need to
+    // think through whether regular asset loads should be cached.
+    pub(crate) async fn action_key(
         &self,
         path: &AssetRef<'static>,
         // XXX TODO: Should we take shared? Or do we contain content cache and anything else?
@@ -136,16 +159,16 @@ impl DependencyGraph {
         let mut stack = Vec::<(AssetRef<'static>, Option<DependencyCacheKey>)>::new();
         let mut pending = IndexMap::<
             AssetRef<'static>,
-            Option<(DependencyCacheKey, Vec<AssetRef<'static>>)>,
+            Option<(DependencyCacheKey, Arc<DependencyCacheValue>)>,
         >::new();
 
         stack.push((path.clone(), None));
 
         while let Some((path, expected_dependency_key)) = stack.pop() {
-            // If we already have a graph node then we're done.
+            // Early out if we already have a graph node for this path.
             if self
                 .graph
-                .read()
+                .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .contains(&path)
             {
@@ -160,25 +183,17 @@ impl DependencyGraph {
                 continue;
             }
 
-            // XXX TODO: Doing separate get and set means looking up the node
-            // twice. Avoid?
-
-            // XXX TODO: Await inside read lock?
-            if let Some(cached) = self.cache.get(&dependency_key, &path).await {
-                let dependee_paths = cached
-                    .list()
-                    .iter()
-                    .map(|(dependee_path, _)| dependee_path.clone())
-                    .collect();
-
-                assert!(!pending.contains_key(&path));
-                pending.insert(path.clone(), Some((dependency_key, dependee_paths)));
-
-                for (dependee_path, dependee_key) in cached.list() {
+            if let Some(cache) = &self.cache
+                && let Some(dependency_value) = cache.get(&dependency_key, &path).await
+            {
+                for (dependee_path, dependee_key) in dependency_value.list() {
                     if !pending.contains_key(dependee_path) {
                         stack.push((dependee_path.clone(), Some(*dependee_key)));
                     }
                 }
+
+                assert!(!pending.contains_key(&path));
+                pending.insert(path.clone(), Some((dependency_key, dependency_value)));
             } else {
                 assert!(!pending.contains_key(&path));
                 pending.insert(path.clone(), None);
@@ -186,54 +201,49 @@ impl DependencyGraph {
         }
 
         if !pending.is_empty() {
-            let mut graph = self.graph.write().unwrap_or_else(PoisonError::into_inner);
+            let mut graph = self.graph.lock().unwrap_or_else(PoisonError::into_inner);
 
             for (path, potential) in pending.iter().rev() {
                 match potential {
-                    Some((dependency_key, dependees)) => {
-                        graph.set(&path, *dependency_key, dependees);
+                    Some((dependency_key, dependency_value)) => {
+                        graph.set(path, *dependency_key, dependency_value);
                     }
                     None => {
-                        graph.invalidate(&path);
+                        graph.invalidate(path);
                     }
                 };
             }
         }
 
         self.graph
-            .read()
+            .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(path)
     }
 
-    fn register_dependencies(
+    pub(crate) fn register_dependencies(
         &self,
         path: &AssetRef<'static>,
         dependency_key: DependencyCacheKey,
         dependency_value: DependencyCacheValue,
     ) -> Option<ActionCacheKey> {
-        // XXX TODO: Avoid allocation or otherwise simplify this?
-        let dependee_paths = dependency_value
-            .list()
-            .iter()
-            .map(|(dependee_path, _)| dependee_path.clone())
-            .collect::<Vec<_>>();
-
         let action_key = self
             .graph
-            .write()
+            .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .set(&path, dependency_key, &dependee_paths);
+            .set(path, dependency_key, &dependency_value);
 
-        self.cache
-            .put(dependency_key, Arc::new(dependency_value), path);
+        if let Some(cache) = &self.cache {
+            cache.put(dependency_key, Arc::new(dependency_value), path);
+        }
 
         action_key
     }
 
-    fn invalidate(&self, path: &AssetRef<'static>) {
+    #[expect(unused, reason = "XXX TODO")]
+    pub(crate) fn invalidate(&self, path: &AssetRef<'static>) {
         self.graph
-            .write()
+            .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .invalidate(path);
     }

@@ -391,6 +391,13 @@ pub struct LoadContext<'a> {
     /// need the dependency information, for example during asset processing.
     pub(crate) should_load_dependencies: bool,
     populate_hashes: bool,
+    // XXX TODO: Reconsider making this an `AssetRef`. It's used to avoid putting
+    // action specific plumbing in a few places - instead there's a special
+    // `basset::ActionLoader` for actions, returned by `get_meta_loader_and_reader_for_ref`.
+    // But other asset loaders never want to load actions. So maybe better to
+    // add the plumbing and avoid confusing the loader interfaces. Perhaps
+    // the "loader` returned by `get_meta_loader_and_reader_for_ref` should be
+    // an wrapper enum with a variant for actions.
     asset_path: AssetRef<'static>,
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
     /// Direct dependencies used by this loader.

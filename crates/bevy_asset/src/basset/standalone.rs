@@ -3,34 +3,23 @@
 use crate::{
     basset::{
         blob::{BlobReader, BlobWriter},
-        cache::ImmediateDependeeActionKeys,
-        ActionCacheKey, ApplyContext, DependencyCacheKey,
+        ApplyContext,
     },
     io::SliceReader,
-    meta::{AssetHash, Settings},
+    meta::Settings,
     saver::ErasedAssetSaver,
     AssetPath, AssetRef, ErasedAssetLoader, ErasedLoadedAsset,
 };
 use alloc::{boxed::Box, vec::Vec};
 use bevy_ecs::error::BevyError;
-use bevy_platform::collections::HashMap;
-use serde::{Deserialize, Serialize};
 
 const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
 const STANDALONE_VERSION: u16 = 1;
-
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub struct StandaloneAssetInfo {
-    pub action_key: ActionCacheKey,
-    pub dependency_key: DependencyCacheKey,
-    pub immediate_dependee_action_keys: ImmediateDependeeActionKeys,
-}
 
 pub async fn read_standalone_asset(
     original_path: &AssetRef<'static>,
     blob: &[u8],
     context: &ApplyContext<'_>,
-    expected_info: &StandaloneAssetInfo,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     let mut blob = BlobReader::new(blob);
 
@@ -52,7 +41,6 @@ pub async fn read_standalone_asset(
 
     let loader_name = blob.string().expect("TODO");
     let meta_bytes = blob.bytes_sized().expect("TODO");
-    let info_bytes = blob.bytes_sized().expect("TODO");
     let asset_bytes = blob.bytes_sized().expect("TODO");
 
     let loader = context
@@ -63,23 +51,20 @@ pub async fn read_standalone_asset(
 
     let meta = loader.deserialize_meta(meta_bytes).expect("TODO");
 
-    let info = ron::de::from_bytes::<StandaloneAssetInfo>(info_bytes).expect("TODO");
-
-    assert_eq!(&info, expected_info);
-
     let mut reader = SliceReader::new(asset_bytes);
 
     let load_dependencies = false;
     let populate_hashes = false;
 
-    // Don't update the dependency cache - this asset loader loader doesn't
-    // know about the dependencies of the action that produced this asset.
+    // Don't update the dependency cache. If we're loading from the action cache
+    // then the dependencies must be already known, otherwise we wouldn't have
+    // been able to calculate the action key.
     //
-    // XXX TODO: Maybe better if we sidestepped `load_with_settings_loader_and_reader`
+    // XXX TODO: This feels janky. Maybe we should be sidestepping `load_with_settings_loader_and_reader`
     // for clarity? Or generally rethink how the dependency cache gets filled out.
     let update_dependency_cache = false;
 
-    let mut asset = context
+    context
         .asset_server
         .load_with_settings_loader_and_reader(
             original_path,
@@ -91,32 +76,7 @@ pub async fn read_standalone_asset(
             update_dependency_cache,
         )
         .await
-        .map_err(Into::<BevyError>::into)?;
-
-    // Apply the correct dependencies.
-
-    let mut loader_dependencies = HashMap::<AssetRef<'static>, AssetHash>::new();
-
-    for (dependee, _) in &info.immediate_dependee_action_keys.list {
-        // XXX TODO: Fake hash for now. Not sure if we need this long-term as
-        // the hash is only used for processing.
-        let hash = [0u8; 32];
-
-        loader_dependencies.insert(dependee.clone(), hash);
-    }
-
-    // Check that the recorded dependencies are correct - they should be a
-    // superset of what the loader used. If this fails then either we didn't
-    // record the dependency correctly, or the loader is unexpectedly reading
-    // different dependencies.
-
-    for dependee in asset.loader_dependencies.keys() {
-        assert!(loader_dependencies.contains_key(dependee), "{dependee}");
-    }
-
-    asset.loader_dependencies = loader_dependencies;
-
-    Ok(asset)
+        .map_err(Into::<BevyError>::into)
 }
 
 pub async fn write_standalone_asset(
@@ -124,7 +84,6 @@ pub async fn write_standalone_asset(
     loader: &dyn ErasedAssetLoader,
     saver: &dyn ErasedAssetSaver,
     saver_settings: &dyn Settings,
-    info: &StandaloneAssetInfo,
 ) -> Result<Box<[u8]>, BevyError> {
     let mut asset_bytes = Vec::<u8>::new();
 
@@ -140,7 +99,6 @@ pub async fn write_standalone_asset(
     // Could get messy.
 
     let meta_bytes = loader.default_meta().serialize();
-    let info_bytes = ron::ser::to_string(&info).expect("TODO").into_bytes();
 
     let mut writer = Vec::<u8>::new();
 
@@ -150,7 +108,6 @@ pub async fn write_standalone_asset(
     blob.u16(STANDALONE_VERSION);
     blob.string(loader.type_path());
     blob.bytes_sized(&meta_bytes);
-    blob.bytes_sized(&info_bytes);
     blob.bytes_sized(&asset_bytes);
 
     Ok(writer.into())
