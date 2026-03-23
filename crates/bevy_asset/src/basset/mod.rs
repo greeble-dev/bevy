@@ -223,7 +223,6 @@ impl ApplyContext<'_> {
 }
 
 /// XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
-/// XXX TODO: Why doesn't this implement serialize/deserialize?
 pub trait BassetActionParams: Downcast + Send + Sync + 'static {}
 
 // XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
@@ -237,7 +236,6 @@ impl<T: 'static> BassetActionParams for T where T: Send + Sync {}
 /// An action that takes a parameter struct of a known type and returns an
 /// `ErasedLoadedAsset`.
 pub trait BassetAction: Send + Sync + 'static {
-    /// XXX TODO: Document. Review if serialize traits should go into `BassetActionParams`.
     type Params: BassetActionParams + Serialize + for<'a> Deserialize<'a>;
 
     /// XXX TODO: Document.

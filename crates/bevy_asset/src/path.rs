@@ -745,12 +745,17 @@ impl<'a, 'de> Deserialize<'de> for SerializableLabel<'a> {
     }
 }
 
-/// XXX TODO: Awkwardly called `AssetAction2` since `AssetAction` is taking.
+/// XXX TODO: Awkwardly called `AssetAction2` since `AssetAction` is taken.
 /// Need to decide on an alternative name or another way of structuring this.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct AssetAction2<'a> {
     // XXX TODO: Review if these should be Arc/CowArc, similar to AssetPath.
     name: Box<str>,
+    // XXX TODO: Consider changing this to `Arc<dyn BassetActionParams>`
+    // (or CowArc). Pros: better equality (handles defaults, not sure if RON is
+    // canonicalized), cheaper to initialise in code, usually smaller.
+    // Cons: Complicates serialization (can't serialize through dyn, so need to
+    // look up action by name and ask it to serialize).
     params: Box<ron::value::RawValue>,
     // XXX TODO: Review if this is justified.
     label: Option<SerializableLabel<'a>>,
