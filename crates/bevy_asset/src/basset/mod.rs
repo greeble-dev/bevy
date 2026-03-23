@@ -47,8 +47,7 @@ pub struct BassetPlugin;
 
 impl Plugin for BassetPlugin {
     fn build(&self, app: &mut App) {
-        app.register_erased_asset_loader(Box::new(BassetLoader))
-            .register_erased_asset_loader(Box::new(ActionLoader));
+        app.register_erased_asset_loader(Box::new(BassetLoader));
     }
 }
 
@@ -172,32 +171,6 @@ impl ApplyContext<'_> {
         }
     }
 
-    // XXX TODO: Review where this duplicates `erased_load_dependee`.
-    pub async fn erased_load_dependee_path(
-        &mut self,
-        path: &AssetPath<'static>,
-        settings: &Option<Box<ron::value::RawValue>>,
-    ) -> Result<PartialErasedLoadedAsset, BevyError> {
-        let asset = load_path(self.asset_server, path, settings).await?;
-
-        // XXX TODO: Decide what to do here. The hash only appears to be used
-        // for asset processing, so maybe can ignore for now.
-        let hash = [0u8; 32];
-
-        // XXX TODO: Duplicates earlier `path.clone().into()`.
-        self.loader_dependencies.insert(path.clone().into(), hash);
-
-        if let Some(label) = path.label_cow() {
-            match asset.take_labeled(label.clone()) {
-                Ok(labeled_asset) => Ok(labeled_asset.into()),
-                // XXX TODO
-                Err(_) => panic!("Couldn't find label \"{}\" in \"{}\".", label, path),
-            }
-        } else {
-            Ok(asset.into())
-        }
-    }
-
     pub async fn load_dependee<T: Asset>(
         &mut self,
         path: &AssetRef<'static>,
@@ -278,8 +251,7 @@ where
     }
 }
 
-// XXX TODO: Review if this actually needs to be shared between `BassetLoader`
-// and `ActionLoader`.
+// XXX TODO: Review if all this stuff actually needs to be shared.
 #[derive(Default)]
 pub struct BassetShared {
     action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
@@ -501,72 +473,6 @@ impl ErasedAssetLoader for BassetLoader {
     }
 }
 
-#[derive(TypePath)]
-struct ActionLoader;
-
-impl ErasedAssetLoader for ActionLoader {
-    fn load<'a>(
-        &'a self,
-        reader: &'a mut dyn Reader,
-        _settings: &'a dyn Settings,
-        load_context: LoadContext<'a>,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
-        assert!(
-            load_context.path().label().is_none(),
-            "Paranoia. {:?}",
-            load_context.path()
-        );
-
-        Box::pin(async move {
-            assert_eq!(
-                reader.read_to_end(&mut Vec::new()).await?,
-                0,
-                "Reader should have been empty, all data is in the path."
-            );
-
-            let action = load_context.path().action().expect(
-                "ActionLoader should have been given an AssetRef::Action, not an AssetRef::Path.",
-            );
-
-            load_action(load_context.asset_server(), action).await
-        })
-    }
-
-    fn extensions(&self) -> &[&str] {
-        &[]
-    }
-
-    fn deserialize_meta(&self, meta: &[u8]) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
-        // XXX TODO: Review. Is this going to be problematic since we don't know the loader type?
-        let meta = AssetMeta::<FakeAssetLoader, ()>::deserialize(meta)?;
-        Ok(Box::new(meta))
-    }
-
-    fn default_meta(&self) -> Box<dyn AssetMetaDyn> {
-        // XXX TODO: Review. Is this going to be problematic since we don't know the loader type?
-        Box::new(AssetMeta::<FakeAssetLoader, ()>::new(AssetAction::Load {
-            loader: self.type_path().to_string(),
-            settings: <FakeAssetLoader as AssetLoader>::Settings::default(),
-        }))
-    }
-
-    fn type_path(&self) -> &'static str {
-        <Self as TypePath>::type_path()
-    }
-
-    fn type_id(&self) -> core::any::TypeId {
-        core::any::TypeId::of::<Self>()
-    }
-
-    fn asset_type_name(&self) -> Option<&'static str> {
-        None
-    }
-
-    fn asset_type_id(&self) -> Option<core::any::TypeId> {
-        None
-    }
-}
-
 fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::value::RawValue>>) {
     let Some(_settings) = settings else {
         return;
@@ -609,8 +515,7 @@ async fn load_path(
     );
 
     let (mut meta, loader, mut reader) = asset_server
-        // XXX TODO `for_path` or `for_action`?
-        .get_meta_loader_and_reader_for_path(path, None)
+        .get_meta_loader_and_reader(path, None)
         .await
         .map_err(Into::<BevyError>::into)?;
 
@@ -624,7 +529,7 @@ async fn load_path(
 
     let asset = asset_server
         .load_with_settings_loader_and_reader(
-            &AssetRef::from(path),
+            path,
             meta.loader_settings().expect("meta is set to Load"),
             &*loader,
             &mut *reader,
@@ -638,7 +543,7 @@ async fn load_path(
     Ok(asset)
 }
 
-async fn load_action(
+pub(crate) async fn load_action(
     asset_server: &AssetServer,
     action: &AssetAction2<'static>,
 ) -> Result<ErasedLoadedAsset, BevyError> {
@@ -672,7 +577,7 @@ async fn load_action(
         if let Some(action_key) = action_key
             && let Some(cached_standalone_asset) = action_cache.get(&action_key, &path).await
         {
-            return read_standalone_asset(&path, &cached_standalone_asset, &apply_context).await;
+            return read_standalone_asset(&cached_standalone_asset, &apply_context).await;
         }
     }
 

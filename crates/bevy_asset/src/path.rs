@@ -782,6 +782,10 @@ impl<'a> AssetAction2<'a> {
         }
     }
 
+    pub fn clone_owned(&self) -> AssetAction2<'static> {
+        self.clone().into_owned()
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }

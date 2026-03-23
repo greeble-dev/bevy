@@ -8,7 +8,7 @@ use crate::{
     io::SliceReader,
     meta::Settings,
     saver::ErasedAssetSaver,
-    AssetPath, AssetRef, ErasedAssetLoader, ErasedLoadedAsset,
+    AssetPath, ErasedAssetLoader, ErasedLoadedAsset,
 };
 use alloc::{boxed::Box, vec::Vec};
 use bevy_ecs::error::BevyError;
@@ -17,7 +17,6 @@ const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
 const STANDALONE_VERSION: u16 = 1;
 
 pub async fn read_standalone_asset(
-    original_path: &AssetRef<'static>,
     blob: &[u8],
     context: &ApplyContext<'_>,
 ) -> Result<ErasedLoadedAsset, BevyError> {
@@ -64,10 +63,13 @@ pub async fn read_standalone_asset(
     // for clarity? Or generally rethink how the dependency cache gets filled out.
     let update_dependency_cache = false;
 
+    // XXX TODO: Ew?
+    let fake_path = AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
+
     context
         .asset_server
         .load_with_settings_loader_and_reader(
-            original_path,
+            &fake_path,
             meta.loader_settings().expect("meta is set to Load"),
             &*loader,
             &mut reader,

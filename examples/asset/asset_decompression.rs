@@ -48,9 +48,6 @@ impl AssetLoader for GzAssetLoader {
     ) -> Result<Self::Asset, Self::Error> {
         let compressed_path = load_context.path();
         let file_name = compressed_path
-            // XXX TODO: Review. Added `unwpath().unwrap()`.
-            .path()
-            .unwrap()
             .path()
             .file_name()
             .ok_or(GzAssetLoaderError::IndeterminateFilePath)?
@@ -59,9 +56,6 @@ impl AssetLoader for GzAssetLoader {
             .strip_suffix(".gz")
             .ok_or(GzAssetLoaderError::IndeterminateFilePath)?;
         let contained_path = compressed_path
-            // XXX TODO: Review. Added `path.unwrap()`.
-            .path()
-            .unwrap()
             .resolve_embed_str(uncompressed_file_name)
             .map_err(|_| GzAssetLoaderError::IndeterminateFilePath)?;
 

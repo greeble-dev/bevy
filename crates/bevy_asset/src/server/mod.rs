@@ -15,10 +15,10 @@ use crate::{
         MetaTransform, Settings,
     },
     path::AssetPath,
-    Asset, AssetEvent, AssetHandleProvider, AssetId, AssetIndex, AssetLoadFailedEvent,
-    AssetMetaCheck, AssetRef, Assets, DeserializeMetaError, ErasedAssetIndex, ErasedLoadedAsset,
-    Handle, LoadedUntypedAsset, UnapprovedPathMode, UntypedAssetId, UntypedAssetLoadFailedEvent,
-    UntypedHandle,
+    Asset, AssetAction2, AssetEvent, AssetHandleProvider, AssetId, AssetIndex,
+    AssetLoadFailedEvent, AssetMetaCheck, AssetRef, Assets, DeserializeMetaError, ErasedAssetIndex,
+    ErasedLoadedAsset, Handle, LoadedUntypedAsset, UnapprovedPathMode, UntypedAssetId,
+    UntypedAssetLoadFailedEvent, UntypedHandle,
 };
 use alloc::{borrow::ToOwned, boxed::Box, vec, vec::Vec};
 use alloc::{
@@ -713,10 +713,10 @@ impl AssetServer {
     ///
     /// Returns the handle of the asset if one was retrieved by this function. Otherwise, may return
     /// [`None`].
-    async fn load_internal<'a>(
+    async fn load_internal_path<'a>(
         &self,
         input_handle: Option<UntypedHandle>,
-        path: AssetRef<'a>,
+        path: AssetPath<'a>,
         force: bool,
         meta_transform: Option<MetaTransform>,
     ) -> Result<Option<UntypedHandle>, AssetLoadError> {
@@ -725,7 +725,7 @@ impl AssetServer {
         let path = path.into_owned();
         let path_clone = path.clone();
         let (mut meta, loader, mut reader) = self
-            .get_meta_loader_and_reader_for_ref(&path_clone, input_handle_type_id)
+            .get_meta_loader_and_reader(&path_clone, input_handle_type_id)
             .await
             .inspect_err(|e| {
                 // if there was an input handle, a "load" operation has already started, so we must produce a "failure" event, if
@@ -733,7 +733,7 @@ impl AssetServer {
                 if let Some(handle) = &input_handle {
                     self.send_asset_event(InternalAssetEvent::Failed {
                         index: handle.try_into().unwrap(),
-                        path: path.clone_owned(),
+                        path: path.clone_owned().into(),
                         error: e.clone(),
                     });
                 }
@@ -763,7 +763,7 @@ impl AssetServer {
 
             let mut infos = self.write_infos();
             let result = infos.get_or_create_path_handle_internal(
-                path.clone(),
+                path.clone().into(), // XXX TODO: Avoid clone?
                 if path.label().is_none() {
                     loader.asset_type_id() // XXX TODO: Review if asset_type_id is ok to be Option. Also can this be simplified?
                 } else {
@@ -812,7 +812,7 @@ impl AssetServer {
                     loader.asset_type_id()
                 );
                 return Err(AssetLoadError::RequestedHandleTypeMismatch {
-                    path: path.into_owned(),
+                    path: path.into_owned().into(),
                     requested: asset_type_id,
                     actual_asset_name: loader.asset_type_name().unwrap(), // XXX TODO: This is assuming that asset_type_name is Some if asset_type_id is Some - see condition above.
                     loader_name: loader.type_path(),
@@ -832,7 +832,7 @@ impl AssetServer {
             let base_path = path.without_label().into_owned();
             let base_handle = infos
                 .get_or_create_path_handle_erased(
-                    base_path.clone(),
+                    base_path.clone().into(),
                     loader.asset_type_id().unwrap(), // XXX TODO: Avoid unwrap. Not sure how to handle this. Can't work out the type until it's loaded.
                     Some(loader.asset_type_name().unwrap()), // XXX TODO: Ditto.
                     HandleLoadingMode::Force,
@@ -873,7 +873,7 @@ impl AssetServer {
                                 && asset_id.type_id != labeled_asset.handle.type_id()
                             {
                                 let error = AssetLoadError::RequestedHandleTypeMismatch {
-                                    path: path.clone(),
+                                    path: path.clone().into(),
                                     requested: asset_id.type_id,
                                     actual_asset_name: labeled_asset.asset.value.asset_type_name(),
                                     loader_name: loader.type_path(),
@@ -881,7 +881,7 @@ impl AssetServer {
                                 self.send_asset_event(InternalAssetEvent::Failed {
                                     index: asset_id,
                                     error: error.clone(),
-                                    path: path.into_owned(),
+                                    path: path.into_owned().into(),
                                 });
                                 return Err(error);
                             }
@@ -895,7 +895,7 @@ impl AssetServer {
                                 .collect();
                             all_labels.sort_unstable();
                             let error = AssetLoadError::MissingLabel {
-                                base_path,
+                                base_path: base_path.into(),
                                 label: label.to_string(),
                                 all_labels,
                             };
@@ -903,7 +903,7 @@ impl AssetServer {
                                 self.send_asset_event(InternalAssetEvent::Failed {
                                     index: asset_id,
                                     error: error.clone(),
-                                    path: path.into_owned(),
+                                    path: path.into_owned().into(),
                                 });
                             }
                             return Err(error);
@@ -924,10 +924,101 @@ impl AssetServer {
                     self.send_asset_event(InternalAssetEvent::Failed {
                         index: asset_id,
                         error: err.clone(),
-                        path: path.into_owned(),
+                        path: path.into_owned().into(),
                     });
                 }
                 Err(err)
+            }
+        }
+    }
+
+    async fn load_internal_action<'a>(
+        &self,
+        input_handle: Option<UntypedHandle>,
+        action: AssetAction2<'a>,
+        force: bool,
+    ) -> Result<Option<UntypedHandle>, AssetLoadError> {
+        let asset_id: Option<ErasedAssetIndex>;
+        let fetched_handle;
+        let should_load;
+        if let Some(input_handle) = input_handle {
+            asset_id = Some((&input_handle).try_into().unwrap());
+            fetched_handle = None;
+            should_load = true;
+        } else {
+            // XXX TODO: Not clear if we can create the handle here since we
+            // don't have the type? Is it valid to create after loading? But that
+            // means we can get duplicate loads.
+            todo!();
+            /*
+            let mut infos = self.write_infos();
+            match infos.get_or_create_path_handle_internal(
+                action.clone().into(),
+                input_handle_type_id,
+                HandleLoadingMode::Request,
+                None,
+            ) {
+                Ok((untyped_handle, handle_should_load)) => {
+                    fetched_handle = Some(untyped_handle);
+                    should_load = handle_should_load;
+                }
+                Err(_) => todo!(),
+            }
+            */
+        }
+
+        // Bail out earlier if we don't need to load the asset.
+        if !should_load && !force {
+            return Ok(fetched_handle);
+        }
+
+        if action.label().is_some() {
+            // XXX TODO: Need to work out the label's handle. See similar code
+            // in load_internal_path where it checks `if path.label().is_some`.
+            // Or maybe we can only do this after loading?
+            todo!();
+        }
+
+        // XXX TODO: Try to avoid `action.clone_owned()`. Maybe not possible since we
+        // need to check label.
+        match crate::basset::load_action(self, &action.clone_owned()).await {
+            Ok(asset) => {
+                let final_handle = if action.label().is_some() {
+                    // XXX TODO: Map to the sub-asset.
+                    todo!();
+                } else {
+                    fetched_handle
+                };
+
+                // XXX TODO: Verify the type of the asset? Compare to `RequestedHandleTypeMismatch`
+                // code in `load_internal_path`.
+
+                self.send_asset_event(InternalAssetEvent::Loaded {
+                    index: asset_id.expect("XXX TODO, also need to return base asset if sub-asset"),
+                    loaded_asset: asset,
+                });
+                Ok(final_handle)
+            }
+            Err(_) => {
+                todo!()
+            }
+        }
+    }
+
+    async fn load_internal<'a>(
+        &self,
+        input_handle: Option<UntypedHandle>,
+        path: AssetRef<'a>,
+        force: bool,
+        meta_transform: Option<MetaTransform>,
+    ) -> Result<Option<UntypedHandle>, AssetLoadError> {
+        match path {
+            AssetRef::Action(action) => {
+                self.load_internal_action(input_handle, action, force).await
+            }
+            AssetRef::Path(path) => {
+                self.load_internal_path(input_handle, path, force, meta_transform)
+                    .await
             }
         }
     }
@@ -1481,43 +1572,7 @@ impl AssetServer {
             .0
     }
 
-    // XXX TODO: Review change from pub(crate) -> pub.
-    // XXX TODO: Review how `get_meta_loader_and_reader` has been split into
-    // `for_ref` and `for_path` variants. Initially done to minimise changes.
-    pub async fn get_meta_loader_and_reader_for_ref<'a>(
-        &'a self,
-        asset_path: &'a AssetRef<'_>,
-        asset_type_id: Option<TypeId>,
-    ) -> Result<
-        (
-            Box<dyn AssetMetaDyn>,
-            Arc<dyn ErasedAssetLoader>,
-            Box<dyn Reader + 'a>,
-        ),
-        AssetLoadError,
-    > {
-        match asset_path {
-            AssetRef::Path(path) => {
-                self.get_meta_loader_and_reader_for_path(path, asset_type_id)
-                    .await
-            }
-            AssetRef::Action(_) => {
-                let loader = self
-                    .get_asset_loader_with_type_name("bevy_asset::basset::ActionLoader")
-                    .await?;
-
-                let meta = loader.default_meta();
-
-                // XXX TODO: We just want an empty reader. Is there a simpler way?
-                let reader: Box<dyn Reader> = Box::new(crate::io::VecReader::new(Vec::new()));
-
-                Ok((meta, loader, reader))
-            }
-        }
-    }
-
-    // XXX TODO: See `for_action` variant.
-    pub async fn get_meta_loader_and_reader_for_path<'a>(
+    pub async fn get_meta_loader_and_reader<'a>(
         &'a self,
         asset_path: &'a AssetPath<'_>,
         asset_type_id: Option<TypeId>,
@@ -1632,7 +1687,7 @@ impl AssetServer {
     // XXX TODO: Review change from pub(crate) -> pub.
     pub(crate) async fn load_with_settings_loader_and_reader(
         &self,
-        asset_path: &AssetRef<'_>,
+        asset_path: &AssetPath<'_>,
         settings: &dyn Settings,
         loader: &dyn ErasedAssetLoader,
         reader: &mut dyn Reader,
@@ -1659,29 +1714,21 @@ impl AssetServer {
         let result = load
             .await
             .map_err(|_| AssetLoadError::AssetLoaderPanic {
-                path: asset_path.clone_owned(),
+                path: asset_path.clone_owned().into(),
                 loader_name: loader.type_path(),
             })?
             .map_err(|e| {
                 AssetLoadError::AssetLoaderError(AssetLoaderError {
-                    path: asset_path.clone_owned(),
+                    path: asset_path.clone_owned().into(),
                     loader_name: loader.type_path(),
                     error: e.into(),
                 })
             });
 
-        if update_dependency_cache
-            // XXX TODO: Review awkwardness. See comment below about `ActionLoader`.
-            && !asset_path.is_action()
-            && let Ok(asset) = &result
-        {
-            // XXX TODO: If the loader is `ActionLoader` then this will redundantly
-            // register the dependencies again. Need to rethink if we should be
-            // trying to hide actions behind a generic loader, or if loading
-            // actions should be more explicit. See similar comments on `LoadContext`.
+        if update_dependency_cache && let Ok(asset) = &result {
             self.basset_shared()
                 .register_dependencies(
-                    &asset_path.clone_owned(), // XXX TODO: Avoid clone?
+                    &asset_path.clone_owned().into(), // XXX TODO: Avoid clone?
                     Some(settings),
                     asset.loader_dependencies.keys().cloned(),
                     self,
@@ -2166,6 +2213,8 @@ impl RecursiveDependencyLoadState {
 pub enum AssetLoadError {
     #[error("Requested handle of type {requested:?} for asset '{path}' does not match actual asset type '{actual_asset_name}', which used loader '{loader_name}'")]
     RequestedHandleTypeMismatch {
+        // XXX TODO: Review if should be `AssetRef` or `AssetPath`? Might need
+        // a separate type of actions since they don't have a `loader_name`.
         path: AssetRef<'static>,
         requested: TypeId,
         actual_asset_name: &'static str,
@@ -2205,6 +2254,8 @@ pub enum AssetLoadError {
     CannotLoadIgnoredAsset { path: AssetPath<'static> },
     #[error("Failed to load asset '{path}', asset loader '{loader_name}' panicked")]
     AssetLoaderPanic {
+        // XXX TODO: Should this be `AssetRef` or `AssetPath` - loaders can't
+        // load refs, but maybe we reuse this error for some part of action loading.
         path: AssetRef<'static>,
         loader_name: &'static str,
     },
@@ -2228,6 +2279,8 @@ pub enum AssetLoadError {
 #[derive(Error, Debug, Clone)]
 #[error("Failed to load asset '{path}' with asset loader '{loader_name}': {error}")]
 pub struct AssetLoaderError {
+    // XXX TODO: Should this be `AssetRef` or `AssetPath`? Loaders can't load refs.
+    // See also `AssetLoadError::AssetLoaderPanic`.
     path: AssetRef<'static>,
     loader_name: &'static str,
     error: Arc<BevyError>,

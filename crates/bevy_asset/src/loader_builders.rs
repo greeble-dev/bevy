@@ -434,7 +434,7 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
             let (meta, loader, reader) = self
                 .load_context
                 .asset_server
-                .get_meta_loader_and_reader_for_path(path, asset_type_id)
+                .get_meta_loader_and_reader(path, asset_type_id)
                 .await
                 .map_err(|error| LoadDirectError::LoadError {
                     dependency: path.clone(),

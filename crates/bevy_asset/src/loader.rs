@@ -391,14 +391,7 @@ pub struct LoadContext<'a> {
     /// need the dependency information, for example during asset processing.
     pub(crate) should_load_dependencies: bool,
     populate_hashes: bool,
-    // XXX TODO: Reconsider making this an `AssetRef`. It's used to avoid putting
-    // action specific plumbing in a few places - instead there's a special
-    // `basset::ActionLoader` for actions, returned by `get_meta_loader_and_reader_for_ref`.
-    // But other asset loaders never want to load actions. So maybe better to
-    // add the plumbing and avoid confusing the loader interfaces. Perhaps
-    // the "loader` returned by `get_meta_loader_and_reader_for_ref` should be
-    // an wrapper enum with a variant for actions.
-    asset_path: AssetRef<'static>,
+    asset_path: AssetPath<'static>,
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
     /// Direct dependencies used by this loader.
     pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
@@ -417,7 +410,7 @@ impl<'a> LoadContext<'a> {
     /// Creates a new [`LoadContext`] instance.
     pub(crate) fn new(
         asset_server: &'a AssetServer,
-        asset_path: AssetRef<'static>,
+        asset_path: AssetPath<'static>,
         should_load_dependencies: bool,
         populate_hashes: bool,
     ) -> Self {
@@ -599,7 +592,7 @@ impl<'a> LoadContext<'a> {
     }
     /// Gets the source asset path for this load context.
     // XXX TODO: Review, keeping `asset_path` as name for now even though it's a ref.
-    pub fn path(&self) -> &AssetRef<'static> {
+    pub fn path(&self) -> &AssetPath<'static> {
         &self.asset_path
     }
 
@@ -684,7 +677,7 @@ impl<'a> LoadContext<'a> {
         let loaded_asset = self
             .asset_server
             .load_with_settings_loader_and_reader(
-                &path.clone().into(), // XXX TODO: Review clone. Or maybe `path` becomes an `AssetRef`.
+                &path,
                 settings,
                 loader,
                 reader,

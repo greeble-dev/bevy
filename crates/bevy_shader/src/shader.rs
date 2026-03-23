@@ -326,9 +326,6 @@ impl AssetLoader for ShaderLoader {
     ) -> Result<Shader, Self::Error> {
         let ext = load_context
             .path()
-            // XXX TODO: Review. Added `path().unwrap()`.
-            .path()
-            .unwrap()
             .path()
             .extension()
             .unwrap()
@@ -347,11 +344,7 @@ impl AssetLoader for ShaderLoader {
             );
         }
         let mut shader = match ext {
-            "spv" => Shader::from_spirv(
-                bytes,
-                // XXX TODO: Review. Added `path().unwrap()`.
-                load_context.path().path().unwrap().path().to_string_lossy(),
-            ),
+            "spv" => Shader::from_spirv(bytes, load_context.path().path().to_string_lossy()),
             "wgsl" => Shader::from_wgsl_with_defs(
                 String::from_utf8(bytes)?,
                 path,

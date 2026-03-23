@@ -342,7 +342,7 @@ impl<'a> ProcessContext<'a> {
         let loader = server.get_asset_loader_with_type_name(loader_name).await?;
         let loaded_asset = server
             .load_with_settings_loader_and_reader(
-                &self.path.clone().into(), // XXX TODO: Avoid clone?
+                self.path,
                 settings,
                 &*loader,
                 &mut self.reader,

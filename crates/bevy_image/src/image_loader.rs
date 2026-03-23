@@ -190,9 +190,6 @@ impl AssetLoader for ImageLoader {
                 let ext = load_context
                     .path()
                     .path()
-                    // XXX TODO: Review. Added `unwrap().path()`.
-                    .unwrap()
-                    .path()
                     .extension()
                     .unwrap()
                     .to_str()
@@ -203,12 +200,12 @@ impl AssetLoader for ImageLoader {
             ImageFormatSetting::Guess => {
                 let format = image::guess_format(&bytes).map_err(|err| FileTextureError {
                     error: err.into(),
-                    path: format!("{}", load_context.path().path().unwrap().path().display()), // XXX TODO: Added `path().unwrap()`.
+                    path: format!("{}", load_context.path().path().display()),
                 })?;
                 ImageType::Format(ImageFormat::from_image_crate_format(format).ok_or_else(
                     || FileTextureError {
-                        error: TextureError::UnsupportedTextureFormat(format!("{format:?}")), // XXX TODO: Added `path().unwrap()`.
-                        path: format!("{}", load_context.path().path().unwrap().path().display()),
+                        error: TextureError::UnsupportedTextureFormat(format!("{format:?}")),
+                        path: format!("{}", load_context.path().path().display()),
                     },
                 )?)
             }
@@ -224,7 +221,7 @@ impl AssetLoader for ImageLoader {
         )
         .map_err(|err| FileTextureError {
             error: err,
-            path: format!("{}", load_context.path().path().unwrap().path().display()), // XXX TODO: Added `path().unwrap()`.
+            path: format!("{}", load_context.path().path().display()),
         })?;
 
         if let Some(format) = settings.texture_format {

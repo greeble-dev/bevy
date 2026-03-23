@@ -552,6 +552,21 @@ impl Material for MeshletDebugMaterial {}
 #[derive(Resource)]
 struct Handles(Vec<UntypedHandle>);
 
+const INLINE_JOIN_STRINGS_RON: &str = r#"
+(
+    separator: ", ",
+    strings: [
+        Action((
+            name: "basset::action::UppercaseString",
+            params: (
+                string: Path("hello.string"),
+            )
+        )),
+        Path("world.string"),
+    ],
+)
+"#;
+
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -560,6 +575,12 @@ fn setup(
 ) {
     // XXX TODO
     //let _inline_path = BassetPathSerializable::Path("1234.int".into()).to_asset_path();
+
+    let inline_join_strings = AssetAction2::new(
+        "basset::action::JoinStrings".into(),
+        ron::value::RawValue::from_boxed_ron(INLINE_JOIN_STRINGS_RON.into()).unwrap(),
+        None,
+    );
 
     commands.insert_resource(Handles(vec![
         /*
@@ -584,10 +605,12 @@ fn setup(
         asset_server
             .load::<demo::StringAsset>("join_strings.basset")
             .untyped(),
+        asset_server
+            .load::<demo::StringAsset>(inline_join_strings)
+            .untyped(),
         //asset_server.load::<demo::IntAsset>(inline_path).untyped(),
     ]));
 
-    /*
     commands.spawn((
         acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("scene_from_gltf.basset")),
         Transform::from_xyz(-100.0, 0.0, 0.0)
@@ -599,7 +622,6 @@ fn setup(
         Transform::from_xyz(100.0, 0.0, 0.0)
             .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
     ));
-    */
 
     commands.spawn((
         Camera3d::default(),

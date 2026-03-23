@@ -276,9 +276,6 @@ impl GltfLoader {
 
         let file_name = load_context
             .path()
-            // XXX TODO: Review this. Added `.path().unwrap().`.
-            .path()
-            .unwrap()
             .path()
             .to_str()
             .ok_or(GltfError::Gltf(gltf::Error::Io(Error::new(
@@ -637,8 +634,7 @@ impl GltfLoader {
                     texture.clone(),
                     &buffer_data,
                     &linear_textures,
-                    // XXX TODO: Review. Added `path().unwrap()`.
-                    load_context.path().path().unwrap(),
+                    load_context.path(),
                     loader.supported_compressed_formats,
                     default_sampler,
                     settings,
@@ -663,8 +659,7 @@ impl GltfLoader {
                                 gltf_texture,
                                 buffer_data,
                                 linear_textures,
-                                // XXX TODO: Review. Added `path().unwrap()`.
-                                asset_path.path().unwrap(),
+                                &asset_path,
                                 loader.supported_compressed_formats,
                                 default_sampler,
                                 settings,
@@ -700,7 +695,7 @@ impl GltfLoader {
                     &material,
                     &texture_handles,
                     false,
-                    load_context.path().path().unwrap().clone(), // XXX TODO: Avoid unwrap. Unclear if `load_material` should take AssetRef?
+                    load_context.path().clone(),
                 );
                 let handle = load_context.add_labeled_asset(label.clone(), gltf_material.clone());
 
@@ -1669,7 +1664,7 @@ fn load_node(
                         &material,
                         textures,
                         is_scale_inverted,
-                        load_context.path().path().unwrap().clone(), // XXX TODO: Avoid unwrap. Unclear if `load_material` should take AssetRef?
+                        load_context.path().clone(),
                     );
                     // TODO: maybe move this into `load_material` ?
                     let handle =
@@ -1959,9 +1954,6 @@ async fn load_buffers(
                         // TODO: Remove this and add dep
                         let buffer_path = load_context
                             .path()
-                            // XXX TODO: Review. Added `path().unwrap()`.
-                            .path()
-                            .unwrap()
                             .resolve_embed_str(uri)
                             .map_err(|err| GltfError::InvalidBufferUri(uri.to_owned(), err))?;
                         load_context.read_asset_bytes(buffer_path).await?
