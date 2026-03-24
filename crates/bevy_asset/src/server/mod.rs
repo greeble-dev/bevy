@@ -2,7 +2,7 @@ mod info;
 mod loaders;
 
 use crate::{
-    basset::{BassetShared, RootAssetAction2, RootAssetPath},
+    basset::{BassetShared, RootAssetAction2, RootAssetPath, RootAssetRef},
     folder::LoadedFolder,
     io::{
         AssetReaderError, AssetSource, AssetSourceEvent, AssetSourceId, AssetSources,
@@ -1733,8 +1733,10 @@ impl AssetServer {
         if update_dependency_cache && let Ok(asset) = &result {
             self.basset_shared()
                 .register_dependencies(
-                    &RootAssetPath::try_from(asset_path)
-                        .expect("XXX TODO: Can we assume no label?"),
+                    &RootAssetRef::from(
+                        RootAssetPath::try_from(asset_path)
+                            .expect("XXX TODO: Can we assume no label?"),
+                    ),
                     Some(settings),
                     asset.loader_dependencies.keys().cloned(),
                     self,

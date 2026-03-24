@@ -630,7 +630,6 @@ impl Material for MeshletDebugMaterial {}
 #[derive(Resource)]
 struct Handles(Vec<UntypedHandle>);
 
-/*
 const INLINE_JOIN_STRINGS_RON: &str = r#"
 (
     separator: ", ",
@@ -645,7 +644,6 @@ const INLINE_JOIN_STRINGS_RON: &str = r#"
     ],
 )
 "#;
-*/
 
 fn setup(
     mut commands: Commands,
@@ -676,7 +674,6 @@ fn setup(
             .load::<demo::StringAsset>("string_loader_uppercase.basset")
             .untyped(),
             */
-        /*
         asset_server
             .load::<demo::StringAsset>("join_strings.basset")
             .untyped(),
@@ -687,7 +684,6 @@ fn setup(
                 None,
             ))
             .untyped(),
-        */
     ]));
 
     commands.spawn((
@@ -766,22 +762,29 @@ fn print(
 }
 
 // XXX TODO: The `done` is annoying. Better way to run once?
-fn reload(asset_server: Res<AssetServer>, handles: Res<Handles>, mut done: Local<bool>) {
+fn reload(
+    mut done: Local<bool>,
+    args: Res<Args>,
+    asset_server: Res<AssetServer>,
+    handles: Res<Handles>,
+) {
     if *done {
         return;
     }
 
     *done = true;
 
-    info!("RELOADING");
+    if args.reload {
+        info!("RELOADING");
 
-    for handle in &handles.0 {
-        asset_server.reload(handle.path().expect("TODO"));
+        for handle in &handles.0 {
+            asset_server.reload(handle.path().expect("TODO"));
+        }
     }
 }
 
 // XXX TODO: The `done` is annoying. Better way to run once?
-fn dump(asset_server: Res<AssetServer>, args: Res<Args>, mut done: Local<bool>) {
+fn dump(mut done: Local<bool>, args: Res<Args>, asset_server: Res<AssetServer>) {
     if *done {
         return;
     }
@@ -815,6 +818,10 @@ struct Args {
     /// XXX TODO
     #[argh(switch)]
     dump_dependency_graph: bool,
+
+    /// XXX TODO
+    #[argh(switch)]
+    reload: bool,
 }
 
 fn main() {

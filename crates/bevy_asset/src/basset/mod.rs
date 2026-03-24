@@ -552,20 +552,19 @@ impl BassetShared {
     // XXX TODO: Settings?
     pub(crate) async fn register_dependencies(
         &self,
-        path: &RootAssetPath<'static>,
+        path: &RootAssetRef<'static>,
+        // XXX TODO: Settings?
         _settings: Option<&dyn Settings>,
         dependees: impl Iterator<Item = AssetRef<'static>>,
         asset_server: &AssetServer,
-    ) {
+    ) -> Option<ActionCacheKey> {
         if let Some(dependency_graph) = &self.dependency_graph {
             let shared = asset_server.basset_shared();
 
             // XXX TODO: Recalculating the dependency key is a race condition since
             // the content cache will be looking at the file as it is now, not what was loaded.
             // Do we need to put the dependency key into `ErasedLoadedAsset`?
-            let dependency_key = shared
-                .dependency_key(&RootAssetRef::from(path.clone()), None, asset_server)
-                .await;
+            let dependency_key = shared.dependency_key(path, None, asset_server).await;
 
             let mut dependees = dependees
                 .map(RootAssetRef::without_label)
@@ -593,11 +592,9 @@ impl BassetShared {
 
             let dependency_value = DependencyCacheValue::new(dependencies.into_iter());
 
-            dependency_graph.register_dependencies(
-                &RootAssetRef::from(path.clone()), // XXX TODO: Avoid clone?
-                dependency_key,
-                dependency_value,
-            );
+            dependency_graph.register_dependencies(path, dependency_key, dependency_value)
+        } else {
+            None
         }
     }
 
@@ -824,51 +821,23 @@ pub(crate) async fn load_action(
     }
     */
 
-    if let Some(action_cache) = &shared.action_cache
-        && let Some(dependency_graph) = &shared.dependency_graph
-    {
-        if let Some((saver, settings)) = shared.saver(asset.asset_type_name()) {
-            // XXX TODO: Sub-asset dependencies?
-
-            // XXX TODO: Review duplication. We already tried the dependency key earlier.
-            // XXX TODO: Review passing `None` for meta parameter.
-            // XXX TODO: Recalculating the dependency key is a race condition since
-            // the content cache will be looking at the file as it is now, not what was loaded.
-            let dependency_key = shared.dependency_key(&path, None, asset_server).await;
-
-            // XXX TODO: This is duplicated in `BassetShared::register_dependencies`.
-            let mut dependees = asset
+    // XXX TODO: Is settings parameter correct?
+    let action_key = shared
+        .register_dependencies(
+            &path,
+            None,
+            asset
                 .loader_dependencies
-                .iter()
-                .map(|(d, _)| RootAssetRef::without_label(d.clone()))
-                .collect::<Vec<_>>();
+                .clone()
+                .into_iter()
+                .map(|(path, _)| path),
+            asset_server,
+        )
+        .await;
 
-            // XXX TODO: Same logic as `DependencyCacheValue::new`.
-            dependees.sort();
-            dependees.dedup();
-
-            let mut dependencies = Vec::<(RootAssetRef<'static>, DependencyCacheKey)>::new();
-
-            for dependee_path in dependees {
-                // XXX TODO: Recalculating the dependency key is a race condition since
-                // the content cache will be looking at the file as it is now, not what was loaded.
-                // Do we need to put the dependency key into `ErasedLoadedAsset`?
-                let dependee_key = shared
-                    .dependency_key(&dependee_path, None, asset_server)
-                    .await;
-                // XXX TODO: Review passing `None` for meta parameter.
-                dependencies.push((dependee_path, dependee_key));
-            }
-
-            let dependency_value = DependencyCacheValue::new(dependencies.into_iter());
-
-            let action_key = dependency_graph.register_dependencies(
-                &path, // XXX TODO: Avoid clone?
-                dependency_key,
-                dependency_value,
-            );
-
-            if let Some(action_key) = action_key {
+    if let Some(action_key) = action_key {
+        if let Some(action_cache) = &shared.action_cache {
+            if let Some((saver, settings)) = shared.saver(asset.asset_type_name()) {
                 // XXX TODO: Verify loader matches saver? Need a way to get
                 // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
                 let loader = asset_server
@@ -880,16 +849,12 @@ pub(crate) async fn load_action(
 
                 action_cache.put(action_key, blob.into(), &path);
             } else {
-                warn!(
-                    ?path,
-                    %dependency_key,
-                    "Register dependencies did not return an action key."
-                );
+                let type_name = asset.asset_type_name();
+                debug!(?type_name, ?path, "Cache ineligible, no saver for type.");
             }
-        } else {
-            let type_name = asset.asset_type_name();
-            debug!(?type_name, ?path, "Cache ineligible, no saver for type.");
         }
+    } else {
+        warn!(?path, "Register dependencies did not return an action key.");
     }
 
     Ok(asset)

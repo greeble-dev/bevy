@@ -77,6 +77,8 @@ impl Debug for InternalGraph {
                     f.write_char('/')?;
                     Display::fmt(&dependency_key, f)?;
                     f.write_char(' ')?;
+                } else {
+                    f.write_str("unknown/unknown ")?;
                 }
 
                 Display::fmt(node_to_path[&node_id], f)?;
@@ -104,8 +106,21 @@ impl InternalGraph {
         // XXX TODO: Validate the existing entry? Or is it an error to set twice?
         // XXX TODO: Try to optimize this by reusing the entry?
         if let Some(existing_node_id) = self.path_to_node.get(path).copied() {
-            self.path_to_node.remove(path);
-            self.graph.remove_node(existing_node_id);
+            return match self
+                .graph
+                .node_weight(existing_node_id)
+                .expect("Graph node should always exist XXX TODO: Document?")
+            {
+                InternalGraphNode::Valid(existing_action_key, existing_dependency_key) => {
+                    // XXX TODO: This can happen if we fail to invalidate on file
+                    // changes. Do we need to make that robust or handle it gracefully
+                    // here?
+                    assert_eq!(*existing_dependency_key, dependency_key);
+
+                    Some(*existing_action_key)
+                }
+                InternalGraphNode::Unknown => None,
+            };
         }
 
         // Gather the node id and action key of each dependee, returning `None`
