@@ -1,5 +1,6 @@
 //! Basset proof of concept.
 
+use argh::FromArgs;
 use bevy::{
     asset::{
         basset::*, io::Reader, saver::AssetSaver, AssetAction2, AssetLoader, AssetRef,
@@ -18,9 +19,8 @@ use bevy::{
     render::render_resource::AsBindGroup,
     time::common_conditions::on_timer,
 };
-
-use argh::FromArgs;
-use core::result::Result;
+use bevy_asset::{io::Writer, saver::SavedAsset, AssetPath, AsyncWriteExt};
+use core::{marker::PhantomData, result::Result};
 use serde::{Deserialize, Serialize};
 use std::{boxed::Box, sync::Arc, time::Duration};
 
@@ -343,6 +343,74 @@ mod demo {
     }
 }
 
+#[derive(Default, TypePath)]
+struct RonAssetLoader<Data>
+where
+    Data: Asset + for<'a> Deserialize<'a>,
+{
+    marker: PhantomData<Data>,
+}
+
+impl<Data> AssetLoader for RonAssetLoader<Data>
+where
+    Data: Asset + for<'a> Deserialize<'a>,
+{
+    type Asset = Data;
+    type Settings = ();
+    type Error = std::io::Error;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _settings: &Self::Settings,
+        _load_context: &mut LoadContext<'_>,
+    ) -> Result<Self::Asset, Self::Error> {
+        // XXX TODO: Check if we can use `ron::de::from_reader`.
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+
+        Ok(ron::de::from_bytes(&bytes).expect("XXX TODO"))
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["acme"]
+    }
+}
+
+#[derive(Default, TypePath)]
+struct RonAssetSaver<Data>
+where
+    Data: Asset + Serialize + for<'a> Deserialize<'a>,
+{
+    marker: PhantomData<Data>,
+}
+
+impl<Data> AssetSaver for RonAssetSaver<Data>
+where
+    Data: Asset + Serialize + for<'a> Deserialize<'a>,
+{
+    type Asset = Data;
+    type Settings = ();
+    type OutputLoader = RonAssetLoader<Data>;
+    type Error = std::io::Error;
+
+    async fn save(
+        &self,
+        writer: &mut Writer,
+        asset: SavedAsset<'_, '_, Self::Asset>,
+        _settings: &Self::Settings,
+        _asset_path: AssetPath<'_>,
+    ) -> Result<(), Self::Error> {
+        // XXX TODO: Check if we can use `ron::de::to_writer_pretty`.
+        let string = ron::ser::to_string_pretty(&*asset, ron::ser::PrettyConfig::default())
+            .expect("XXX TODO");
+
+        writer.write_all(string.as_bytes()).await?;
+
+        Ok(())
+    }
+}
+
 mod acme {
     use super::*;
     use bevy::pbr::experimental::meshlet::MeshletMesh3d;
@@ -398,13 +466,18 @@ mod acme {
 
         let gltf = asset.get::<Gltf>().expect("TODO");
 
+        // Add all the root nodes to the stack.
         let mut stack = gltf
             .nodes
             .iter()
-            .map(|node_handle| {
+            .filter_map(|node_handle| {
                 let node = get_sub_asset(asset, node_handle);
 
-                (node, node.transform)
+                if node.children.is_empty() {
+                    None
+                } else {
+                    Some((node, node.transform))
+                }
             })
             .collect::<Vec<_>>();
 
@@ -442,6 +515,7 @@ mod acme {
                 }
             }
 
+            // Push children onto the stack.
             for child in node
                 .children
                 .iter()
@@ -541,6 +615,9 @@ mod acme {
             );
         }
     }
+
+    pub type AcmeSceneAssetLoader = RonAssetLoader<AcmeScene>;
+    pub type AcmeSceneAssetSaver = RonAssetSaver<AcmeScene>;
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Default)]
@@ -553,6 +630,7 @@ impl Material for MeshletDebugMaterial {}
 #[derive(Resource)]
 struct Handles(Vec<UntypedHandle>);
 
+/*
 const INLINE_JOIN_STRINGS_RON: &str = r#"
 (
     separator: ", ",
@@ -567,6 +645,7 @@ const INLINE_JOIN_STRINGS_RON: &str = r#"
     ],
 )
 "#;
+*/
 
 fn setup(
     mut commands: Commands,
@@ -576,12 +655,6 @@ fn setup(
 ) {
     // XXX TODO
     //let _inline_path = BassetPathSerializable::Path("1234.int".into()).to_asset_path();
-
-    let inline_join_strings = AssetAction2::new(
-        "basset::action::JoinStrings".into(),
-        ron::value::RawValue::from_boxed_ron(INLINE_JOIN_STRINGS_RON.into()).unwrap(),
-        None,
-    );
 
     commands.insert_resource(Handles(vec![
         /*
@@ -603,31 +676,37 @@ fn setup(
             .load::<demo::StringAsset>("string_loader_uppercase.basset")
             .untyped(),
             */
+        /*
         asset_server
             .load::<demo::StringAsset>("join_strings.basset")
             .untyped(),
         asset_server
-            .load::<demo::StringAsset>(inline_join_strings)
+            .load::<demo::StringAsset>(AssetAction2::new(
+                "basset::action::JoinStrings".into(),
+                ron::value::RawValue::from_boxed_ron(INLINE_JOIN_STRINGS_RON.into()).unwrap(),
+                None,
+            ))
             .untyped(),
+        */
     ]));
 
     commands.spawn((
         acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("scene_from_gltf.basset")),
-        Transform::from_xyz(-100.0, 0.0, 0.0)
+        Transform::from_xyz(-1.0, 0.0, 0.0)
             .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
     ));
 
     commands.spawn((
         acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("meshlet_scene.basset")),
-        Transform::from_xyz(100.0, 0.0, 0.0)
+        Transform::from_xyz(1.0, 0.0, 0.0)
             .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
     ));
 
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(-30.0, 200.0, 300.0).looking_at(Vec3::new(-30.0, 75.0, 0.0), Vec3::Y),
+        Transform::from_xyz(-0.3, 2.0, 3.0).looking_at(Vec3::new(-0.3, 0.75, 0.0), Vec3::Y),
         FreeCamera {
-            walk_speed: 200.0,
+            walk_speed: 2.0,
             ..Default::default()
         },
         // Meshlets are incompatible with MSAA.
@@ -636,19 +715,19 @@ fn setup(
     ));
 
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(500000.0, 500000.0))),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(5000.0, 5000.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
     ));
 
     commands.spawn((
-        Transform::from_xyz(100.0, 200.0, 200.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
+        Transform::from_xyz(1.0, 2.0, 2.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
         DirectionalLight {
             shadow_maps_enabled: true,
             ..default()
         },
         CascadeShadowConfigBuilder {
             num_cascades: 1,
-            maximum_distance: 600.0,
+            maximum_distance: 20.0,
             ..default()
         }
         .build(),
@@ -702,14 +781,16 @@ fn reload(asset_server: Res<AssetServer>, handles: Res<Handles>, mut done: Local
 }
 
 // XXX TODO: The `done` is annoying. Better way to run once?
-fn dump(asset_server: Res<AssetServer>, mut done: Local<bool>) {
+fn dump(asset_server: Res<AssetServer>, args: Res<Args>, mut done: Local<bool>) {
     if *done {
         return;
     }
 
     *done = true;
 
-    asset_server.basset_shared().dump_graph();
+    if args.dump_dependency_graph {
+        asset_server.basset_shared().dump_dependency_graph();
+    }
 }
 
 fn make_action<A: BassetAction>(params: &<A as BassetAction>::Params) -> AssetAction2<'static> {
@@ -721,7 +802,7 @@ fn make_action<A: BassetAction>(params: &<A as BassetAction>::Params) -> AssetAc
 }
 
 /// XXX TODO
-#[derive(FromArgs)]
+#[derive(FromArgs, Resource)]
 struct Args {
     /// XXX TODO
     #[argh(switch)]
@@ -730,6 +811,10 @@ struct Args {
     /// XXX TODO
     #[argh(switch)]
     validate_action_cache: bool,
+
+    /// XXX TODO
+    #[argh(switch)]
+    dump_dependency_graph: bool,
 }
 
 fn main() {
@@ -776,7 +861,8 @@ fn main() {
         .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
         .with_saver(demo::StringAssetSaver)
         .with_saver(demo::IntAssetSaver)
-        .with_saver(MeshletMeshSaver),
+        .with_saver(MeshletMeshSaver)
+        .with_saver(acme::AcmeSceneAssetSaver::default()),
     );
 
     App::new()
@@ -803,10 +889,12 @@ fn main() {
         .init_asset::<acme::AcmeScene>()
         .register_asset_loader(demo::StringAssetLoader)
         .register_asset_loader(demo::IntAssetLoader)
+        .register_asset_loader(acme::AcmeSceneAssetLoader::default())
         .add_systems(Startup, setup)
         .add_systems(Update, print)
         .add_systems(Update, reload.run_if(on_timer(Duration::from_secs(2))))
         .add_systems(Update, dump.run_if(on_timer(Duration::from_secs(4))))
         .add_systems(Update, acme::tick_scene_spawners)
+        .insert_resource(args)
         .run();
 }

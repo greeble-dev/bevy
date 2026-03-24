@@ -602,7 +602,7 @@ impl BassetShared {
     }
 
     // XXX TODO: Less hacky debugging.
-    pub fn dump_graph(&self) {
+    pub fn dump_dependency_graph(&self) {
         self.dependency_graph
             .as_ref()
             .inspect(|g| debug!("GRAPH DUMP\n{:?}", g));

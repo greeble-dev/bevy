@@ -1,4 +1,8 @@
-//! XXX TODO
+//! XXX TODO: Documentation.
+//
+// XXX TODO: Consider adding a UTF8 version. This would have the (very minor?)
+// benefit that an asset serialized as UTF8 (e.g. RON) could be opened in a
+// text editor without binary data getting in the way.
 
 use crate::{
     basset::{
