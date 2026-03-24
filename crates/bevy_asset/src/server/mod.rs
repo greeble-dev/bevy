@@ -1919,7 +1919,7 @@ impl AssetServer {
     }
 
     // XXX TODO: Document. Review visibility.
-    pub(crate) fn basset_shared<'a>(&'a self) -> &'a Arc<BassetShared> {
+    pub fn basset_shared<'a>(&'a self) -> &'a Arc<BassetShared> {
         &self.data.basset_shared
     }
 }

@@ -7,6 +7,7 @@ use crate::{
 };
 use alloc::{sync::Arc, vec, vec::Vec};
 use bevy_platform::collections::HashMap;
+use core::fmt::{Debug, Display, Write};
 use indexmap::IndexMap;
 use petgraph::{
     acyclic::Acyclic, data::Build, graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef,
@@ -27,6 +28,70 @@ enum InternalGraphNode {
 struct InternalGraph {
     graph: Acyclic<StableDiGraph<InternalGraphNode, ()>>,
     path_to_node: HashMap<RootAssetRef<'static>, NodeIndex>,
+}
+
+impl Debug for InternalGraph {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let node_to_path: HashMap<NodeIndex, &RootAssetRef<'static>> =
+            HashMap::from_iter(self.path_to_node.iter().map(|(path, node)| (*node, path)));
+
+        // XXX TODO: Maybe petgraph has this built-in somewhere?
+        let mut root_nodes = self
+            .graph
+            .nodes_iter()
+            .filter(|&n| {
+                self.graph
+                    .neighbors_directed(n, Direction::Incoming)
+                    .next()
+                    .is_none()
+            })
+            .map(|n| node_to_path[&n].clone())
+            .collect::<Vec<_>>();
+
+        root_nodes.sort();
+
+        let mut stack = Vec::<(NodeIndex, usize)>::new();
+
+        for root_node_path in root_nodes.into_iter() {
+            let root_node_id = self.path_to_node[&root_node_path];
+
+            // Skip spammy embedded assets. XXX TODO: Rethink at some point.
+            if root_node_path
+                .path()
+                .is_some_and(|p| p.source().as_str() == Some("embedded"))
+            {
+                continue;
+            }
+
+            stack.push((root_node_id, 0));
+
+            while let Some((node_id, depth)) = stack.pop() {
+                for _ in 0..(depth + 1) {
+                    f.write_str("    ")?;
+                }
+
+                f.write_str("+-- ")?;
+
+                if let InternalGraphNode::Valid(action_key, dependency_key) = self.graph[node_id] {
+                    Display::fmt(&action_key, f)?;
+                    f.write_char('/')?;
+                    Display::fmt(&dependency_key, f)?;
+                    f.write_char(' ')?;
+                }
+
+                Display::fmt(node_to_path[&node_id], f)?;
+
+                // XXX TODO: Platform specific newline?
+                f.write_char('\n')?;
+
+                for child in self.graph.neighbors_directed(node_id, Direction::Outgoing) {
+                    stack.push((child, depth + 1));
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl InternalGraph {
@@ -247,5 +312,15 @@ impl DependencyGraph {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .invalidate(path);
+    }
+}
+
+// XXX TODO: Less hacky debugging?
+impl Debug for DependencyGraph {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Debug::fmt(
+            &self.graph.lock().unwrap_or_else(PoisonError::into_inner),
+            f,
+        )
     }
 }

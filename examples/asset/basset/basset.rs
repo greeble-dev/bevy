@@ -686,6 +686,7 @@ fn print(
     print_events(&asset_server, &scene_assets, &mut scene_events);
 }
 
+// XXX TODO: The `done` is annoying. Better way to run once?
 fn reload(asset_server: Res<AssetServer>, handles: Res<Handles>, mut done: Local<bool>) {
     if *done {
         return;
@@ -698,6 +699,17 @@ fn reload(asset_server: Res<AssetServer>, handles: Res<Handles>, mut done: Local
     for handle in &handles.0 {
         asset_server.reload(handle.path().expect("TODO"));
     }
+}
+
+// XXX TODO: The `done` is annoying. Better way to run once?
+fn dump(asset_server: Res<AssetServer>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+
+    *done = true;
+
+    asset_server.basset_shared().dump_graph();
 }
 
 fn make_action<A: BassetAction>(params: &<A as BassetAction>::Params) -> AssetAction2<'static> {
@@ -794,6 +806,7 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(Update, print)
         .add_systems(Update, reload.run_if(on_timer(Duration::from_secs(2))))
+        .add_systems(Update, dump.run_if(on_timer(Duration::from_secs(4))))
         .add_systems(Update, acme::tick_scene_spawners)
         .run();
 }

@@ -600,6 +600,13 @@ impl BassetShared {
             );
         }
     }
+
+    // XXX TODO: Less hacky debugging.
+    pub fn dump_graph(&self) {
+        self.dependency_graph
+            .as_ref()
+            .inspect(|g| debug!("GRAPH DUMP\n{:?}", g));
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
