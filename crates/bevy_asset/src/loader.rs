@@ -296,11 +296,15 @@ impl ErasedLoadedAsset {
     )]
     pub fn take_labeled(
         mut self,
-        label: impl Into<CowArc<'static, str>>,
+        label: Option<impl Into<CowArc<'static, str>>>,
     ) -> Result<ErasedLoadedAsset, ErasedLoadedAsset> {
-        match self.label_to_asset_index.get(&label.into()) {
-            Some(index) => Ok(self.labeled_assets.remove(*index).asset),
-            None => Err(self),
+        if let Some(label) = label {
+            match self.label_to_asset_index.get(&label.into()) {
+                Some(index) => Ok(self.labeled_assets.remove(*index).asset),
+                None => Err(self),
+            }
+        } else {
+            Ok(self)
         }
     }
 

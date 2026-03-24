@@ -10,7 +10,8 @@ use bevy::{
     light::CascadeShadowConfigBuilder,
     log::LogPlugin,
     pbr::experimental::meshlet::{
-        MeshletMesh, MeshletPlugin, MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR,
+        MeshletMesh, MeshletMeshSaver, MeshletPlugin,
+        MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR,
     },
     prelude::*,
     reflect::TypePath,
@@ -608,7 +609,6 @@ fn setup(
         asset_server
             .load::<demo::StringAsset>(inline_join_strings)
             .untyped(),
-        //asset_server.load::<demo::IntAsset>(inline_path).untyped(),
     ]));
 
     commands.spawn((
@@ -763,7 +763,8 @@ fn main() {
         .with_action(action::MeshletFromMesh)
         .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
         .with_saver(demo::StringAssetSaver)
-        .with_saver(demo::IntAssetSaver),
+        .with_saver(demo::IntAssetSaver)
+        .with_saver(MeshletMeshSaver),
     );
 
     App::new()

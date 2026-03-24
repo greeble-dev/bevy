@@ -1,9 +1,9 @@
 use crate::{
     basset::{
         cache::{ActionCacheKey, DependencyCacheKey, DependencyCacheValue, MemoryAndFileCache},
-        BassetShared,
+        BassetShared, RootAssetRef,
     },
-    AssetRef, AssetServer,
+    AssetServer,
 };
 use alloc::{sync::Arc, vec, vec::Vec};
 use bevy_platform::collections::HashMap;
@@ -17,6 +17,7 @@ use std::{
     sync::{Mutex, PoisonError},
 };
 
+#[derive(Debug)]
 enum InternalGraphNode {
     Valid(ActionCacheKey, DependencyCacheKey),
     Unknown,
@@ -25,18 +26,18 @@ enum InternalGraphNode {
 #[derive(Default)]
 struct InternalGraph {
     graph: Acyclic<StableDiGraph<InternalGraphNode, ()>>,
-    path_to_node: HashMap<AssetRef<'static>, NodeIndex>,
+    path_to_node: HashMap<RootAssetRef<'static>, NodeIndex>,
 }
 
 impl InternalGraph {
     fn set(
         &mut self,
-        path: &AssetRef<'static>,
+        path: &RootAssetRef<'static>,
         dependency_key: DependencyCacheKey,
         dependency_value: &DependencyCacheValue,
     ) -> Option<ActionCacheKey> {
         // XXX TODO: Validate the existing entry? Or is it an error to set twice?
-        // XXX TODO: Try to optimise this by reusing the entry?
+        // XXX TODO: Try to optimize this by reusing the entry?
         if let Some(existing_node_id) = self.path_to_node.get(path).copied() {
             self.path_to_node.remove(path);
             self.graph.remove_node(existing_node_id);
@@ -94,7 +95,7 @@ impl InternalGraph {
         action_key
     }
 
-    fn get(&self, path: &AssetRef<'static>) -> Option<ActionCacheKey> {
+    fn get(&self, path: &RootAssetRef<'static>) -> Option<ActionCacheKey> {
         self.path_to_node.get(path).and_then(|&node_id| {
             match self.graph.node_weight(node_id).expect("XXX TODO") {
                 InternalGraphNode::Valid(action_key, _) => Some(*action_key),
@@ -103,11 +104,11 @@ impl InternalGraph {
         })
     }
 
-    fn contains(&self, path: &AssetRef<'static>) -> bool {
+    fn contains(&self, path: &RootAssetRef<'static>) -> bool {
         self.path_to_node.contains_key(path)
     }
 
-    fn invalidate(&mut self, path: &AssetRef<'static>) {
+    fn invalidate(&mut self, path: &RootAssetRef<'static>) {
         if let Some(initial_node_index) = self.path_to_node.get(path).copied() {
             let mut stack = vec![initial_node_index];
 
@@ -124,7 +125,7 @@ impl InternalGraph {
 }
 
 pub(crate) struct DependencyGraph {
-    // XXX TODO: Would have prefered `RwLock`, but `petgraph::Acyclic` is not
+    // XXX TODO: Would have preferred `RwLock`, but `petgraph::Acyclic` is not
     // `Sync` due to using `RefCell`.
     graph: Mutex<InternalGraph>,
     // XXX TODO?
@@ -149,16 +150,16 @@ impl DependencyGraph {
     // think through whether regular asset loads should be cached.
     pub(crate) async fn action_key(
         &self,
-        path: &AssetRef<'static>,
+        path: &RootAssetRef<'static>,
         // XXX TODO: Should we take shared? Or do we contain content cache and anything else?
         // That would fit in with invalidation on file change - we want to invalidate both
         // the dependency graph and the content cache.
         shared: &BassetShared,
         asset_server: &AssetServer,
     ) -> Option<ActionCacheKey> {
-        let mut stack = Vec::<(AssetRef<'static>, Option<DependencyCacheKey>)>::new();
+        let mut stack = Vec::<(RootAssetRef<'static>, Option<DependencyCacheKey>)>::new();
         let mut pending = IndexMap::<
-            AssetRef<'static>,
+            RootAssetRef<'static>,
             Option<(DependencyCacheKey, Arc<DependencyCacheValue>)>,
         >::new();
 
@@ -223,7 +224,7 @@ impl DependencyGraph {
 
     pub(crate) fn register_dependencies(
         &self,
-        path: &AssetRef<'static>,
+        path: &RootAssetRef<'static>,
         dependency_key: DependencyCacheKey,
         dependency_value: DependencyCacheValue,
     ) -> Option<ActionCacheKey> {
@@ -241,7 +242,7 @@ impl DependencyGraph {
     }
 
     #[expect(unused, reason = "XXX TODO")]
-    pub(crate) fn invalidate(&self, path: &AssetRef<'static>) {
+    pub(crate) fn invalidate(&self, path: &RootAssetRef<'static>) {
         self.graph
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

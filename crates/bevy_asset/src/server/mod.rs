@@ -2,7 +2,7 @@ mod info;
 mod loaders;
 
 use crate::{
-    basset::BassetShared,
+    basset::{BassetShared, RootAssetAction2, RootAssetPath},
     folder::LoadedFolder,
     io::{
         AssetReaderError, AssetSource, AssetSourceEvent, AssetSourceId, AssetSources,
@@ -978,17 +978,22 @@ impl AssetServer {
             // Or maybe we can only do this after loading?
             todo!();
         }
+        let action = RootAssetAction2::without_label(action);
 
         // XXX TODO: Try to avoid `action.clone_owned()`. Maybe not possible since we
         // need to check label.
-        match crate::basset::load_action(self, &action.clone_owned()).await {
+        match crate::basset::load_action(self, &action).await {
             Ok(asset) => {
+                // XXX TODO: Sub-asset handling.
+                let final_handle = fetched_handle;
+                /*
                 let final_handle = if action.label().is_some() {
                     // XXX TODO: Map to the sub-asset.
                     todo!();
                 } else {
                     fetched_handle
                 };
+                */
 
                 // XXX TODO: Verify the type of the asset? Compare to `RequestedHandleTypeMismatch`
                 // code in `load_internal_path`.
@@ -1728,7 +1733,8 @@ impl AssetServer {
         if update_dependency_cache && let Ok(asset) = &result {
             self.basset_shared()
                 .register_dependencies(
-                    &asset_path.clone_owned().into(), // XXX TODO: Avoid clone?
+                    &RootAssetPath::try_from(asset_path)
+                        .expect("XXX TODO: Can we assume no label?"),
                     Some(settings),
                     asset.loader_dependencies.keys().cloned(),
                     self,

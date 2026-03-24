@@ -723,7 +723,7 @@ pub(crate) fn normalize_path(path: &Path) -> PathBuf {
 // whole of `AssetAction`, since the only member that needs a custom serialize
 // is the label. But is it all a bit too weird?
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-struct SerializableLabel<'a>(CowArc<'a, str>);
+pub(crate) struct SerializableLabel<'a>(CowArc<'a, str>);
 
 impl<'a> Serialize for SerializableLabel<'a> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -753,7 +753,7 @@ pub struct AssetAction2<'a> {
     name: Box<str>,
     // XXX TODO: Consider changing this to `Arc<dyn BassetActionParams>`
     // (or CowArc). Pros: better equality (handles defaults, not sure if RON is
-    // canonicalized), cheaper to initialise in code, usually smaller.
+    // canonicalized), cheaper to initialize in code, usually smaller.
     // Cons: Complicates serialization (can't serialize through dyn, so need to
     // look up action by name and ask it to serialize).
     params: Box<ron::value::RawValue>,
@@ -862,7 +862,7 @@ impl Default for AssetRef<'_> {
 
 impl Display for AssetRef<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // XXX TODO: Review if we should distinguish these two.
+        // XXX TODO: Should the string distinguish paths and actions?
         match self {
             Self::Path(path) => Display::fmt(path, f),
             Self::Action(action) => Display::fmt(action, f),

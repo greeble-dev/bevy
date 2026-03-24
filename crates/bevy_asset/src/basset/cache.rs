@@ -1,6 +1,9 @@
 //! XXX TODO
 
-use crate::{AssetPath, AssetRef, AssetServer, AsyncWriteExt};
+use crate::{
+    basset::{RootAssetPath, RootAssetRef},
+    AssetServer, AsyncWriteExt,
+};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use async_fs::File;
 use bevy_ecs::error::BevyError;
@@ -69,7 +72,7 @@ struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
 }
 
 // XXX TODO: Where should this go?
-pub(crate) fn should_log(path: &AssetRef<'static>) -> bool {
+pub(crate) fn should_log(path: &RootAssetRef<'static>) -> bool {
     // Skip embedded sources for now as they're too spammy.
     if let Some(path) = path.path()
         && path.source().as_str() == Some("embedded")
@@ -80,7 +83,7 @@ pub(crate) fn should_log(path: &AssetRef<'static>) -> bool {
     }
 }
 
-fn log(name: &'static str, path: &AssetRef<'static>, key: BassetHash, string: &'static str) {
+fn log(name: &'static str, path: &RootAssetRef<'static>, key: BassetHash, string: &'static str) {
     if should_log(path) {
         debug!(%key, ?path, "{name}: {string}");
     }
@@ -96,7 +99,7 @@ impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn get(&self, key: &K, asset_path: &AssetRef<'static>) -> Option<V> {
+    fn get(&self, key: &K, asset_path: &RootAssetRef<'static>) -> Option<V> {
         if self.validate {
             return None;
         }
@@ -113,7 +116,7 @@ impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn put(&mut self, key: K, value: V, asset_path: &AssetRef<'static>) {
+    fn put(&mut self, key: K, value: V, asset_path: &RootAssetRef<'static>) {
         log(self.name, asset_path, key.as_hash(), "Memory cache put.");
 
         if self.validate
@@ -163,7 +166,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
 
     pub(crate) fn value_path(&self, key: &K) -> PathBuf {
         // XXX TODO: Duplicates `BassetHash` debug?
-        // XXX TODO: Check if this is worth optimising.
+        // XXX TODO: Check if this is worth optimizing.
         let hex = String::from_iter(key.as_hash().0.iter().map(|b| format!("{:x}", b)));
 
         // Spread files across multiple folders by using the first few digits of
@@ -171,7 +174,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
         // thousands of files in a single folder.
         //
         // XXX TODO: Could be refined? Review the probabilities.
-        // XXX TODO: Can be optimised if the file separator is a single character?
+        // XXX TODO: Can be optimized if the file separator is a single character?
         let relative_path = [&hex[0..2], &hex[2..4], &hex[..]]
             .iter()
             .collect::<PathBuf>();
@@ -180,7 +183,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    pub(crate) async fn get(&self, key: &K, asset_path: &AssetRef<'static>) -> Option<V> {
+    pub(crate) async fn get(&self, key: &K, asset_path: &RootAssetRef<'static>) -> Option<V> {
         if self.validate {
             return None;
         }
@@ -209,7 +212,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    pub(crate) fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
+    pub(crate) fn put(&self, key: K, value: V, asset_path: &RootAssetRef<'static>) {
         let value_path = self.value_path(&key);
 
         // XXX TODO: Review faff that avoids lifetime issues.
@@ -277,7 +280,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    pub(crate) async fn get(&self, key: &K, asset_path: &AssetRef<'static>) -> Option<V> {
+    pub(crate) async fn get(&self, key: &K, asset_path: &RootAssetRef<'static>) -> Option<V> {
         if let Some(from_memory) = self
             .memory
             .read()
@@ -302,7 +305,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    pub(crate) fn put(&self, key: K, value: V, asset_path: &AssetRef<'static>) {
+    pub(crate) fn put(&self, key: K, value: V, asset_path: &RootAssetRef<'static>) {
         // XXX TODO: Avoid `blob.clone()` if there's no file cache?
         self.memory
             .write()
@@ -320,7 +323,7 @@ pub(crate) struct ContentHash(BassetHash);
 
 #[derive(Default)]
 pub(crate) struct ContentCache {
-    path_to_hash: RwLock<HashMap<AssetPath<'static>, ContentHash>>,
+    path_to_hash: RwLock<HashMap<RootAssetPath<'static>, ContentHash>>,
 }
 
 impl ContentHash {
@@ -331,10 +334,10 @@ impl ContentHash {
 
 impl ContentCache {
     // XXX TODO: Can we avoid `AssetPath` being `<'static>`?
-    // XXX TODO: Returning BassetHash by value is probabably the practical choice? But check.
+    // XXX TODO: Returning BassetHash by value is probably the practical choice? But check.
     pub(crate) async fn get(
         &self,
-        path: &AssetPath<'static>,
+        path: &RootAssetPath<'static>,
         asset_server: &AssetServer,
     ) -> Result<ContentHash, BevyError> {
         if let Some(hash) = self
@@ -404,18 +407,24 @@ impl CacheKey for DependencyCacheKey {
 pub(crate) struct DependencyCacheValue {
     // XXX TODO: Could store some debug info on the input?
     // XXX TODO: Guarantee sorting?
-    list: Vec<(AssetRef<'static>, DependencyCacheKey)>,
+    list: Vec<(RootAssetRef<'static>, DependencyCacheKey)>,
 }
 
 impl DependencyCacheValue {
-    pub(crate) fn new(list: impl Iterator<Item = (AssetRef<'static>, DependencyCacheKey)>) -> Self {
+    pub(crate) fn new(
+        list: impl Iterator<Item = (RootAssetRef<'static>, DependencyCacheKey)>,
+    ) -> Self {
         let mut list = list.collect::<Vec<_>>();
+
+        // The action key depends on the order, so we must sort and de-dupe for
+        // consistency.
         list.sort();
+        list.dedup();
 
         Self { list }
     }
 
-    pub(crate) fn list<'a>(&'a self) -> &'a Vec<(AssetRef<'static>, DependencyCacheKey)> {
+    pub(crate) fn list<'a>(&'a self) -> &'a Vec<(RootAssetRef<'static>, DependencyCacheKey)> {
         &self.list
     }
 }
