@@ -17,6 +17,7 @@ use std::{
     path::PathBuf,
     sync::{Mutex, PoisonError},
 };
+use tracing::warn;
 
 #[derive(Debug)]
 enum InternalGraphNode {
@@ -132,10 +133,8 @@ impl InternalGraph {
             .loader_dependees()
             .iter()
             .map(|(dependee_path, dependee_key)| {
-                self.path_to_node
-                    .get(dependee_path)
-                    .copied()
-                    .and_then(|dependee_node_id| {
+                if let Some(dependee_node_id) = self.path_to_node.get(dependee_path)
+                    .copied() {
                         let dependee_node = self
                             .graph
                             .node_weight(dependee_node_id)
@@ -149,7 +148,11 @@ impl InternalGraph {
                             }
                             InternalGraphNode::Unknown => None,
                         }
-                    })
+                    }
+                 else {
+                    warn!(%dependee_path, %dependee_key, "Failed to find graph node - were dependencies not registered for this asset?");
+                    None
+                 }
             })
             .collect::<Option<Vec<(NodeIndex, ActionCacheKey)>>>();
 

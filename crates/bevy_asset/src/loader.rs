@@ -1,4 +1,5 @@
 use crate::{
+    basset::{RootAssetPath, RootAssetRef},
     io::{AssetReaderError, MissingAssetSourceError, MissingProcessedAssetReaderError, Reader},
     loader_builders::{Deferred, NestedLoader, StaticTyped},
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfo, ProcessedInfoMinimal, Settings},
@@ -635,6 +636,14 @@ impl<'a> LoadContext<'a> {
             })?;
         self.loader_dependencies
             .insert(path.clone_owned().into(), hash);
+        // XXX TODO: Document.
+        self.asset_server
+            .basset_shared()
+            .register_bytes_dependency(
+                &RootAssetRef::from(RootAssetPath::without_label(path.clone_owned())),
+                self.asset_server,
+            )
+            .await;
         Ok(bytes)
     }
 

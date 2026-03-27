@@ -1,3 +1,5 @@
+#![expect(unused, reason = "XXX TODO")]
+
 use crate::{basset::BassetShared, AssetRef};
 use alloc::{boxed::Box, vec::Vec};
 

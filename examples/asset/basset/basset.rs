@@ -691,6 +691,16 @@ fn setup(
             .untyped(),
     ]));
 
+    /*
+    commands.spawn((
+        acme::AcmeSceneSpawner(
+            asset_server.load::<acme::AcmeScene>("scene_from_gltf_with_dependencies.basset"),
+        ),
+        Transform::from_xyz(-1.0, 1.0, 0.0)
+            .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+    ));
+    */
+
     commands.spawn((
         acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("scene_from_gltf.basset")),
         Transform::from_xyz(-1.0, 0.0, 0.0)
@@ -835,6 +845,7 @@ fn main() {
     #[cfg(target_arch = "wasm32")]
     let args = Args::from_args(&[], &[]).unwrap();
 
+    /*
     dbg!(ron::ser::to_string(&AssetRef::Path("asdf.txt".into())).expect("TODO"));
     dbg!(
         ron::ser::to_string(&AssetRef::Action(make_action::<action::LoadPath>(
@@ -858,6 +869,7 @@ fn main() {
         )))
         .expect("TODO")
     );
+    */
 
     let basset_shared = Arc::new(
         BassetShared::new(

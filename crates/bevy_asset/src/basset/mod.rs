@@ -608,6 +608,28 @@ impl BassetShared {
         }
     }
 
+    // Registers the given file as a potential dependency.
+    pub(crate) async fn register_bytes_dependency(
+        &self,
+        path: &RootAssetRef<'static>,
+        asset_server: &AssetServer,
+    ) -> Option<ActionCacheKey> {
+        if let Some(dependency_graph) = &self.dependency_graph {
+            let shared = asset_server.basset_shared();
+
+            // XXX TODO: Recalculating the dependency key is a race condition since
+            // the content cache will be looking at the file as it is now, not what was loaded.
+            // Do we need to put the dependency key into `ErasedLoadedAsset`?
+            let dependency_key = shared.dependency_key(path, None, asset_server).await;
+
+            let dependency_value = DependencyCacheValue::empty();
+
+            dependency_graph.register_dependencies(path, dependency_key, dependency_value)
+        } else {
+            None
+        }
+    }
+
     // XXX TODO: Less hacky debugging.
     pub fn dump_dependency_graph(&self) {
         self.dependency_graph

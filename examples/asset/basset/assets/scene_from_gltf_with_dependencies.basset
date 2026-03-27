@@ -1,0 +1,1 @@
+(root: Action((name: "basset::action::AcmeSceneFromGltf", params: (gltf: Path("BoxTextured/BoxTextured.gltf")))))

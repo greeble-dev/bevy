@@ -87,7 +87,7 @@ pub(crate) fn should_log(path: &RootAssetRef<'static>) -> bool {
 
 fn log(name: &'static str, path: &RootAssetRef<'static>, key: BassetHash, string: &'static str) {
     if should_log(path) {
-        debug!(%key, ?path, "{name}: {string}");
+        debug!(%key, %path, "{name}: {string}");
     }
 }
 
@@ -432,12 +432,20 @@ impl DependencyCacheValue {
         }
     }
 
+    pub(crate) fn empty() -> Self {
+        Self {
+            loader_dependees: Default::default(),
+            external_dependees: Default::default(),
+        }
+    }
+
     pub(crate) fn loader_dependees<'a>(
         &'a self,
     ) -> &'a [(RootAssetRef<'static>, DependencyCacheKey)] {
         &self.loader_dependees
     }
 
+    #[expect(unused, reason = "XXX TODO")]
     pub(crate) fn external_dependees<'a>(&'a self) -> &'a [RootAssetRef<'static>] {
         &self.external_dependees
     }
