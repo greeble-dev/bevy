@@ -63,11 +63,12 @@ pub async fn read_standalone_asset(
     // then the dependencies must be already known, otherwise we wouldn't have
     // been able to calculate the action key.
     //
-    // XXX TODO: This feels janky. Maybe we should be sidestepping `load_with_settings_loader_and_reader`
-    // for clarity? Or generally rethink how the dependency cache gets filled out.
+    // XXX TODO: This feels janky. Maybe we should be sidestepping
+    // `load_with_settings_loader_and_reader` for clarity? Or generally rethink
+    // how the dependency cache gets filled out.
     let update_dependency_cache = false;
 
-    // XXX TODO: Ew?
+    // XXX TODO: Ew? Need to decide if we try to support the original path.
     let fake_path = AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
 
     context
@@ -93,10 +94,11 @@ pub async fn write_standalone_asset(
 ) -> Result<Box<[u8]>, BevyError> {
     let mut asset_bytes = Vec::<u8>::new();
 
-    let dummy_path = AssetPath::parse("NOT IMPLEMENTED"); // XXX TODO?
+    // XXX TODO: As with reading, need to decide if we try to support the original path.
+    let fake_path = AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
 
     saver
-        .save(&mut asset_bytes, asset, saver_settings, dummy_path)
+        .save(&mut asset_bytes, asset, saver_settings, fake_path)
         .await?;
 
     // XXX TODO: Think through loader settings. Firstly, if the asset was loaded
@@ -107,14 +109,15 @@ pub async fn write_standalone_asset(
     let meta_bytes = loader.default_meta().serialize();
 
     let mut writer = Vec::<u8>::new();
+    {
+        let mut blob = BlobWriter::new(&mut writer);
 
-    let mut blob = BlobWriter::new(&mut writer);
-
-    blob.bytes(STANDALONE_MAGIC);
-    blob.u16(STANDALONE_VERSION);
-    blob.string(loader.type_path());
-    blob.bytes_sized(&meta_bytes);
-    blob.bytes_sized(&asset_bytes);
+        blob.bytes(STANDALONE_MAGIC);
+        blob.u16(STANDALONE_VERSION);
+        blob.string(loader.type_path());
+        blob.bytes_sized(&meta_bytes);
+        blob.bytes_sized(&asset_bytes);
+    }
 
     Ok(writer.into())
 }

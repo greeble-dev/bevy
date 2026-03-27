@@ -428,7 +428,10 @@ impl AssetInfos {
         }
 
         loaded_asset.value.insert(loaded_asset_index.index, world);
-        let mut loading_deps = loaded_asset.dependencies;
+        let mut loading_deps = loaded_asset
+            .dependencies
+            .into_keys()
+            .collect::<HashSet<_>>();
         let mut failed_deps = <HashSet<_>>::default();
         let mut dep_error = None;
         let mut loading_rec_deps = loading_deps.clone();

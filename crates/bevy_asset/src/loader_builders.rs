@@ -4,8 +4,8 @@
 use crate::{
     io::Reader,
     meta::{meta_transform_settings, AssetMetaDyn, MetaTransform, Settings},
-    Asset, AssetLoadError, AssetPath, ErasedAssetLoader, ErasedLoadedAsset, Handle, LoadContext,
-    LoadDirectError, LoadedAsset, LoadedUntypedAsset, UntypedHandle,
+    Asset, AssetLoadError, AssetPath, AssetRef, ErasedAssetLoader, ErasedLoadedAsset, Handle,
+    LoadContext, LoadDirectError, LoadedAsset, LoadedUntypedAsset, UntypedHandle,
 };
 use alloc::{borrow::ToOwned, boxed::Box, sync::Arc};
 use core::any::TypeId;
@@ -307,7 +307,7 @@ impl NestedLoader<'_, '_, StaticTyped, Deferred> {
         let path = path.into().to_owned();
         let handle = if self.load_context.should_load_dependencies {
             self.load_context.asset_server.load_with_meta_transform(
-                path,
+                path.clone(),
                 self.meta_transform,
                 (),
                 true,
@@ -315,12 +315,14 @@ impl NestedLoader<'_, '_, StaticTyped, Deferred> {
         } else {
             self.load_context
                 .asset_server
-                .get_or_create_path_handle(path, self.meta_transform)
+                .get_or_create_path_handle(path.clone(), self.meta_transform)
         };
         // `load_with_meta_transform` and `get_or_create_path_handle` always returns a Strong
         // variant, so we are safe to unwrap.
         let index = (&handle).try_into().unwrap();
-        self.load_context.dependencies.insert(index);
+        self.load_context
+            .dependencies
+            .insert(index, Some(AssetRef::from(path.into_owned())));
         handle
     }
 }
@@ -339,7 +341,7 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
             self.load_context
                 .asset_server
                 .load_erased_with_meta_transform(
-                    path,
+                    path.clone(),
                     self.typing.asset_type_id,
                     self.meta_transform,
                     (),
@@ -348,7 +350,7 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
             self.load_context
                 .asset_server
                 .get_or_create_path_handle_erased(
-                    path,
+                    path.clone(),
                     self.typing.asset_type_id,
                     self.meta_transform,
                 )
@@ -356,7 +358,10 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
         // `load_erased_with_meta_transform` and `get_or_create_path_handle_erased` always returns a
         // Strong variant, so we are safe to unwrap.
         let index = (&handle).try_into().unwrap();
-        self.load_context.dependencies.insert(index);
+        self.load_context
+            .dependencies
+            // XXX TODO: Review clones.
+            .insert(index, Some(AssetRef::from(path.into_owned())));
         handle
     }
 }
@@ -371,16 +376,18 @@ impl NestedLoader<'_, '_, UnknownTyped, Deferred> {
         let handle = if self.load_context.should_load_dependencies {
             self.load_context
                 .asset_server
-                .load_unknown_type_with_meta_transform(path, self.meta_transform)
+                .load_unknown_type_with_meta_transform(path.clone(), self.meta_transform)
         } else {
             self.load_context
                 .asset_server
-                .get_or_create_path_handle(path, self.meta_transform)
+                .get_or_create_path_handle(path.clone(), self.meta_transform)
         };
         // `load_unknown_type_with_meta_transform` and `get_or_create_path_handle` always returns a
         // Strong variant, so we are safe to unwrap.
         let index = (&handle).try_into().unwrap();
-        self.load_context.dependencies.insert(index);
+        self.load_context
+            .dependencies
+            .insert(index, Some(AssetRef::from(path.into_owned())));
         handle
     }
 }

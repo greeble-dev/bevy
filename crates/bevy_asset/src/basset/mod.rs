@@ -43,6 +43,7 @@ use tracing::{debug, warn};
 mod blob;
 mod cache;
 mod dependency_graph;
+mod publisher;
 mod standalone;
 
 pub struct BassetPlugin;
@@ -555,7 +556,7 @@ impl BassetShared {
         path: &RootAssetRef<'static>,
         // XXX TODO: Settings?
         _settings: Option<&dyn Settings>,
-        dependees: impl Iterator<Item = AssetRef<'static>>,
+        asset: &ErasedLoadedAsset,
         asset_server: &AssetServer,
     ) -> Option<ActionCacheKey> {
         if let Some(dependency_graph) = &self.dependency_graph {
@@ -566,20 +567,23 @@ impl BassetShared {
             // Do we need to put the dependency key into `ErasedLoadedAsset`?
             let dependency_key = shared.dependency_key(path, None, asset_server).await;
 
-            let mut dependees = dependees
-                .map(RootAssetRef::without_label)
+            let mut unresolved_loader_dependees = asset
+                .loader_dependencies
+                .clone()
+                .into_iter()
+                .map(|(path, _)| RootAssetRef::without_label(path))
                 .collect::<Vec<_>>();
 
             // XXX TODO: We're duplicating logic in `DependencyCacheValue::new`.
             // But maybe this goes away if something external gives us the
             // dependency keys, so this function just takes a `DependencyCacheValue`.
-            dependees.sort();
-            dependees.dedup();
+            unresolved_loader_dependees.sort();
+            unresolved_loader_dependees.dedup();
 
             // XXX TODO Duplicated in `load_action`.
-            let mut dependencies = Vec::<(RootAssetRef<'static>, DependencyCacheKey)>::new();
+            let mut loader_dependees = Vec::<(RootAssetRef<'static>, DependencyCacheKey)>::new();
 
-            for dependee_path in dependees {
+            for dependee_path in unresolved_loader_dependees {
                 // XXX TODO: Recalculating the dependency key is a race condition since
                 // the content cache will be looking at the file as it is now, not what was loaded.
                 // Do we need to put the dependency key into `ErasedLoadedAsset`?
@@ -587,10 +591,16 @@ impl BassetShared {
                     .dependency_key(&dependee_path, None, asset_server)
                     .await;
                 // XXX TODO: Review passing `None` for meta parameter.
-                dependencies.push((dependee_path, dependee_key));
+                loader_dependees.push((dependee_path, dependee_key));
             }
 
-            let dependency_value = DependencyCacheValue::new(dependencies.into_iter());
+            let external_dependees = asset
+                .dependencies
+                .iter()
+                .filter_map(|(_, path)| path.clone().map(RootAssetRef::without_label));
+
+            let dependency_value =
+                DependencyCacheValue::new(loader_dependees.into_iter(), external_dependees);
 
             dependency_graph.register_dependencies(path, dependency_key, dependency_value)
         } else {
@@ -823,16 +833,7 @@ pub(crate) async fn load_action(
 
     // XXX TODO: Is settings parameter correct?
     let action_key = shared
-        .register_dependencies(
-            &path,
-            None,
-            asset
-                .loader_dependencies
-                .clone()
-                .into_iter()
-                .map(|(path, _)| path),
-            asset_server,
-        )
+        .register_dependencies(&path, None, &asset, asset_server)
         .await;
 
     if let Some(action_key) = action_key {

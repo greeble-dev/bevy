@@ -120,6 +120,11 @@ mod action {
     #[derive(Serialize, Deserialize, Default)]
     pub struct AcmeSceneFromGltfParams {
         gltf: AssetRef<'static>,
+        // XXX TODO: Would be nice to support selecting a scene. but that's
+        // awkward to do - we'd have to dig around `Gltf::scenes` and extract
+        // everything from components.
+        //#[serde(default)]
+        //scene: Option<String>,
     }
 
     impl BassetAction for AcmeSceneFromGltf {

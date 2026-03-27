@@ -21,6 +21,8 @@ use serde::{Deserialize, Serialize};
 use std::{format, path::PathBuf};
 use tracing::debug;
 
+// XXX TODO: The RON serialization of `BassetHash` is verbose. Maybe do a custom
+// serialize that uses hex?
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct BassetHash([u8; 32]);
 
@@ -406,26 +408,38 @@ impl CacheKey for DependencyCacheKey {
 #[derive(Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DependencyCacheValue {
     // XXX TODO: Could store some debug info on the input?
-    // XXX TODO: Guarantee sorting?
-    list: Vec<(RootAssetRef<'static>, DependencyCacheKey)>,
+    loader_dependees: Vec<(RootAssetRef<'static>, DependencyCacheKey)>,
+    external_dependees: Vec<RootAssetRef<'static>>,
+}
+
+fn collect_sort_dedup<T: Ord + PartialEq>(iter: impl Iterator<Item = T>) -> Vec<T> {
+    let mut value = iter.collect::<Vec<_>>();
+
+    value.sort();
+    value.dedup();
+
+    value
 }
 
 impl DependencyCacheValue {
     pub(crate) fn new(
-        list: impl Iterator<Item = (RootAssetRef<'static>, DependencyCacheKey)>,
+        loader_dependees: impl Iterator<Item = (RootAssetRef<'static>, DependencyCacheKey)>,
+        external_dependees: impl Iterator<Item = RootAssetRef<'static>>,
     ) -> Self {
-        let mut list = list.collect::<Vec<_>>();
-
-        // The action key depends on the order, so we must sort and de-dupe for
-        // consistency.
-        list.sort();
-        list.dedup();
-
-        Self { list }
+        Self {
+            loader_dependees: collect_sort_dedup(loader_dependees),
+            external_dependees: collect_sort_dedup(external_dependees),
+        }
     }
 
-    pub(crate) fn list<'a>(&'a self) -> &'a Vec<(RootAssetRef<'static>, DependencyCacheKey)> {
-        &self.list
+    pub(crate) fn loader_dependees<'a>(
+        &'a self,
+    ) -> &'a [(RootAssetRef<'static>, DependencyCacheKey)] {
+        &self.loader_dependees
+    }
+
+    pub(crate) fn external_dependees<'a>(&'a self) -> &'a [RootAssetRef<'static>] {
+        &self.external_dependees
     }
 }
 

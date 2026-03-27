@@ -27,6 +27,9 @@ enum InternalGraphNode {
 #[derive(Default)]
 struct InternalGraph {
     graph: Acyclic<StableDiGraph<InternalGraphNode, ()>>,
+
+    // XXX TODO: Support settings. We can't use the path alone. Or we must
+    // commit to settings in the path.
     path_to_node: HashMap<RootAssetRef<'static>, NodeIndex>,
 }
 
@@ -126,7 +129,7 @@ impl InternalGraph {
         // Gather the node id and action key of each dependee, returning `None`
         // if any are absent or unknown.
         let resolved = dependency_value
-            .list()
+            .loader_dependees()
             .iter()
             .map(|(dependee_path, dependee_key)| {
                 self.path_to_node
@@ -245,7 +248,7 @@ impl DependencyGraph {
 
         stack.push((path.clone(), None));
 
-        while let Some((path, expected_dependency_key)) = stack.pop() {
+        while let Some((path, tentative_dependency_key)) = stack.pop() {
             // Early out if we already have a graph node for this path.
             if self
                 .graph
@@ -257,24 +260,30 @@ impl DependencyGraph {
             };
 
             // XXX TODO: Settings parameter?
-            let dependency_key = shared.dependency_key(&path, None, asset_server).await;
+            let current_dependency_key = shared.dependency_key(&path, None, asset_server).await;
 
-            if expected_dependency_key.is_some_and(|e| e != dependency_key) {
+            // The tentative dependency key came from the dependency cache. Check
+            // if it matches the current file state. If not then invalidate the
+            // node.
+            if tentative_dependency_key.is_some_and(|e| e != current_dependency_key) {
                 pending.insert(path.clone(), None);
                 continue;
             }
 
             if let Some(cache) = &self.cache
-                && let Some(dependency_value) = cache.get(&dependency_key, &path).await
+                && let Some(dependency_value) = cache.get(&current_dependency_key, &path).await
             {
-                for (dependee_path, dependee_key) in dependency_value.list() {
+                for (dependee_path, dependee_key) in dependency_value.loader_dependees() {
                     if !pending.contains_key(dependee_path) {
                         stack.push((dependee_path.clone(), Some(*dependee_key)));
                     }
                 }
 
                 assert!(!pending.contains_key(&path));
-                pending.insert(path.clone(), Some((dependency_key, dependency_value)));
+                pending.insert(
+                    path.clone(),
+                    Some((current_dependency_key, dependency_value)),
+                );
             } else {
                 assert!(!pending.contains_key(&path));
                 pending.insert(path.clone(), None);

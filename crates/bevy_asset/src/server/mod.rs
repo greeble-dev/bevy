@@ -1738,7 +1738,7 @@ impl AssetServer {
                             .expect("XXX TODO: Can we assume no label?"),
                     ),
                     Some(settings),
-                    asset.loader_dependencies.keys().cloned(),
+                    asset,
                     self,
                 )
                 .await;

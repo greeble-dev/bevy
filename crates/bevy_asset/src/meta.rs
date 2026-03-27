@@ -209,7 +209,10 @@ impl Process for () {
 impl Asset for () {}
 
 impl VisitAssetDependencies for () {
-    fn visit_dependencies(&self, _visit: &mut impl FnMut(bevy_asset::UntypedAssetId)) {
+    fn visit_dependencies(
+        &self,
+        _visit: &mut impl FnMut(bevy_asset::UntypedAssetId, Option<&bevy_asset::AssetRef<'static>>),
+    ) {
         unreachable!()
     }
 }

@@ -658,7 +658,11 @@ mod tests {
         }
         impl Asset for MyAsset {}
         impl VisitAssetDependencies for MyAsset {
-            fn visit_dependencies(&self, _visit: &mut impl FnMut(UntypedAssetId)) {}
+            fn visit_dependencies(
+                &self,
+                _visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
+            ) {
+            }
         }
 
         let mut app = create_app().0;

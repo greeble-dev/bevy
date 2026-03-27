@@ -9,7 +9,7 @@ use crate::{
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use atomicow::CowArc;
 use bevy_ecs::{error::BevyError, world::World};
-use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
+use bevy_platform::collections::{hash_map::Entry, HashMap};
 use bevy_reflect::TypePath;
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::any::{Any, TypeId};
@@ -141,7 +141,7 @@ pub(crate) struct LabeledAsset {
 /// * Loader dependencies: dependencies whose actual asset values are used during the load process
 pub struct LoadedAsset<A: Asset> {
     pub(crate) value: A,
-    pub(crate) dependencies: HashSet<ErasedAssetIndex>,
+    pub(crate) dependencies: HashMap<ErasedAssetIndex, Option<AssetRef<'static>>>,
     pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     /// The subassets of this asset.
     pub(crate) labeled_assets: Vec<LabeledAsset>,
@@ -157,12 +157,12 @@ pub struct LoadedAsset<A: Asset> {
 impl<A: Asset> LoadedAsset<A> {
     /// Create a new loaded asset. This will use [`VisitAssetDependencies`](crate::VisitAssetDependencies) to populate `dependencies`.
     pub fn new_with_dependencies(value: A) -> Self {
-        let mut dependencies = <HashSet<_>>::default();
-        value.visit_dependencies(&mut |id| {
+        let mut dependencies = <HashMap<_, _>>::default();
+        value.visit_dependencies(&mut |id, path| {
             let Ok(asset_index) = id.try_into() else {
                 return;
             };
-            dependencies.insert(asset_index);
+            dependencies.insert(asset_index, path.cloned());
         });
         LoadedAsset {
             value,
@@ -220,7 +220,7 @@ impl<A: Asset> From<A> for LoadedAsset<A> {
 /// A "type erased / boxed" counterpart to [`LoadedAsset`]. This is used in places where the loaded type is not statically known.
 pub struct ErasedLoadedAsset {
     pub(crate) value: Box<dyn AssetContainer>,
-    pub(crate) dependencies: HashSet<ErasedAssetIndex>,
+    pub(crate) dependencies: HashMap<ErasedAssetIndex, Option<AssetRef<'static>>>,
     pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     /// The subassets of this asset.
     pub(crate) labeled_assets: Vec<LabeledAsset>,
@@ -396,7 +396,7 @@ pub struct LoadContext<'a> {
     pub(crate) should_load_dependencies: bool,
     populate_hashes: bool,
     asset_path: AssetPath<'static>,
-    pub(crate) dependencies: HashSet<ErasedAssetIndex>,
+    pub(crate) dependencies: HashMap<ErasedAssetIndex, Option<AssetRef<'static>>>,
     /// Direct dependencies used by this loader.
     pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
     /// Stores the subassets added to this context.
@@ -423,7 +423,7 @@ impl<'a> LoadContext<'a> {
             asset_path,
             populate_hashes,
             should_load_dependencies,
-            dependencies: HashSet::default(),
+            dependencies: HashMap::default(),
             loader_dependencies: HashMap::default(),
             labeled_assets: Default::default(),
             label_to_asset_index: Default::default(),
@@ -563,14 +563,14 @@ impl<'a> LoadContext<'a> {
         // `LoadedAsset`, `ErasedLoadedAsset`, or `LoadContext` (for mutating existing subassets),
         // we should move this to some point after those mutations are not possible. This spot is
         // convenient because we still have access to the static type of `A`.
-        value.visit_dependencies(&mut |asset_id| {
+        value.visit_dependencies(&mut |asset_id, path| {
             let (type_id, index) = match asset_id {
                 UntypedAssetId::Index { type_id, index } => (type_id, index),
                 // UUID assets can't be loaded anyway, so just ignore this ID.
                 UntypedAssetId::Uuid { .. } => return,
             };
             self.dependencies
-                .insert(ErasedAssetIndex { index, type_id });
+                .insert(ErasedAssetIndex { index, type_id }, path.cloned());
         });
         LoadedAsset {
             value,
@@ -646,10 +646,14 @@ impl<'a> LoadContext<'a> {
         label: impl Into<CowArc<'b, str>>,
     ) -> Handle<A> {
         let path = self.asset_path.clone().with_label(label);
-        let handle = self.asset_server.get_or_create_path_handle::<A>(path, None);
+        let handle = self
+            .asset_server
+            .get_or_create_path_handle::<A>(path.clone(), None);
         // `get_or_create_path_handle` always returns a Strong variant, so we are safe to unwrap.
         let index = (&handle).try_into().unwrap();
-        self.dependencies.insert(index);
+        self.dependencies
+            // XXX TODO: Review clones.
+            .insert(index, Some(AssetRef::from(self.asset_path.clone_owned())));
         handle
     }
 
