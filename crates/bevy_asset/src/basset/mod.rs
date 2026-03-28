@@ -599,6 +599,8 @@ impl BassetShared {
                 .iter()
                 .filter_map(|(_, path)| path.clone().map(RootAssetRef::without_label));
 
+            // XXX TODO: We're not accounting for sub-asset dependencies.
+
             let dependency_value =
                 DependencyCacheValue::new(loader_dependees.into_iter(), external_dependees);
 
@@ -754,7 +756,7 @@ async fn load_ref(
     }
 }
 
-async fn load_path(
+pub(crate) async fn load_path(
     asset_server: &AssetServer,
     path: &RootAssetPath<'static>,
     settings: &Option<Box<ron::value::RawValue>>,
@@ -866,7 +868,7 @@ pub(crate) async fn load_action(
                 let loader = asset_server
                     .get_asset_loader_with_type_name(saver.loader_type_name())
                     .await
-                    .expect("TODO");
+                    .expect("XXX TODO");
 
                 let blob = write_standalone_asset(&asset, &*loader, saver, settings).await?;
 

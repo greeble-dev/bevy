@@ -485,9 +485,14 @@ impl ActionCacheKey {
         dependees: impl Iterator<Item = ActionCacheKey>,
     ) -> Self {
         // XXX TODO: In theory we could make the action key the same as the
-        // dependency key if there's no dependees - that would save a hash.
-        // But maybe it's risky if the values are wrongly treated as
-        // interchangeable.
+        // dependency key if there's zero dependees.
+        //
+        // Pros:
+        //   - Saves a hash.
+        //   - Can quickly check for leaf from keys alone.
+        // Cons:
+        //   - Probably gonna cause a bug where the wrong key type is used and
+        //     it kinda seems to work.
 
         // XXX TODO: Should hasher be seeded?
         let mut hasher = blake3::Hasher::new();
