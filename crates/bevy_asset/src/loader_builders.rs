@@ -335,7 +335,7 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
     /// [`with_dynamic_type`].
     ///
     /// [`with_dynamic_type`]: Self::with_dynamic_type
-    pub fn load<'p>(self, path: impl Into<AssetPath<'p>>) -> UntypedHandle {
+    pub fn load<'p>(self, path: impl Into<AssetRef<'p>>) -> UntypedHandle {
         let path = path.into().to_owned();
         let handle = if self.load_context.should_load_dependencies {
             self.load_context
