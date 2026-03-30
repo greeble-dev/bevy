@@ -361,7 +361,7 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
         self.load_context
             .dependencies
             // XXX TODO: Review clones.
-            .insert(index, Some(AssetRef::from(path.into_owned())));
+            .insert(index, Some(path.into_owned()));
         handle
     }
 }

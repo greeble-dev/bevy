@@ -8,7 +8,7 @@ use crate::{
     io::{AssetReader, AssetReaderError, AssetSourceBuilder, PathStream, Reader, SliceReader},
     AssetPath, AssetRef, AssetServer,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use bevy_platform::collections::HashMap;
 use core::{
     pin::Pin,
@@ -18,7 +18,6 @@ use futures_lite::Stream;
 use std::{
     format,
     path::{Path, PathBuf},
-    string::ToString,
 };
 use tracing::error;
 
@@ -34,8 +33,8 @@ struct StagedAsset {
 fn published_path(path: &RootAssetRef) -> Box<Path> {
     Box::<Path>::from(PathBuf::from(match path {
         // XXX TODO: Verify that `to_string` is what we want.
-        RootAssetRef::Path(path) => format!("path:{}", path.to_string()),
-        RootAssetRef::Action(action) => format!("action:{}", action.to_string()),
+        RootAssetRef::Path(path) => format!("path:{}", path),
+        RootAssetRef::Action(action) => format!("action:{}", action),
     }))
 }
 
@@ -58,7 +57,7 @@ async fn publish(input_manifest: InputManifest, asset_server: &AssetServer) {
 
         match &input_asset {
             RootAssetRef::Action(action) => {
-                let loaded = load_action(asset_server, &action).await.expect("XXX TODO");
+                let loaded = load_action(asset_server, action).await.expect("XXX TODO");
 
                 // XXX TODO: Duplicates where `load_action` writes to the cache.
                 let (saver, settings) = shared.saver(loaded.asset_type_name()).expect("XXX TODO");
@@ -97,7 +96,7 @@ async fn publish(input_manifest: InputManifest, asset_server: &AssetServer) {
 
             RootAssetRef::Path(path) => {
                 // XXX TODO: Settings?
-                let loaded = load_path(asset_server, &path, &None)
+                let loaded = load_path(asset_server, path, &None)
                     .await
                     .expect("XXX TODO");
 

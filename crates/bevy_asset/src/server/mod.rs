@@ -552,7 +552,7 @@ impl AssetServer {
         let path = path.into().into_owned();
         let mut infos = self.write_infos();
         let (handle, should_load) = infos.get_or_create_path_handle_erased(
-            path.clone().into(),
+            path.clone(),
             type_id,
             None,
             HandleLoadingMode::Request,
@@ -560,7 +560,7 @@ impl AssetServer {
         );
 
         if should_load {
-            self.spawn_load_task(handle.clone(), path.into(), infos, guard);
+            self.spawn_load_task(handle.clone(), path, infos, guard);
         }
 
         handle
