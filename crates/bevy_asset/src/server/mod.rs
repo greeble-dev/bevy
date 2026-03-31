@@ -1024,12 +1024,12 @@ impl AssetServer {
         meta_transform: Option<MetaTransform>,
     ) -> Result<Option<UntypedHandle>, AssetLoadError> {
         match path {
-            AssetRef::Action(action) => {
-                self.load_internal_action(input_handle, action, force).await
-            }
             AssetRef::Path(path) => {
                 self.load_internal_path(input_handle, path, force, meta_transform)
                     .await
+            }
+            AssetRef::Action(action) => {
+                self.load_internal_action(input_handle, action, force).await
             }
         }
     }

@@ -56,44 +56,6 @@ async fn publish(input_manifest: InputManifest, asset_server: &AssetServer) {
             .await;
 
         match &input_asset {
-            RootAssetRef::Action(action) => {
-                let loaded = load_action(asset_server, action).await.expect("XXX TODO");
-
-                // XXX TODO: Duplicates where `load_action` writes to the cache.
-                let (saver, settings) = shared.saver(loaded.asset_type_name()).expect("XXX TODO");
-
-                let loader = asset_server
-                    .get_asset_loader_with_type_name(saver.loader_type_name())
-                    .await
-                    .expect("XXX TODO");
-
-                /*
-                let bytes = write_standalone_asset(&loaded, &*loader, saver, settings)
-                    .await
-                    .expect("XXX TODO");
-                */
-                let bytes = todo!();
-                let meta_bytes = todo!();
-
-                staged_assets.insert(
-                    published_path(&input_asset),
-                    StagedAsset { bytes, meta_bytes },
-                );
-
-                input_stack.extend(
-                    loaded
-                        .dependencies
-                        .values()
-                        .flatten()
-                        .cloned()
-                        .map(RootAssetRef::without_label),
-                );
-
-                // XXX TODO: We're not accounting for the standalone asset having
-                // loader dependencies. Not sure if we can work them out unless
-                // we do a fake load?
-            }
-
             RootAssetRef::Path(path) => {
                 // XXX TODO: Settings?
                 let loaded = load_path(asset_server, path, &None)
@@ -137,6 +99,43 @@ async fn publish(input_manifest: InputManifest, asset_server: &AssetServer) {
                         .cloned()
                         .map(RootAssetRef::without_label),
                 );
+            }
+            RootAssetRef::Action(action) => {
+                let loaded = load_action(asset_server, action).await.expect("XXX TODO");
+
+                // XXX TODO: Duplicates where `load_action` writes to the cache.
+                let (saver, settings) = shared.saver(loaded.asset_type_name()).expect("XXX TODO");
+
+                let loader = asset_server
+                    .get_asset_loader_with_type_name(saver.loader_type_name())
+                    .await
+                    .expect("XXX TODO");
+
+                /*
+                let bytes = write_standalone_asset(&loaded, &*loader, saver, settings)
+                    .await
+                    .expect("XXX TODO");
+                */
+                let bytes = todo!();
+                let meta_bytes = todo!();
+
+                staged_assets.insert(
+                    published_path(&input_asset),
+                    StagedAsset { bytes, meta_bytes },
+                );
+
+                input_stack.extend(
+                    loaded
+                        .dependencies
+                        .values()
+                        .flatten()
+                        .cloned()
+                        .map(RootAssetRef::without_label),
+                );
+
+                // XXX TODO: We're not accounting for the standalone asset having
+                // loader dependencies. Not sure if we can work them out unless
+                // we do a fake load?
             }
         }
         /*
