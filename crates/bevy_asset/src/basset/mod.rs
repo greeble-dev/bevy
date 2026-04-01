@@ -588,15 +588,12 @@ impl BassetShared {
         // XXX TODO: Settings?
         _settings: Option<&dyn Settings>,
         asset: &ErasedLoadedAsset,
-        asset_server: &AssetServer,
     ) -> Option<ActionCacheKey> {
         if let Some(dependency_graph) = &self.dependency_graph {
-            let shared = asset_server.basset_shared();
-
             // XXX TODO: Recalculating the dependency key is a race condition since
             // the content cache will be looking at the file as it is now, not what was loaded.
             // Do we need to put the dependency key into `ErasedLoadedAsset`?
-            let dependency_key = shared.dependency_key(path, None).await;
+            let dependency_key = self.dependency_key(path, None).await;
 
             let mut unresolved_loader_dependees = asset
                 .loader_dependencies
@@ -618,7 +615,7 @@ impl BassetShared {
                 // XXX TODO: Recalculating the dependency key is a race condition since
                 // the content cache will be looking at the file as it is now, not what was loaded.
                 // Do we need to put the dependency key into `ErasedLoadedAsset`?
-                let dependee_key = shared.dependency_key(&dependee_path, None).await;
+                let dependee_key = self.dependency_key(&dependee_path, None).await;
                 // XXX TODO: Review passing `None` for meta parameter.
                 loader_dependees.push((dependee_path, dependee_key));
             }
@@ -645,15 +642,12 @@ impl BassetShared {
     pub(crate) async fn register_bytes_dependency(
         &self,
         path: &RootAssetRef<'static>,
-        asset_server: &AssetServer,
     ) -> Option<ActionCacheKey> {
         if let Some(dependency_graph) = &self.dependency_graph {
-            let shared = asset_server.basset_shared();
-
             // XXX TODO: Recalculating the dependency key is a race condition since
             // the content cache will be looking at the file as it is now, not what was loaded.
             // Do we need to put the dependency key into `ErasedLoadedAsset`?
-            let dependency_key = shared.dependency_key(path, None).await;
+            let dependency_key = self.dependency_key(path, None).await;
 
             let dependency_value = DependencyCacheValue::empty();
 
@@ -885,9 +879,7 @@ pub(crate) async fn load_action(
     */
 
     // XXX TODO: Is settings parameter correct?
-    let action_key = shared
-        .register_dependencies(&path, None, &asset, asset_server)
-        .await;
+    let action_key = shared.register_dependencies(&path, None, &asset).await;
 
     if let Some(action_key) = action_key {
         if let Some(action_cache) = &shared.action_cache {

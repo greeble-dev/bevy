@@ -633,10 +633,9 @@ impl<'a> LoadContext<'a> {
         // XXX TODO: Document.
         self.asset_server
             .basset_shared()
-            .register_bytes_dependency(
-                &RootAssetRef::from(RootAssetPath::without_label(path.clone_owned())),
-                self.asset_server,
-            )
+            .register_bytes_dependency(&RootAssetRef::from(RootAssetPath::without_label(
+                path.clone_owned(),
+            )))
             .await;
         Ok(bytes)
     }

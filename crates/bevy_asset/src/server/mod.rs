@@ -1744,7 +1744,6 @@ impl AssetServer {
                     ),
                     Some(settings),
                     asset,
-                    self,
                 )
                 .await;
         }
