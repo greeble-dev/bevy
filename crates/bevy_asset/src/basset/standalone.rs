@@ -18,6 +18,8 @@ use alloc::{boxed::Box, vec::Vec};
 use bevy_ecs::error::BevyError;
 
 const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
+// XXX TODO: Is u16 maybe a bit risky? Might want to break into a bigger semver
+// style.
 const STANDALONE_VERSION: u16 = 1;
 
 pub async fn read_standalone_asset(
@@ -26,33 +28,33 @@ pub async fn read_standalone_asset(
 ) -> Result<ErasedLoadedAsset, BevyError> {
     let mut blob = BlobReader::new(blob);
 
-    let magic = blob.bytes(STANDALONE_MAGIC.len()).expect("TODO");
+    let magic = blob.bytes(STANDALONE_MAGIC.len()).expect("XXX TODO");
 
     if magic != STANDALONE_MAGIC {
-        return Err("TODO".into());
+        return Err("XXX TODO".into());
     }
 
-    let version = blob.u16().expect("TODO");
+    let version = blob.u16().expect("XXX TODO");
 
     if version != STANDALONE_VERSION {
-        return Err("TODO".into());
+        return Err("XXX TODO".into());
     }
 
     // XXX TODO: Some awkward duplication here. We get the loader name so we can
     // deserialize the meta, but that meta already contains the loader name.
     // Don't see an obvious solution.
 
-    let loader_name = blob.string().expect("TODO");
-    let meta_bytes = blob.bytes_sized().expect("TODO");
-    let asset_bytes = blob.bytes_sized().expect("TODO");
+    let loader_name = blob.string().expect("XXX TODO");
+    let meta_bytes = blob.bytes_sized().expect("XXX TODO");
+    let asset_bytes = blob.bytes_sized().expect("XXX TODO");
 
     let loader = context
         .asset_server
         .get_asset_loader_with_type_name(loader_name)
         .await
-        .expect("TODO");
+        .expect("XXX TODO");
 
-    let meta = loader.deserialize_meta(meta_bytes).expect("TODO");
+    let meta = loader.deserialize_meta(meta_bytes).expect("XXX TODO");
 
     let mut reader = SliceReader::new(asset_bytes);
 

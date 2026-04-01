@@ -711,14 +711,6 @@ impl AssetServer {
         self.load_unknown_type_with_meta_transform(path, None)
     }
 
-    /// Performs an async asset load.
-    ///
-    /// `input_handle` must only be [`Some`] if `should_load` was true when retrieving
-    /// `input_handle`. This is an optimization to avoid looking up `should_load` twice, but it
-    /// means you _must_ be sure a load is necessary when calling this function with [`Some`].
-    ///
-    /// Returns the handle of the asset if one was retrieved by this function. Otherwise, may return
-    /// [`None`].
     async fn load_internal_path<'a>(
         &self,
         input_handle: Option<UntypedHandle>,
@@ -952,23 +944,24 @@ impl AssetServer {
             fetched_handle = None;
             should_load = true;
         } else {
-            // XXX TODO: Not clear if we can create the handle here since we
-            // don't have the type? Is it valid to create after loading? But that
-            // means we can get duplicate loads.
+            // XXX TODO: What if happens if the input handle is `None`? Can't
+            // create here as we don't know the type yet.
             todo!();
             /*
-            let mut infos = self.write_infos();
-            match infos.get_or_create_path_handle_internal(
-                action.clone().into(),
-                input_handle_type_id,
-                HandleLoadingMode::Request,
-                None,
-            ) {
-                Ok((untyped_handle, handle_should_load)) => {
-                    fetched_handle = Some(untyped_handle);
-                    should_load = handle_should_load;
+            if input_handle.is_none() {
+                let mut infos = self.write_infos();
+                match infos.get_or_create_path_handle_internal(
+                    action.clone().into(),
+                    input_handle_type_id,
+                    HandleLoadingMode::Request,
+                    None,
+                ) {
+                    Ok((untyped_handle, handle_should_load)) => {
+                        fetched_handle = Some(untyped_handle);
+                        should_load = handle_should_load;
+                    }
+                    Err(_) => todo!(),
                 }
-                Err(_) => todo!(),
             }
             */
         }
@@ -984,11 +977,9 @@ impl AssetServer {
             // Or maybe we can only do this after loading?
             todo!();
         }
-        let action = RootAssetAction2::without_label(action);
 
-        // XXX TODO: Try to avoid `action.clone_owned()`. Maybe not possible since we
-        // need to check label.
-        match crate::basset::load_action(self, &action).await {
+        // XXX TODO: Try to avoid clone?
+        match crate::basset::load_action(self, &RootAssetAction2::without_label(action)).await {
             Ok(asset) => {
                 // XXX TODO: Sub-asset handling.
                 let final_handle = fetched_handle;
@@ -1016,6 +1007,14 @@ impl AssetServer {
         }
     }
 
+    /// Performs an async asset load.
+    ///
+    /// `input_handle` must only be [`Some`] if `should_load` was true when retrieving
+    /// `input_handle`. This is an optimization to avoid looking up `should_load` twice, but it
+    /// means you _must_ be sure a load is necessary when calling this function with [`Some`].
+    ///
+    /// Returns the handle of the asset if one was retrieved by this function. Otherwise, may return
+    /// [`None`].
     async fn load_internal<'a>(
         &self,
         input_handle: Option<UntypedHandle>,

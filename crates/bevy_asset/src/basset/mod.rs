@@ -610,7 +610,9 @@ impl BassetShared {
         }
     }
 
-    // Registers the given file as a potential dependency.
+    // Registers a dependency on the given file, which is only loaded as raw
+    // bytes - not through an `AssetLoader`. This means the file itself cannot
+    // have dependencies.
     pub(crate) async fn register_bytes_dependency(
         &self,
         path: &RootAssetRef<'static>,
@@ -798,7 +800,7 @@ pub(crate) async fn load_action(
     asset_server: &AssetServer,
     action: &RootAssetAction2,
 ) -> Result<ErasedLoadedAsset, BevyError> {
-    // XXX TODO: Avoid converting to path? There's a bunch of things that expect
+    // XXX TODO: Avoid converting to a ref? There's a bunch of things that expect
     // an `AssetRef` but maybe could be specialized for an action.
     let path = RootAssetRef::from(action.clone());
 

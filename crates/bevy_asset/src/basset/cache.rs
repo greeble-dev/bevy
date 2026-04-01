@@ -5,6 +5,7 @@ use crate::{
     AssetServer, AsyncWriteExt,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+// XXX TODO: Try and replace `async_fs` with `AssetSource`.
 use async_fs::File;
 use bevy_ecs::error::BevyError;
 use bevy_platform::{

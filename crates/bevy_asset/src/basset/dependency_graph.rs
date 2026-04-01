@@ -233,7 +233,9 @@ impl DependencyGraph {
     }
 
     // XXX TODO: Should this take an `AssetRef` or an `AssetAction2`? Need to
-    // think through whether regular asset loads should be cached.
+    // think through whether regular asset loads should be cached. Although caching
+    // isn't the only client - the dependency graph needs the action keys of non-actions
+    // to calculate the action key of actions.
     pub(crate) async fn action_key(
         &self,
         path: &RootAssetRef<'static>,
