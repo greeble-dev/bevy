@@ -9,7 +9,7 @@ use crate::{
         dependency_graph::DependencyGraph,
         standalone::{read_standalone_asset, write_standalone_asset},
     },
-    io::AssetSourceId,
+    io::{AssetSourceId, AssetSources},
     Asset, AssetApp, AssetContainer, AssetServer, DeserializeMetaError, LabeledAsset,
     UntypedAssetId,
 };
@@ -453,34 +453,28 @@ where
 
 // XXX TODO: Review if all this stuff actually needs to be shared.
 #[derive(Default)]
-pub struct BassetShared {
+pub struct BassetSettings {
+    pub file_cache_path: Option<PathBuf>,
+    pub validate_dependency_cache: bool,
+    pub validate_action_cache: bool,
     action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
-    content_cache: ContentCache,
-    dependency_graph: Option<DependencyGraph>,
-    action_cache: Option<MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>>,
 }
 
-impl BassetShared {
-    pub fn new(
-        file_cache_path: Option<PathBuf>,
-        validate_dependency_cache: bool,
-        validate_action_cache: bool,
-    ) -> Self {
-        Self {
-            action_type_name_to_action: Default::default(),
-            asset_type_name_to_saver: Default::default(),
-            content_cache: Default::default(),
-            dependency_graph: Some(DependencyGraph::new(
-                file_cache_path.as_ref().map(|p| p.join("dependency")),
-                validate_dependency_cache,
-            )),
-            action_cache: Some(MemoryAndFileCache::new(
-                "action_cache",
-                file_cache_path.as_ref().map(|p| p.join("action")),
-                validate_action_cache,
-            )),
-        }
+impl BassetSettings {
+    pub fn with_file_cache_path(mut self, path: PathBuf) -> Self {
+        self.file_cache_path = Some(path);
+        self
+    }
+
+    pub fn with_validate_dependency_cache(mut self, value: bool) -> Self {
+        self.validate_dependency_cache = value;
+        self
+    }
+
+    pub fn with_validate_action_cache(mut self, value: bool) -> Self {
+        self.validate_action_cache = value;
+        self
     }
 
     pub fn with_action<T: BassetAction>(mut self, action: T) -> Self {
@@ -500,9 +494,46 @@ impl BassetShared {
 
         self
     }
+}
+
+// XXX TODO: Review if all this stuff actually needs to be shared.
+pub struct BassetShared {
+    // XXX TODO: Keeping settings is kinda annoying, but it's the only way I can
+    // see to avoid cloning things like `BassetSettings::asset_type_name_to_action'.
+    // See also comment on `AssetPlugin::basset_settings`.
+    settings: Arc<BassetSettings>,
+    content_cache: ContentCache,
+    dependency_graph: Option<DependencyGraph>,
+    action_cache: Option<MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>>,
+}
+
+impl BassetShared {
+    pub fn new(settings: Arc<BassetSettings>, sources: Arc<AssetSources>) -> Self {
+        let dependency_graph = Some(DependencyGraph::new(
+            settings
+                .file_cache_path
+                .as_ref()
+                .map(|p| p.join("dependency")),
+            settings.validate_dependency_cache,
+        ));
+
+        let action_cache = Some(MemoryAndFileCache::new(
+            "action_cache",
+            settings.file_cache_path.as_ref().map(|p| p.join("action")),
+            settings.validate_action_cache,
+        ));
+
+        Self {
+            settings,
+            content_cache: ContentCache::new(sources),
+            dependency_graph,
+            action_cache,
+        }
+    }
 
     pub(crate) fn action<'a>(&'a self, type_name: &str) -> Option<&'a dyn ErasedBassetAction> {
-        self.action_type_name_to_action
+        self.settings
+            .action_type_name_to_action
             .get(type_name)
             .map(move |a| &**a)
     }
@@ -511,7 +542,8 @@ impl BassetShared {
         &'a self,
         type_name: &str,
     ) -> Option<(&'a dyn ErasedAssetSaver, &'a dyn Settings)> {
-        self.asset_type_name_to_saver
+        self.settings
+            .asset_type_name_to_saver
             .get(type_name)
             .map(move |s| (&*s.0, &*s.1))
     }
@@ -520,7 +552,6 @@ impl BassetShared {
         &self,
         path: &RootAssetRef<'static>,
         _settings: Option<&dyn Settings>,
-        asset_server: &AssetServer,
     ) -> DependencyCacheKey {
         let mut hasher = blake3::Hasher::new();
         // XXX TODO: Double check that we're using the correct hash for actions.
@@ -538,7 +569,7 @@ impl BassetShared {
         if let Some(really_a_path) = path.path() {
             let content_hash = self
                 .content_cache
-                .get(really_a_path, asset_server)
+                .get(really_a_path)
                 .await
                 .expect("XXX TODO");
 
@@ -565,7 +596,7 @@ impl BassetShared {
             // XXX TODO: Recalculating the dependency key is a race condition since
             // the content cache will be looking at the file as it is now, not what was loaded.
             // Do we need to put the dependency key into `ErasedLoadedAsset`?
-            let dependency_key = shared.dependency_key(path, None, asset_server).await;
+            let dependency_key = shared.dependency_key(path, None).await;
 
             let mut unresolved_loader_dependees = asset
                 .loader_dependencies
@@ -587,9 +618,7 @@ impl BassetShared {
                 // XXX TODO: Recalculating the dependency key is a race condition since
                 // the content cache will be looking at the file as it is now, not what was loaded.
                 // Do we need to put the dependency key into `ErasedLoadedAsset`?
-                let dependee_key = shared
-                    .dependency_key(&dependee_path, None, asset_server)
-                    .await;
+                let dependee_key = shared.dependency_key(&dependee_path, None).await;
                 // XXX TODO: Review passing `None` for meta parameter.
                 loader_dependees.push((dependee_path, dependee_key));
             }
@@ -624,7 +653,7 @@ impl BassetShared {
             // XXX TODO: Recalculating the dependency key is a race condition since
             // the content cache will be looking at the file as it is now, not what was loaded.
             // Do we need to put the dependency key into `ErasedLoadedAsset`?
-            let dependency_key = shared.dependency_key(path, None, asset_server).await;
+            let dependency_key = shared.dependency_key(path, None).await;
 
             let dependency_value = DependencyCacheValue::empty();
 
@@ -818,9 +847,7 @@ pub(crate) async fn load_action(
         // up in a situation where the saver has been compiled out but we still
         // want to read from the cache.
 
-        let action_key = dependency_graph
-            .action_key(&path, &shared, asset_server)
-            .await;
+        let action_key = dependency_graph.action_key(&path, &shared).await;
 
         if let Some(action_key) = action_key
             && let Some(cached_standalone_asset) = action_cache.get(&action_key, &path).await

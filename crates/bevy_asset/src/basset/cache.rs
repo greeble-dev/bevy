@@ -2,7 +2,8 @@
 
 use crate::{
     basset::{RootAssetPath, RootAssetRef},
-    AssetServer, AsyncWriteExt,
+    io::AssetSources,
+    AsyncWriteExt,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 // XXX TODO: Try and replace `async_fs` with `AssetSource`.
@@ -324,9 +325,9 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub(crate) struct ContentHash(BassetHash);
 
-#[derive(Default)]
 pub(crate) struct ContentCache {
     path_to_hash: RwLock<HashMap<RootAssetPath<'static>, ContentHash>>,
+    sources: Arc<AssetSources>,
 }
 
 impl ContentHash {
@@ -336,12 +337,18 @@ impl ContentHash {
 }
 
 impl ContentCache {
+    pub(crate) fn new(sources: Arc<AssetSources>) -> Self {
+        Self {
+            path_to_hash: Default::default(),
+            sources,
+        }
+    }
+
     // XXX TODO: Can we avoid `AssetPath` being `<'static>`?
     // XXX TODO: Returning BassetHash by value is probably the practical choice? But check.
     pub(crate) async fn get(
         &self,
         path: &RootAssetPath<'static>,
-        asset_server: &AssetServer,
     ) -> Result<ContentHash, BevyError> {
         if let Some(hash) = self
             .path_to_hash
@@ -358,9 +365,7 @@ impl ContentCache {
         // XXX TODO: Review. Too spammy for now.
         //info!(?path, "Content cache miss.");
 
-        let source = asset_server
-            .get_source(path.source())
-            .map_err(BevyError::from)?;
+        let source = self.sources.get(path.source()).map_err(BevyError::from)?;
 
         let mut reader = source
             .reader()

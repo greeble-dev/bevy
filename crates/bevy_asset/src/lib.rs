@@ -209,7 +209,7 @@ pub mod basset;
 pub use uuid;
 
 use crate::{
-    basset::BassetShared,
+    basset::{BassetSettings, BassetShared},
     io::{embedded::EmbeddedAssetRegistry, AssetSourceBuilder, AssetSourceBuilders, AssetSourceId},
     processor::{AssetProcessor, Process},
 };
@@ -266,9 +266,10 @@ pub struct AssetPlugin {
     /// [`AssetSource`](io::AssetSource). Subfolders within these folders are also valid.
     pub unapproved_path_mode: UnapprovedPathMode,
 
-    // XXX TODO: Review. Only lives here temporarily until it's passed into
-    // `AssetServer`.
-    pub basset_shared: Arc<BassetShared>,
+    // XXX TODO: Review. This is annoyingly an Arc because we can't consume it during
+    // AssetPlugin::build, so we have to keep a useless reference around. Maybe missing
+    // a better solution.
+    pub basset_settings: Arc<BassetSettings>,
 }
 
 /// Determines how to react to attempts to load assets not inside the approved folders.
@@ -348,7 +349,7 @@ impl Default for AssetPlugin {
             use_asset_processor_override: None,
             meta_check: AssetMetaCheck::default(),
             unapproved_path_mode: UnapprovedPathMode::default(),
-            basset_shared: Default::default(),
+            basset_settings: Default::default(),
         }
     }
 }
@@ -381,15 +382,15 @@ impl Plugin for AssetPlugin {
             match self.mode {
                 AssetMode::Unprocessed => {
                     let mut builders = app.world_mut().resource_mut::<AssetSourceBuilders>();
-                    let sources = builders.build_sources(watch, false);
+                    let sources = Arc::new(builders.build_sources(watch, false));
 
                     app.insert_resource(AssetServer::new_with_meta_check(
-                        Arc::new(sources),
+                        sources.clone(),
                         AssetServerMode::Unprocessed,
                         self.meta_check.clone(),
                         watch,
                         self.unapproved_path_mode.clone(),
-                        self.basset_shared.clone(),
+                        Arc::new(BassetShared::new(self.basset_settings.clone(), sources)),
                     ));
                 }
                 AssetMode::Processed => {
@@ -401,26 +402,26 @@ impl Plugin for AssetPlugin {
                         let (processor, sources) = AssetProcessor::new(&mut builders, watch);
                         // the main asset server shares loaders with the processor asset server
                         app.insert_resource(AssetServer::new_with_loaders(
-                            sources,
+                            sources.clone(),
                             processor.server().data.loaders.clone(),
                             AssetServerMode::Processed,
                             AssetMetaCheck::Always,
                             watch,
                             self.unapproved_path_mode.clone(),
-                            self.basset_shared.clone(),
+                            Arc::new(BassetShared::new(self.basset_settings.clone(), sources)),
                         ))
                         .insert_resource(processor)
                         .add_systems(bevy_app::Startup, AssetProcessor::start);
                     } else {
                         let mut builders = app.world_mut().resource_mut::<AssetSourceBuilders>();
-                        let sources = builders.build_sources(false, watch);
+                        let sources = Arc::new(builders.build_sources(false, watch));
                         app.insert_resource(AssetServer::new_with_meta_check(
-                            Arc::new(sources),
+                            sources.clone(),
                             AssetServerMode::Processed,
                             AssetMetaCheck::Always,
                             watch,
                             self.unapproved_path_mode.clone(),
-                            self.basset_shared.clone(),
+                            Arc::new(BassetShared::new(self.basset_settings.clone(), sources)),
                         ));
                     }
                 }

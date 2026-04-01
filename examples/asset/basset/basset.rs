@@ -22,7 +22,7 @@ use bevy::{
 use bevy_asset::{io::Writer, saver::SavedAsset, AssetPath, AsyncWriteExt};
 use core::{marker::PhantomData, result::Result};
 use serde::{Deserialize, Serialize};
-use std::{boxed::Box, sync::Arc, time::Duration};
+use std::{boxed::Box, time::Duration};
 
 mod action {
     use super::*;
@@ -871,12 +871,10 @@ fn main() {
     );
     */
 
-    let basset_shared = Arc::new(
-        BassetShared::new(
-            Some("target/basset/cache".into()),
-            args.validate_dependency_cache,
-            args.validate_action_cache,
-        )
+    let basset_settings = BassetSettings::default()
+        .with_file_cache_path("target/basset/cache".into())
+        .with_validate_dependency_cache(args.validate_dependency_cache)
+        .with_validate_action_cache(args.validate_action_cache)
         .with_action(action::LoadPath)
         .with_action(action::JoinStrings)
         .with_action(action::UppercaseString)
@@ -886,15 +884,14 @@ fn main() {
         .with_saver(demo::StringAssetSaver)
         .with_saver(demo::IntAssetSaver)
         .with_saver(MeshletMeshSaver)
-        .with_saver(acme::AcmeSceneAssetSaver::default()),
-    );
+        .with_saver(acme::AcmeSceneAssetSaver::default());
 
     App::new()
         .add_plugins((
             DefaultPlugins
                 .set(AssetPlugin {
                     file_path: "examples/asset/basset/assets".to_string(),
-                    basset_shared,
+                    basset_settings: basset_settings.into(),
                     ..default()
                 })
                 .set(LogPlugin {

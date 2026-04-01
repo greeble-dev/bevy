@@ -56,9 +56,7 @@ async fn publish(input: PublishInput, asset_server: &AssetServer) {
 
     while let Some(input_asset) = input_stack.pop() {
         // XXX TODO: Settings parameter?
-        let dependency_key = shared
-            .dependency_key(&input_asset, None, asset_server)
-            .await;
+        let dependency_key = shared.dependency_key(&input_asset, None).await;
 
         match &input_asset {
             RootAssetRef::Path(path) => {
