@@ -10,7 +10,7 @@ use crate::{
         ApplyContext,
     },
     io::SliceReader,
-    meta::Settings,
+    meta::{AssetActionMinimal, AssetMetaMinimal, Settings},
     saver::ErasedAssetSaver,
     AssetPath, ErasedAssetLoader, ErasedLoadedAsset,
 };
@@ -40,13 +40,15 @@ pub async fn read_standalone_asset(
         return Err("XXX TODO".into());
     }
 
-    // XXX TODO: Some awkward duplication here. We get the loader name so we can
-    // deserialize the meta, but that meta already contains the loader name.
-    // Don't see an obvious solution.
-
-    let loader_name = blob.string().expect("XXX TODO");
     let meta_bytes = blob.bytes_sized().expect("XXX TODO");
     let asset_bytes = blob.bytes_sized().expect("XXX TODO");
+
+    let minimal_meta = ron::de::from_bytes::<AssetMetaMinimal>(meta_bytes).expect("XXX TODO");
+
+    let loader_name = match &minimal_meta.asset {
+        AssetActionMinimal::Load { loader } => loader.as_str(),
+        _ => todo!("XXX TODO"),
+    };
 
     let loader = context
         .asset_server
@@ -107,7 +109,6 @@ pub async fn write_standalone_asset(
     // with certain settings then we should preserve them here? There might also
     // be situations where a saver/loader pair are expecting certain settings?
     // Could get messy.
-
     let meta_bytes = loader.default_meta().serialize();
 
     let mut writer = Vec::<u8>::new();
@@ -116,7 +117,6 @@ pub async fn write_standalone_asset(
 
         blob.bytes(STANDALONE_MAGIC);
         blob.u16(STANDALONE_VERSION);
-        blob.string(loader.type_path());
         blob.bytes_sized(&meta_bytes);
         blob.bytes_sized(&asset_bytes);
     }
