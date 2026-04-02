@@ -30,180 +30,21 @@ use std::{
 };
 use tracing::error;
 
-struct PublishInput {
-    paths: Vec<AssetRef<'static>>,
+pub struct PublishInput {
+    pub(crate) paths: Vec<AssetRef<'static>>,
 }
 
-struct StagedAsset {
-    meta_bytes: Box<[u8]>,
-    asset_bytes: Box<[u8]>,
-}
-
-// XXX TODO: Needs major work.
-//
-// 1. Consider how to reuse dependency graph and action cache where possible.
-// 2. Multithreading.
-async fn publish(input: PublishInput, asset_server: &AssetServer, pack_path: &Path) {
-    let shared = asset_server.basset_action_source();
-
-    let mut pack = WritablePackFile::default();
-
-    // Assets that have already been published to `pack`.
-    //
-    // XXX TODO: Consider removing this and checking `pack` directly?
-    // Kinda depends on multithread approaches.
-    let mut done = HashSet::<RootAssetRef>::new();
-
-    let mut input_stack = input
-        .paths
-        .iter()
-        .map(|p| RootAssetRef::without_label(p.clone()))
-        .collect::<Vec<_>>();
-
-    while let Some(input_asset) = input_stack.pop() {
-        // XXX TODO: Clone is annoying, but not sure it's possible to avoid
-        // without doing a separate `contains` then `insert`?
-        //
-        // XXX TODO: Should we be checking done here or where we add stuff to
-        // the input stack? Note that the latter would mean we have to de-dupe
-        // `input`.
-        if !done.insert(input_asset.clone()) {
-            continue;
-        }
-
-        match &input_asset {
-            RootAssetRef::Path(path) => {
-                // XXX TODO: Consider how we can avoid this load - it's only
-                // needed for discovering dependencies and getting the meta.
-                // XXX TODO: Settings parameter?
-                let (loaded, loader) = load_path(asset_server, path, &None)
-                    .await
-                    .expect("XXX TODO");
-
-                let asset_bytes = {
-                    let mut reader = asset_server
-                        .get_source(path.source())
-                        .expect("XXX TODO")
-                        .reader()
-                        .read(path.path())
-                        .await
-                        .expect("XXX TODO");
-                    let mut bytes = Vec::new();
-                    reader.read_to_end(&mut bytes).await.expect("XXX TODO");
-                    bytes.into()
-                };
-
-                // XXX TODO: Sort out loader settings? See above where we call `load_path`.
-                let meta_bytes = loader.default_meta().serialize().into_boxed_slice();
-
-                // XXX TODO: The action case somewhat duplicates this. Refactor?
-
-                pack.paths.insert(
-                    ManifestPath::from(path),
-                    StagedAsset {
-                        asset_bytes,
-                        meta_bytes,
-                    },
-                );
-
-                input_stack.extend(
-                    loaded
-                        .dependencies
-                        .values()
-                        .flatten()
-                        .cloned()
-                        .map(RootAssetRef::without_label),
-                );
-
-                input_stack.extend(
-                    loaded
-                        .loader_dependencies
-                        .keys()
-                        .cloned()
-                        .map(RootAssetRef::without_label),
-                );
-            }
-            RootAssetRef::Action(action) => {
-                // XXX TODO: Can this handle actions that can't be saved?
-
-                // XXX TODO: Can this read directly out of the action cache? We're
-                // mostly replicating what that's already done. Maybe the standalone
-                // files can be organized in such a way that we can grab `meta_bytes`
-                // and `action_bytes` directly. Or maybe there's better options for
-                // copying the cache.
-
-                /*
-                xxx todo, maybe need to move this into the source? that way we reuse
-                the action cache paths
-
-                let loaded = asset_server
-                    .basset_action_source()
-                    .apply(action, asset_server)
-                    .await
-                    .expect("XXX TODO");
-
-                // XXX TODO: Decide if we try to support the original path.
-                let fake_path =
-                    AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
-
-                // XXX TODO: Duplicates where `load_action` writes to the cache.
-                let (saver, saver_settings) =
-                    shared.saver(loaded.asset_type_name()).expect("XXX TODO");
-
-                let loader = asset_server
-                    .get_asset_loader_with_type_name(saver.loader_type_name())
-                    .await
-                    .expect("XXX TODO");
-
-                let meta_bytes = loader.default_meta().serialize();
-
-                let mut asset_bytes = Vec::<u8>::new();
-                {
-                    saver
-                        .save(&mut asset_bytes, &loaded, saver_settings, fake_path)
-                        .await
-                        .expect("XXX TODO");
-                }
-
-                */
-
-                let meta_bytes: Vec<u8> = todo!();
-                let asset_bytes: Vec<u8> = todo!();
-                let loaded: crate::ErasedLoadedAsset = todo!();
-
-                pack.actions.insert(
-                    Box::<str>::from(action.to_string()),
-                    StagedAsset {
-                        asset_bytes: asset_bytes.into(),
-                        meta_bytes: meta_bytes.into(),
-                    },
-                );
-
-                input_stack.extend(
-                    loaded
-                        .dependencies
-                        .values()
-                        .flatten()
-                        .cloned()
-                        .map(RootAssetRef::without_label),
-                );
-
-                // XXX TODO: We're not accounting for the standalone asset having
-                // loader dependencies. Not sure if we can work them out unless
-                // we do a fake load?
-            }
-        }
-    }
-
-    write_pack_file(pack, pack_path).await;
+pub(crate) struct StagedAsset {
+    pub(crate) meta_bytes: Box<[u8]>,
+    pub(crate) asset_bytes: Box<[u8]>,
 }
 
 // XXX TODO: Is this duplicating `RootAssetPath`? Maybe justified if we don't
 // need `CowArc`.
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-struct ManifestPath {
-    source: Option<Box<str>>,
-    path: Box<Path>,
+pub(crate) struct ManifestPath {
+    pub(crate) source: Option<Box<str>>,
+    pub(crate) path: Box<Path>,
 }
 
 impl<'a> From<&RootAssetPath<'a>> for ManifestPath {
@@ -213,7 +54,7 @@ impl<'a> From<&RootAssetPath<'a>> for ManifestPath {
 }
 
 impl ManifestPath {
-    fn new(source: &AssetSourceId, path: &Path) -> Self {
+    pub(crate) fn new(source: &AssetSourceId, path: &Path) -> Self {
         Self {
             source: source.as_str().map(Box::<str>::from),
             path: path.into(),
@@ -222,39 +63,43 @@ impl ManifestPath {
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
-struct ReadableManifest {
-    paths: HashMap<ManifestPath, MetaAndAssetPackLocation>,
-    actions: HashMap<Box<str>, MetaAndAssetPackLocation>,
+pub(crate) struct ReadableManifest {
+    pub(crate) paths: HashMap<ManifestPath, MetaAndAssetPackLocation>,
+    pub(crate) actions: HashMap<Box<str>, MetaAndAssetPackLocation>,
 }
 
 impl ReadableManifest {
-    fn path(&self, source: &AssetSourceId, path: &Path) -> Option<MetaAndAssetPackLocation> {
+    pub(crate) fn path(
+        &self,
+        source: &AssetSourceId,
+        path: &Path,
+    ) -> Option<MetaAndAssetPackLocation> {
         self.paths
             // XXX TODO: Avoid allocations hidden in `ManifestPath::new`.
             .get(&ManifestPath::new(source, path))
             .cloned()
     }
 
-    fn action(&self, action: &str) -> Option<MetaAndAssetPackLocation> {
+    pub(crate) fn action(&self, action: &str) -> Option<MetaAndAssetPackLocation> {
         self.actions.get(action).cloned()
     }
 }
 
 #[derive(Copy, Clone, Default, Serialize, Deserialize)]
-struct PackLocation {
-    offset: usize,
-    length: usize,
+pub(crate) struct PackLocation {
+    pub(crate) offset: usize,
+    pub(crate) length: usize,
 }
 
 #[derive(Copy, Clone, Default, Serialize, Deserialize)]
-struct MetaAndAssetPackLocation {
-    meta: PackLocation,
-    asset: PackLocation,
+pub(crate) struct MetaAndAssetPackLocation {
+    pub(crate) meta: PackLocation,
+    pub(crate) asset: PackLocation,
 }
 
 struct PublishedAssetReader {
-    source: AssetSourceId<'static>,
-    pack_file: Arc<ReadablePackFile>,
+    pub(crate) source: AssetSourceId<'static>,
+    pub(crate) pack_file: Arc<ReadablePackFile>,
 }
 
 // XXX TODO: Duplicated from crate::io. Refactor? Or try to avoid in the first
@@ -300,7 +145,7 @@ const PACK_MAGIC: &[u8] = b"BEVY_PACK_FILE\n";
 // style.
 const PACK_VERSION: u16 = 1;
 
-struct ReadableStorage(Box<[u8]>);
+pub(crate) struct ReadableStorage(pub(crate) Box<[u8]>);
 
 impl<'a> ReadableStorage {
     fn read(&'a self, location: PackLocation) -> Result<impl Reader + 'a, AssetReaderError> {
@@ -315,8 +160,8 @@ impl<'a> ReadableStorage {
 }
 
 pub(crate) struct ReadablePackFile {
-    manifest: ReadableManifest,
-    storage: ReadableStorage,
+    pub(crate) manifest: ReadableManifest,
+    pub(crate) storage: ReadableStorage,
 }
 
 impl<'a> ReadablePackFile {
@@ -374,7 +219,7 @@ impl<'a> ReadablePackFile {
     }
 }
 
-async fn read_pack_file(path: &Path) -> ReadablePackFile {
+pub(crate) async fn read_pack_file(path: &Path) -> ReadablePackFile {
     let mut file = async_fs::OpenOptions::new()
         .read(true)
         .open(&path)
@@ -415,12 +260,12 @@ async fn read_pack_file(path: &Path) -> ReadablePackFile {
 }
 
 #[derive(Default)]
-struct WritablePackFile {
-    paths: HashMap<ManifestPath, StagedAsset>,
-    actions: HashMap<Box<str>, StagedAsset>,
+pub(crate) struct WritablePackFile {
+    pub(crate) paths: HashMap<ManifestPath, StagedAsset>,
+    pub(crate) actions: HashMap<Box<str>, StagedAsset>,
 }
 
-async fn write_pack_file(pack: WritablePackFile, path: &Path) {
+pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) {
     // XXX TODO: Consider sorting the paths? Reasoning is that assets in the
     // same folder will likely be accessed together. Not sure if there's anything
     // sensible we can do for actions though.
@@ -512,8 +357,8 @@ async fn write_pack_file(pack: WritablePackFile, path: &Path) {
     // XXX TODO: Eventually we should write direct to the file.
     let mut file_bytes = Vec::<u8>::new();
 
-    let mut blob = BlobWriter::new(&mut file_bytes);
     {
+        let mut blob = BlobWriter::new(&mut file_bytes);
         blob.bytes(PACK_MAGIC);
         blob.u16(PACK_VERSION);
         blob.bytes_sized(&manifest_bytes);

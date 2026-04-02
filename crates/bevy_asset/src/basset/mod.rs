@@ -7,7 +7,10 @@ use crate::{
             MemoryAndFileCache,
         },
         dependency_graph::DependencyGraph,
-        publisher::ReadablePackFile,
+        publisher::{
+            write_pack_file, ManifestPath, PublishInput, ReadablePackFile, StagedAsset,
+            WritablePackFile,
+        },
         standalone::{read_standalone_asset, write_standalone_asset},
     },
     io::{AssetSourceId, AssetSources},
@@ -26,7 +29,7 @@ use bevy_asset::{
     LoadContext, LoadedAsset,
 };
 use bevy_ecs::error::BevyError;
-use bevy_platform::collections::HashMap;
+use bevy_platform::collections::{HashMap, HashSet};
 use bevy_reflect::TypePath;
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
@@ -792,6 +795,158 @@ impl ActionSource for DevelopmentActionSource {
             .as_ref()
             .inspect(|g| debug!("GRAPH DUMP\n{:?}", g));
     }
+
+    fn publish<'a>(
+        &'a self,
+        input: PublishInput,
+        asset_server: &'a AssetServer,
+        pack_path: &'a Path,
+    ) -> Option<BoxedFuture<'a, ()>> {
+        Some(Box::pin(async move {
+            let mut pack = WritablePackFile::default();
+
+            // Assets that have already been published to `pack`.
+            //
+            // XXX TODO: Consider removing this and checking `pack` directly?
+            // Kinda depends on multithread approaches.
+            let mut done = HashSet::<RootAssetRef>::new();
+
+            let mut input_stack = input
+                .paths
+                .iter()
+                .map(|p| RootAssetRef::without_label(p.clone()))
+                .collect::<Vec<_>>();
+
+            while let Some(input_asset) = input_stack.pop() {
+                // XXX TODO: Clone is annoying, but not sure it's possible to avoid
+                // without doing a separate `contains` then `insert`?
+                //
+                // XXX TODO: Should we be checking done here or where we add stuff to
+                // the input stack? Note that the latter would mean we have to de-dupe
+                // `input`.
+                if !done.insert(input_asset.clone()) {
+                    continue;
+                }
+
+                match &input_asset {
+                    RootAssetRef::Path(path) => {
+                        // XXX TODO: Consider how we can avoid this load - it's only
+                        // needed for discovering dependencies and getting the meta.
+                        // Can we try and reuse the dependency graph?
+
+                        // XXX TODO: Settings parameter?
+                        let (loaded, loader) = load_path(asset_server, path, &None)
+                            .await
+                            .expect("XXX TODO");
+
+                        input_stack.extend(
+                            loaded
+                                .dependencies
+                                .values()
+                                .flatten()
+                                .cloned()
+                                .map(RootAssetRef::without_label),
+                        );
+
+                        input_stack.extend(
+                            loaded
+                                .loader_dependencies
+                                .keys()
+                                .cloned()
+                                .map(RootAssetRef::without_label),
+                        );
+
+                        let asset_bytes = {
+                            let mut reader = asset_server
+                                .get_source(path.source())
+                                .expect("XXX TODO")
+                                .reader()
+                                .read(path.path())
+                                .await
+                                .expect("XXX TODO");
+                            let mut bytes = Vec::new();
+                            reader.read_to_end(&mut bytes).await.expect("XXX TODO");
+                            bytes.into()
+                        };
+
+                        // XXX TODO: Sort out loader settings? See above where we call `load_path`.
+                        let meta_bytes = loader.default_meta().serialize().into_boxed_slice();
+
+                        // XXX TODO: The action case somewhat duplicates this. Refactor?
+
+                        pack.paths.insert(
+                            ManifestPath::from(path),
+                            StagedAsset {
+                                asset_bytes,
+                                meta_bytes,
+                            },
+                        );
+                    }
+                    RootAssetRef::Action(action) => {
+                        // XXX TODO: Can this handle actions that can't be saved?
+
+                        // XXX TODO: Can this read directly out of the action cache? We're
+                        // mostly replicating what that's already done. Maybe the standalone
+                        // files can be organized in such a way that we can grab `meta_bytes`
+                        // and `action_bytes` directly. Or maybe there's better options for
+                        // copying the cache.
+
+                        let loaded = asset_server
+                            .basset_action_source()
+                            .apply(action, asset_server)
+                            .await
+                            .expect("XXX TODO");
+
+                        // XXX TODO: Decide if we try to support the original path.
+                        let fake_path =
+                            AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
+
+                        // XXX TODO: Duplicates where `load_action` writes to the cache.
+                        let (saver, saver_settings) =
+                            self.saver(loaded.asset_type_name()).expect("XXX TODO");
+
+                        let loader = asset_server
+                            .get_asset_loader_with_type_name(saver.loader_type_name())
+                            .await
+                            .expect("XXX TODO");
+
+                        let meta_bytes = loader.default_meta().serialize();
+
+                        let mut asset_bytes = Vec::<u8>::new();
+                        {
+                            saver
+                                .save(&mut asset_bytes, &loaded, saver_settings, fake_path)
+                                .await
+                                .expect("XXX TODO");
+                        }
+
+                        pack.actions.insert(
+                            Box::<str>::from(action.to_string()),
+                            StagedAsset {
+                                asset_bytes: asset_bytes.into(),
+                                meta_bytes: meta_bytes.into(),
+                            },
+                        );
+
+                        input_stack.extend(
+                            loaded
+                                .dependencies
+                                .values()
+                                .flatten()
+                                .cloned()
+                                .map(RootAssetRef::without_label),
+                        );
+
+                        // XXX TODO: We're not accounting for the standalone asset having
+                        // loader dependencies. Not sure if we can work them out unless
+                        // we do a fake load?
+                    }
+                }
+            }
+
+            write_pack_file(pack, pack_path).await;
+        }))
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -976,6 +1131,8 @@ impl AssetLoader for FakeAssetLoader {
 
 // XXX TODO: Review name? Does have some similarities to `AssetSource` but not
 // that much. `ActionHandler`?
+//
+// XXX TODO: Should be `pub`?
 pub trait ActionSource: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
@@ -1016,6 +1173,15 @@ pub trait ActionSource: Send + Sync + 'static {
 
     // XXX TODO: Less hacky debugging.
     fn dump_dependency_graph(&self) {}
+
+    fn publish<'a>(
+        &'a self,
+        _input: PublishInput,
+        _asset_server: &'a AssetServer,
+        _pack_path: &'a Path,
+    ) -> Option<BoxedFuture<'a, ()>> {
+        todo!("XXX TODO: What should this do by default?")
+    }
 }
 
 pub trait ActionSourceBuilder: Send + Sync + 'static {
