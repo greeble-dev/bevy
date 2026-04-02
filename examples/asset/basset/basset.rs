@@ -17,12 +17,18 @@ use bevy::{
     prelude::*,
     reflect::TypePath,
     render::render_resource::AsBindGroup,
+    tasks::block_on,
     time::common_conditions::on_timer,
 };
-use bevy_asset::{io::Writer, saver::SavedAsset, AssetPath, AsyncWriteExt};
+use bevy_asset::{
+    basset::publisher::{read_pack_file, PublishInput},
+    io::Writer,
+    saver::SavedAsset,
+    AssetPath, AsyncWriteExt,
+};
 use core::{marker::PhantomData, result::Result};
 use serde::{Deserialize, Serialize};
-use std::{boxed::Box, sync::Arc, time::Duration};
+use std::{boxed::Box, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 mod action {
     use super::*;
@@ -701,6 +707,7 @@ fn setup(
     ));
     */
 
+    /*
     commands.spawn((
         acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("scene_from_gltf.basset")),
         Transform::from_xyz(-1.0, 0.0, 0.0)
@@ -712,6 +719,7 @@ fn setup(
         Transform::from_xyz(1.0, 0.0, 0.0)
             .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
     ));
+    */
 
     commands.spawn((
         Camera3d::default(),
@@ -819,6 +827,26 @@ fn make_action<A: BassetAction>(params: &<A as BassetAction>::Params) -> AssetAc
     )
 }
 
+#[derive(PartialEq)]
+enum ArgMode {
+    Development,
+    Publish,
+    Published,
+}
+
+impl FromStr for ArgMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "development" => Ok(Self::Development),
+            "publish" => Ok(Self::Publish),
+            "published" => Ok(Self::Published),
+            _ => Err("must be 'development', 'publish', or 'published'".into()),
+        }
+    }
+}
+
 /// XXX TODO
 #[derive(FromArgs, Resource)]
 struct Args {
@@ -837,6 +865,10 @@ struct Args {
     /// XXX TODO
     #[argh(switch)]
     reload: bool,
+
+    /// XXX TODO
+    #[argh(option, default = "ArgMode::Development")]
+    mode: ArgMode,
 }
 
 fn main() {
@@ -871,53 +903,93 @@ fn main() {
     );
     */
 
-    let action_source_builder = Arc::new(DevelopmentActionSourceBuilder::new(
-        DevelopmentActionSourceSettings::default()
-            .with_file_cache_path("target/basset/cache".into())
-            .with_validate_dependency_cache(args.validate_dependency_cache)
-            .with_validate_action_cache(args.validate_action_cache)
-            .with_action(action::LoadPath)
-            .with_action(action::JoinStrings)
-            .with_action(action::UppercaseString)
-            .with_action(action::AcmeSceneFromGltf)
-            .with_action(action::MeshletFromMesh)
-            .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
-            .with_saver(demo::StringAssetSaver)
-            .with_saver(demo::IntAssetSaver)
-            .with_saver(MeshletMeshSaver)
-            .with_saver(acme::AcmeSceneAssetSaver::default()),
-    ));
+    let pack_file_path = PathBuf::from("target/basset/published.pack");
 
-    App::new()
-        .add_plugins((
-            DefaultPlugins
-                .set(AssetPlugin {
-                    file_path: "examples/asset/basset/assets".to_string(),
-                    basset_action_source_builder: Some(action_source_builder),
-                    ..default()
-                })
-                .set(LogPlugin {
-                    filter: bevy::log::DEFAULT_FILTER.to_string() + "bevy_asset::basset=debug",
-                    ..Default::default()
-                }),
-            BassetPlugin,
-            MaterialPlugin::<MeshletDebugMaterial>::default(),
-            FreeCameraPlugin,
-            MeshletPlugin {
-                cluster_buffer_slots: 1 << 14,
-            },
+    let action_source_builder: Arc<dyn ActionSourceBuilder> = if args.mode == ArgMode::Published {
+        let pack_file = block_on(read_pack_file(&pack_file_path));
+
+        Arc::new(PublishedActionSourceBuilder::new(Arc::new(pack_file)))
+    } else {
+        Arc::new(DevelopmentActionSourceBuilder::new(
+            DevelopmentActionSourceSettings::default()
+                .with_file_cache_path("target/basset/cache".into())
+                .with_validate_dependency_cache(args.validate_dependency_cache)
+                .with_validate_action_cache(args.validate_action_cache)
+                .with_action(action::LoadPath)
+                .with_action(action::JoinStrings)
+                .with_action(action::UppercaseString)
+                .with_action(action::AcmeSceneFromGltf)
+                .with_action(action::MeshletFromMesh)
+                .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
+                .with_saver(demo::StringAssetSaver)
+                .with_saver(demo::IntAssetSaver)
+                .with_saver(MeshletMeshSaver)
+                .with_saver(acme::AcmeSceneAssetSaver::default()),
         ))
-        .init_asset::<demo::StringAsset>()
-        .init_asset::<demo::IntAsset>()
-        .init_asset::<acme::AcmeScene>()
-        .register_asset_loader(demo::StringAssetLoader)
-        .register_asset_loader(demo::IntAssetLoader)
-        .register_asset_loader(acme::AcmeSceneAssetLoader::default())
-        .add_systems(Startup, setup)
-        .add_systems(Update, print)
-        .add_systems(Update, reload.run_if(on_timer(Duration::from_secs(2))))
-        .add_systems(Update, dump.run_if(on_timer(Duration::from_secs(4))))
-        .add_systems(Update, acme::tick_scene_spawners)
-        .insert_resource(args)
-        .run();
+    };
+
+    let mut app = App::new();
+
+    app.add_plugins((
+        DefaultPlugins
+            .set(AssetPlugin {
+                file_path: "examples/asset/basset/assets".to_string(),
+                basset_action_source_builder: Some(action_source_builder),
+                ..default()
+            })
+            .set(LogPlugin {
+                filter: bevy::log::DEFAULT_FILTER.to_string() + "bevy_asset::basset=debug",
+                ..Default::default()
+            }),
+        BassetPlugin,
+        MaterialPlugin::<MeshletDebugMaterial>::default(),
+        FreeCameraPlugin,
+        MeshletPlugin {
+            cluster_buffer_slots: 1 << 14,
+        },
+    ))
+    .init_asset::<demo::StringAsset>()
+    .init_asset::<demo::IntAsset>()
+    .init_asset::<acme::AcmeScene>()
+    .register_asset_loader(demo::StringAssetLoader)
+    .register_asset_loader(demo::IntAssetLoader)
+    .register_asset_loader(acme::AcmeSceneAssetLoader::default());
+
+    match args.mode {
+        ArgMode::Development | ArgMode::Published => {
+            app.add_systems(Startup, setup)
+                .add_systems(Update, print)
+                .add_systems(Update, reload.run_if(on_timer(Duration::from_secs(2))))
+                .add_systems(Update, dump.run_if(on_timer(Duration::from_secs(4))))
+                .add_systems(Update, acme::tick_scene_spawners)
+                .insert_resource(args)
+                .run();
+        }
+
+        ArgMode::Publish => {
+            app.finish();
+
+            let asset_server = app.world().resource::<AssetServer>();
+
+            let input = PublishInput {
+                paths: vec![
+                    "join_strings.basset".into(),
+                    AssetAction2::new(
+                        "basset::action::JoinStrings".into(),
+                        ron::value::RawValue::from_boxed_ron(INLINE_JOIN_STRINGS_RON.into())
+                            .unwrap(),
+                        None,
+                    )
+                    .into(),
+                ],
+            };
+
+            block_on(
+                asset_server
+                    .basset_action_source()
+                    .publish(input, asset_server, &pack_file_path)
+                    .expect("XXX TODO"),
+            );
+        }
+    }
 }

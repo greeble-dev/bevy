@@ -42,15 +42,17 @@ use serde::{Deserialize, Serialize};
 use std::{
     format,
     path::{Path, PathBuf},
+    time::Instant,
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 mod blob;
 mod cache;
 mod dependency_graph;
-mod publisher;
+pub mod publisher;
 mod standalone;
 
+// XXX TODO: Is this necessary any more? Maybe just fold into `AssetPlugin`.
 pub struct BassetPlugin;
 
 impl Plugin for BassetPlugin {
@@ -803,6 +805,10 @@ impl ActionSource for DevelopmentActionSource {
         pack_path: &'a Path,
     ) -> Option<BoxedFuture<'a, ()>> {
         Some(Box::pin(async move {
+            let begin_time = Instant::now();
+
+            std::dbg!(&input);
+
             let mut pack = WritablePackFile::default();
 
             // Assets that have already been published to `pack`.
@@ -942,9 +948,18 @@ impl ActionSource for DevelopmentActionSource {
                         // we do a fake load?
                     }
                 }
+
+                info!(?input_asset, "Publishing");
             }
 
+            info!("Writing pack file");
+
             write_pack_file(pack, pack_path).await;
+
+            info!(
+                "Publishing finished in {:.2}s",
+                begin_time.elapsed().as_secs()
+            );
         }))
     }
 }
@@ -1212,7 +1227,24 @@ impl ActionSource for NullActionSource {
     }
 }
 
-#[expect(unused, reason = "XXX TODO")]
+pub struct PublishedActionSourceBuilder {
+    pub pack_file: Arc<ReadablePackFile>,
+}
+
+impl PublishedActionSourceBuilder {
+    pub fn new(pack_file: Arc<ReadablePackFile>) -> Self {
+        Self { pack_file }
+    }
+}
+
+impl ActionSourceBuilder for PublishedActionSourceBuilder {
+    fn build(&self, _sources: Arc<AssetSources>) -> Arc<dyn ActionSource> {
+        Arc::new(PublishedActionSource {
+            pack_file: self.pack_file.clone(),
+        })
+    }
+}
+
 struct PublishedActionSource {
     pack_file: Arc<ReadablePackFile>,
 }

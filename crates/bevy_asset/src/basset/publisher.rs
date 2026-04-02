@@ -30,8 +30,9 @@ use std::{
 };
 use tracing::error;
 
+#[derive(Debug)]
 pub struct PublishInput {
-    pub(crate) paths: Vec<AssetRef<'static>>,
+    pub paths: Vec<AssetRef<'static>>,
 }
 
 pub(crate) struct StagedAsset {
@@ -159,7 +160,8 @@ impl<'a> ReadableStorage {
     }
 }
 
-pub(crate) struct ReadablePackFile {
+// XXX TODO: Review `pub`.
+pub struct ReadablePackFile {
     pub(crate) manifest: ReadableManifest,
     pub(crate) storage: ReadableStorage,
 }
@@ -219,7 +221,7 @@ impl<'a> ReadablePackFile {
     }
 }
 
-pub(crate) async fn read_pack_file(path: &Path) -> ReadablePackFile {
+pub async fn read_pack_file(path: &Path) -> ReadablePackFile {
     let mut file = async_fs::OpenOptions::new()
         .read(true)
         .open(&path)
@@ -372,15 +374,19 @@ pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) {
         .expect("TODO");
 
     let temp_path = path.with_extension("tmp");
+    {
+        let mut temp_file = async_fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .await
+            .expect("XXX TODO");
 
-    let mut temp_file = async_fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .await
-        .expect("XXX TODO");
+        temp_file.write_all(&file_bytes).await.expect("XXX TODO");
 
-    temp_file.write_all(&file_bytes).await.expect("XXX TODO");
+        // XXX TODO: Is this necessary?
+        temp_file.sync_all().await.expect("XXX TODO");
+    }
 
     async_fs::rename(temp_path, path).await.expect("XXX TODO");
 }

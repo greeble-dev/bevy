@@ -258,6 +258,10 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
                     .await
                     .expect("XXX TODO");
 
+                // XXX TODO: Is this necessary?
+                temp_file.sync_all().await.expect("XXX TODO");
+                drop(temp_file);
+
                 async_fs::rename(temp_path, value_path)
                     .await
                     .expect("XXX TODO");
