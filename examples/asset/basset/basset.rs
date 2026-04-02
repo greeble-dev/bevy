@@ -22,7 +22,7 @@ use bevy::{
 use bevy_asset::{io::Writer, saver::SavedAsset, AssetPath, AsyncWriteExt};
 use core::{marker::PhantomData, result::Result};
 use serde::{Deserialize, Serialize};
-use std::{boxed::Box, time::Duration};
+use std::{boxed::Box, sync::Arc, time::Duration};
 
 mod action {
     use super::*;
@@ -807,7 +807,7 @@ fn dump(mut done: Local<bool>, args: Res<Args>, asset_server: Res<AssetServer>) 
     *done = true;
 
     if args.dump_dependency_graph {
-        asset_server.basset_shared().dump_dependency_graph();
+        asset_server.basset_action_source().dump_dependency_graph();
     }
 }
 
@@ -871,27 +871,29 @@ fn main() {
     );
     */
 
-    let basset_settings = BassetSettings::default()
-        .with_file_cache_path("target/basset/cache".into())
-        .with_validate_dependency_cache(args.validate_dependency_cache)
-        .with_validate_action_cache(args.validate_action_cache)
-        .with_action(action::LoadPath)
-        .with_action(action::JoinStrings)
-        .with_action(action::UppercaseString)
-        .with_action(action::AcmeSceneFromGltf)
-        .with_action(action::MeshletFromMesh)
-        .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
-        .with_saver(demo::StringAssetSaver)
-        .with_saver(demo::IntAssetSaver)
-        .with_saver(MeshletMeshSaver)
-        .with_saver(acme::AcmeSceneAssetSaver::default());
+    let action_source_builder = Arc::new(DevelopmentActionSourceBuilder::new(
+        DevelopmentActionSourceSettings::default()
+            .with_file_cache_path("target/basset/cache".into())
+            .with_validate_dependency_cache(args.validate_dependency_cache)
+            .with_validate_action_cache(args.validate_action_cache)
+            .with_action(action::LoadPath)
+            .with_action(action::JoinStrings)
+            .with_action(action::UppercaseString)
+            .with_action(action::AcmeSceneFromGltf)
+            .with_action(action::MeshletFromMesh)
+            .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
+            .with_saver(demo::StringAssetSaver)
+            .with_saver(demo::IntAssetSaver)
+            .with_saver(MeshletMeshSaver)
+            .with_saver(acme::AcmeSceneAssetSaver::default()),
+    ));
 
     App::new()
         .add_plugins((
             DefaultPlugins
                 .set(AssetPlugin {
                     file_path: "examples/asset/basset/assets".to_string(),
-                    basset_settings: basset_settings.into(),
+                    basset_action_source_builder: Some(action_source_builder),
                     ..default()
                 })
                 .set(LogPlugin {

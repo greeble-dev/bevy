@@ -45,7 +45,6 @@ pub use log::*;
 pub use process::*;
 
 use crate::{
-    basset::{BassetSettings, BassetShared},
     io::{
         AssetReaderError, AssetSource, AssetSourceBuilders, AssetSourceEvent, AssetSourceId,
         AssetSources, AssetWriterError, ErasedAssetReader, MissingAssetSourceError,
@@ -175,12 +174,10 @@ impl AssetProcessor {
             AssetMetaCheck::Always,
             false,
             UnapprovedPathMode::default(),
-            // XXX TODO: Review? Unsure if we want to try and keep regular asset processing
+            // XXX TODO: Review if we're ok to use the null action source?
+            // Unsure if we want to try and keep regular asset processing
             // working.
-            Arc::new(BassetShared::new(
-                Arc::new(BassetSettings::default()),
-                sources.clone(),
-            )),
+            None,
         );
         (Self { server, data }, sources)
     }

@@ -2,7 +2,10 @@ mod info;
 mod loaders;
 
 use crate::{
-    basset::{BassetShared, RootAssetAction2, RootAssetPath, RootAssetRef},
+    basset::{
+        ActionSource, ActionSourceBuilder, NullActionSource, RootAssetAction2, RootAssetPath,
+        RootAssetRef,
+    },
     folder::LoadedFolder,
     io::{
         AssetReaderError, AssetSource, AssetSourceEvent, AssetSourceId, AssetSources,
@@ -74,7 +77,7 @@ pub(crate) struct AssetServerData {
     mode: AssetServerMode,
     meta_check: AssetMetaCheck,
     unapproved_path_mode: UnapprovedPathMode,
-    basset_shared: Arc<BassetShared>,
+    basset_action_source: Arc<dyn ActionSource>,
 }
 
 /// The "asset mode" the server is currently in.
@@ -97,7 +100,7 @@ impl AssetServer {
         mode: AssetServerMode,
         watching_for_changes: bool,
         unapproved_path_mode: UnapprovedPathMode,
-        basset_shared: Arc<BassetShared>,
+        basset_action_source_builder: Option<Arc<dyn ActionSourceBuilder>>,
     ) -> Self {
         Self::new_with_loaders(
             sources,
@@ -106,7 +109,7 @@ impl AssetServer {
             AssetMetaCheck::Always,
             watching_for_changes,
             unapproved_path_mode,
-            basset_shared,
+            basset_action_source_builder,
         )
     }
 
@@ -118,7 +121,7 @@ impl AssetServer {
         meta_check: AssetMetaCheck,
         watching_for_changes: bool,
         unapproved_path_mode: UnapprovedPathMode,
-        basset_shared: Arc<BassetShared>,
+        basset_action_source_builder: Option<Arc<dyn ActionSourceBuilder>>,
     ) -> Self {
         Self::new_with_loaders(
             sources,
@@ -127,7 +130,7 @@ impl AssetServer {
             meta_check,
             watching_for_changes,
             unapproved_path_mode,
-            basset_shared,
+            basset_action_source_builder,
         )
     }
 
@@ -138,11 +141,15 @@ impl AssetServer {
         meta_check: AssetMetaCheck,
         watching_for_changes: bool,
         unapproved_path_mode: UnapprovedPathMode,
-        basset_shared: Arc<BassetShared>,
+        basset_action_source_builder: Option<Arc<dyn ActionSourceBuilder>>,
     ) -> Self {
         let (asset_event_sender, asset_event_receiver) = crossbeam_channel::unbounded();
         let mut infos = AssetInfos::default();
         infos.watching_for_changes = watching_for_changes;
+
+        let basset_action_source = basset_action_source_builder
+            .map(|s| s.build(sources.clone()))
+            .unwrap_or_else(|| Arc::new(NullActionSource));
         Self {
             data: Arc::new(AssetServerData {
                 sources,
@@ -153,7 +160,7 @@ impl AssetServer {
                 loaders,
                 infos: RwLock::new(infos),
                 unapproved_path_mode,
-                basset_shared,
+                basset_action_source,
             }),
         }
     }
@@ -946,7 +953,7 @@ impl AssetServer {
         } else {
             // XXX TODO: What if happens if the input handle is `None`? Can't
             // create here as we don't know the type yet.
-            todo!();
+            todo!("XXX TODO");
             /*
             if input_handle.is_none() {
                 let mut infos = self.write_infos();
@@ -975,11 +982,15 @@ impl AssetServer {
             // XXX TODO: Need to work out the label's handle. See similar code
             // in load_internal_path where it checks `if path.label().is_some`.
             // Or maybe we can only do this after loading?
-            todo!();
+            todo!("XXX TODO");
         }
 
-        // XXX TODO: Try to avoid clone?
-        match crate::basset::load_action(self, &RootAssetAction2::without_label(action)).await {
+        // XXX TODO: Try to avoid clone in `without_label`?
+        match self
+            .basset_action_source()
+            .apply(&RootAssetAction2::without_label(action), self)
+            .await
+        {
             Ok(asset) => {
                 // XXX TODO: Sub-asset handling.
                 let final_handle = fetched_handle;
@@ -1002,7 +1013,7 @@ impl AssetServer {
                 Ok(final_handle)
             }
             Err(_) => {
-                todo!()
+                todo!("XXX TODO");
             }
         }
     }
@@ -1735,17 +1746,17 @@ impl AssetServer {
                 })
             });
 
-        if update_dependency_cache && let Ok(asset) = &result {
-            self.basset_shared()
-                .register_dependencies(
-                    &RootAssetRef::from(
-                        RootAssetPath::try_from(asset_path)
-                            .expect("XXX TODO: Can we assume no label?"),
-                    ),
-                    Some(settings),
-                    asset,
-                )
-                .await;
+        if update_dependency_cache
+            && let Ok(asset) = &result
+            && let Some(future) = self.basset_action_source().register_dependencies(
+                &RootAssetRef::from(
+                    RootAssetPath::try_from(asset_path).expect("XXX TODO: Can we assume no label?"),
+                ),
+                Some(settings),
+                asset,
+            )
+        {
+            future.await;
         }
 
         result
@@ -1925,8 +1936,8 @@ impl AssetServer {
     }
 
     // XXX TODO: Document. Review visibility.
-    pub fn basset_shared<'a>(&'a self) -> &'a Arc<BassetShared> {
-        &self.data.basset_shared
+    pub fn basset_action_source<'a>(&'a self) -> &'a Arc<dyn ActionSource> {
+        &self.data.basset_action_source
     }
 }
 

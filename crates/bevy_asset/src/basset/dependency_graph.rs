@@ -1,6 +1,6 @@
 use crate::basset::{
     cache::{ActionCacheKey, DependencyCacheKey, DependencyCacheValue, MemoryAndFileCache},
-    BassetShared, RootAssetRef,
+    DevelopmentActionSource, RootAssetRef,
 };
 use alloc::{sync::Arc, vec, vec::Vec};
 use bevy_platform::collections::HashMap;
@@ -239,7 +239,7 @@ impl DependencyGraph {
         // XXX TODO: Should we take shared? Or do we contain content cache and anything else?
         // That would fit in with invalidation on file change - we want to invalidate both
         // the dependency graph and the content cache.
-        shared: &BassetShared,
+        action_source: &DevelopmentActionSource,
     ) -> Option<ActionCacheKey> {
         let mut stack = Vec::<(RootAssetRef<'static>, Option<DependencyCacheKey>)>::new();
         let mut pending = IndexMap::<
@@ -261,7 +261,7 @@ impl DependencyGraph {
             };
 
             // XXX TODO: Settings parameter?
-            let current_dependency_key = shared.dependency_key(&path, None).await;
+            let current_dependency_key = action_source.dependency_key(&path, None).await;
 
             // The tentative dependency key came from the dependency cache. Check
             // if it matches the current file state. If not then invalidate the

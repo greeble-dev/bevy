@@ -209,7 +209,7 @@ pub mod basset;
 pub use uuid;
 
 use crate::{
-    basset::{BassetSettings, BassetShared},
+    basset::ActionSourceBuilder,
     io::{embedded::EmbeddedAssetRegistry, AssetSourceBuilder, AssetSourceBuilders, AssetSourceId},
     processor::{AssetProcessor, Process},
 };
@@ -269,7 +269,7 @@ pub struct AssetPlugin {
     // XXX TODO: Review. This is annoyingly an Arc because we can't consume it during
     // AssetPlugin::build, so we have to keep a useless reference around. Maybe missing
     // a better solution.
-    pub basset_settings: Arc<BassetSettings>,
+    pub basset_action_source_builder: Option<Arc<dyn ActionSourceBuilder>>,
 }
 
 /// Determines how to react to attempts to load assets not inside the approved folders.
@@ -349,7 +349,7 @@ impl Default for AssetPlugin {
             use_asset_processor_override: None,
             meta_check: AssetMetaCheck::default(),
             unapproved_path_mode: UnapprovedPathMode::default(),
-            basset_settings: Default::default(),
+            basset_action_source_builder: None,
         }
     }
 }
@@ -390,7 +390,7 @@ impl Plugin for AssetPlugin {
                         self.meta_check.clone(),
                         watch,
                         self.unapproved_path_mode.clone(),
-                        Arc::new(BassetShared::new(self.basset_settings.clone(), sources)),
+                        self.basset_action_source_builder.clone(),
                     ));
                 }
                 AssetMode::Processed => {
@@ -408,7 +408,7 @@ impl Plugin for AssetPlugin {
                             AssetMetaCheck::Always,
                             watch,
                             self.unapproved_path_mode.clone(),
-                            Arc::new(BassetShared::new(self.basset_settings.clone(), sources)),
+                            self.basset_action_source_builder.clone(),
                         ))
                         .insert_resource(processor)
                         .add_systems(bevy_app::Startup, AssetProcessor::start);
@@ -421,7 +421,7 @@ impl Plugin for AssetPlugin {
                             AssetMetaCheck::Always,
                             watch,
                             self.unapproved_path_mode.clone(),
-                            Arc::new(BassetShared::new(self.basset_settings.clone(), sources)),
+                            self.basset_action_source_builder.clone(),
                         ));
                     }
                 }

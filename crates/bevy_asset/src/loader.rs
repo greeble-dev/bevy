@@ -631,12 +631,15 @@ impl<'a> LoadContext<'a> {
         self.loader_dependencies
             .insert(path.clone_owned().into(), hash);
         // XXX TODO: Document.
-        self.asset_server
-            .basset_shared()
+        if let Some(future) = self
+            .asset_server
+            .basset_action_source()
             .register_bytes_dependency(&RootAssetRef::from(RootAssetPath::without_label(
                 path.clone_owned(),
             )))
-            .await;
+        {
+            future.await;
+        }
         Ok(bytes)
     }
 

@@ -3,9 +3,9 @@
 use crate::{
     basset::{
         blob::{BlobReader, BlobWriter},
-        load_action, load_path,
+        load_path,
         standalone::write_standalone_asset,
-        BassetShared, RootAssetAction2, RootAssetPath, RootAssetRef,
+        RootAssetAction2, RootAssetPath, RootAssetRef,
     },
     io::{
         AssetReader, AssetReaderError, AssetSourceBuilder, AssetSourceId, PathStream, Reader,
@@ -39,8 +39,12 @@ struct StagedAsset {
     asset_bytes: Box<[u8]>,
 }
 
+// XXX TODO: Needs major work.
+//
+// 1. Consider how to reuse dependency graph and action cache where possible.
+// 2. Multithreading.
 async fn publish(input: PublishInput, asset_server: &AssetServer, pack_path: &Path) {
-    let shared = asset_server.basset_shared();
+    let shared = asset_server.basset_action_source();
 
     let mut pack = WritablePackFile::default();
 
@@ -57,9 +61,6 @@ async fn publish(input: PublishInput, asset_server: &AssetServer, pack_path: &Pa
         .collect::<Vec<_>>();
 
     while let Some(input_asset) = input_stack.pop() {
-        // XXX TODO: Settings parameter?
-        let dependency_key = shared.dependency_key(&input_asset, None).await;
-
         // XXX TODO: Clone is annoying, but not sure it's possible to avoid
         // without doing a separate `contains` then `insert`?
         //
@@ -74,7 +75,7 @@ async fn publish(input: PublishInput, asset_server: &AssetServer, pack_path: &Pa
             RootAssetRef::Path(path) => {
                 // XXX TODO: Consider how we can avoid this load - it's only
                 // needed for discovering dependencies and getting the meta.
-                // XXX TODO: Settings?
+                // XXX TODO: Settings parameter?
                 let (loaded, loader) = load_path(asset_server, path, &None)
                     .await
                     .expect("XXX TODO");
@@ -123,7 +124,23 @@ async fn publish(input: PublishInput, asset_server: &AssetServer, pack_path: &Pa
                 );
             }
             RootAssetRef::Action(action) => {
-                let loaded = load_action(asset_server, action).await.expect("XXX TODO");
+                // XXX TODO: Can this handle actions that can't be saved?
+
+                // XXX TODO: Can this read directly out of the action cache? We're
+                // mostly replicating what that's already done. Maybe the standalone
+                // files can be organized in such a way that we can grab `meta_bytes`
+                // and `action_bytes` directly. Or maybe there's better options for
+                // copying the cache.
+
+                /*
+                xxx todo, maybe need to move this into the source? that way we reuse
+                the action cache paths
+
+                let loaded = asset_server
+                    .basset_action_source()
+                    .apply(action, asset_server)
+                    .await
+                    .expect("XXX TODO");
 
                 // XXX TODO: Decide if we try to support the original path.
                 let fake_path =
@@ -147,6 +164,12 @@ async fn publish(input: PublishInput, asset_server: &AssetServer, pack_path: &Pa
                         .await
                         .expect("XXX TODO");
                 }
+
+                */
+
+                let meta_bytes: Vec<u8> = todo!();
+                let asset_bytes: Vec<u8> = todo!();
+                let loaded: crate::ErasedLoadedAsset = todo!();
 
                 pack.actions.insert(
                     Box::<str>::from(action.to_string()),
