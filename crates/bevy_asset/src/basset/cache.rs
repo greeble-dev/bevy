@@ -237,9 +237,9 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
             .spawn(async move {
                 // XXX TODO: Early out if file already exists?
 
-                async_fs::create_dir_all(value_path.parent().expect("TODO"))
+                async_fs::create_dir_all(value_path.parent().expect("XXX TODO"))
                     .await
-                    .expect("TODO");
+                    .expect("XXX TODO");
 
                 let temp_path = value_path.with_extension("tmp");
 
@@ -256,11 +256,11 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
 
                 <V as FileCacheValue>::write(&value, &mut temp_file)
                     .await
-                    .expect("TODO");
+                    .expect("XXX TODO");
 
                 async_fs::rename(temp_path, value_path)
                     .await
-                    .expect("TODO, this is ok to fail?");
+                    .expect("XXX TODO");
             })
             .detach();
     }

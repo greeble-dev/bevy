@@ -43,6 +43,7 @@ impl<'a> BlobReader<'a> {
         Some(u16::from_le_bytes(bytes))
     }
 
+    #[expect(unused, reason = "XXX TODO")]
     pub fn string(&mut self) -> Option<&'a str> {
         let len = self.u64()? as usize;
         str::from_utf8(self.bytes(len)?).ok()
@@ -75,6 +76,7 @@ impl<'a> BlobWriter<'a> {
         self.writer.write_all(&value.to_le_bytes()).expect("TODO");
     }
 
+    #[expect(unused, reason = "XXX TODO")]
     pub fn string(&mut self, string: &str) {
         self.bytes_sized(string.as_bytes());
     }

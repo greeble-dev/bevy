@@ -7,9 +7,11 @@ use crate::{
             MemoryAndFileCache,
         },
         dependency_graph::DependencyGraph,
+        publisher::ReadablePackFile,
         standalone::{read_standalone_asset, write_standalone_asset},
     },
     io::{AssetSourceId, AssetSources},
+    meta::{AssetActionMinimal, AssetMetaMinimal},
     Asset, AssetApp, AssetContainer, AssetServer, DeserializeMetaError, LabeledAsset,
     UntypedAssetId,
 };
@@ -55,6 +57,10 @@ impl Plugin for BassetPlugin {
 }
 
 /// An `AssetPath` without a label.
+//
+// XXX TODO: Maybe think more about the name. "root asset" does match other parts
+// of the asset system, but it's a bit ambiguous. E.g. publishing wants a list
+// of "root assets", but they're the roots of the publishing tree.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug)]
 pub struct RootAssetPath<'a> {
     source: AssetSourceId<'a>,
@@ -576,7 +582,7 @@ impl BassetShared {
             hasher.update(&content_hash.as_bytes());
         }
 
-        // XXX TODO: Loader version.
+        // XXX TODO: Should include loader versions.
 
         DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
     }
@@ -776,16 +782,17 @@ async fn load_ref(
     path: &RootAssetRef<'static>,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     match path {
-        RootAssetRef::Path(path) => load_path(asset_server, path, &None).await, // XXX TODO: Settings?
+        RootAssetRef::Path(path) => load_path(asset_server, path, &None).await.map(|(l, _)| l), // XXX TODO: Settings?
         RootAssetRef::Action(action) => load_action(asset_server, action).await,
     }
 }
 
+// XXX TODO: Review how we're returning the loader. Only used by publishing.
 pub(crate) async fn load_path(
     asset_server: &AssetServer,
     path: &RootAssetPath<'static>,
     settings: &Option<Box<ron::value::RawValue>>,
-) -> Result<ErasedLoadedAsset, BevyError> {
+) -> Result<(ErasedLoadedAsset, Arc<dyn ErasedAssetLoader>), BevyError> {
     // XXX TODO: Try to avoid?
     let full_path = AssetPath::from(path.clone());
 
@@ -816,7 +823,7 @@ pub(crate) async fn load_path(
         .await
         .map_err(Into::<BevyError>::into)?;
 
-    Ok(asset)
+    Ok((asset, loader.clone()))
 }
 
 pub(crate) async fn load_action(
@@ -923,5 +930,98 @@ impl AssetLoader for FakeAssetLoader {
         _load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
         Ok(())
+    }
+}
+
+// XXX TODO: Review name? Does have some similarities to `AssetSource` but not
+// that much. `ActionHandler`?
+pub trait ActionSource: Send + Sync + 'static {
+    fn load(
+        &self,
+        // XXX TODO: Review and see if we can use something narrower. Probably
+        // difficult as we need to load assets internally, but worth a check.
+        asset_server: &AssetServer,
+        action: &RootAssetAction2,
+    ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, BevyError>>;
+}
+
+#[expect(unused, reason = "XXX TODO")]
+struct DevelopmentActionSource;
+
+impl ActionSource for DevelopmentActionSource {
+    async fn load(
+        &self,
+        // XXX TODO: Review and see if we can use something narrower. Probably
+        // difficult as we need to load assets internally, but worth a check.
+        asset_server: &AssetServer,
+        action: &RootAssetAction2,
+    ) -> Result<ErasedLoadedAsset, BevyError> {
+        load_action(asset_server, action).await
+    }
+}
+
+#[expect(unused, reason = "XXX TODO")]
+struct PublishedActionSource {
+    pack_file: Arc<ReadablePackFile>,
+}
+
+impl ActionSource for PublishedActionSource {
+    async fn load(
+        &self,
+        // XXX TODO: Review and see if we can use something narrower. Probably
+        // difficult as we need to load assets internally, but worth a check.
+        asset_server: &AssetServer,
+        action: &RootAssetAction2,
+    ) -> Result<ErasedLoadedAsset, BevyError> {
+        // XXX TODO: Review how we should be referencing assets. Maybe want
+        // a distinct type for safety?
+        let action_string = action.to_string();
+
+        // XXX TODO: The below duplicates a fair amount of `read_standalone_asset`.
+        // Refactor?
+
+        let mut meta_reader = self.pack_file.action_meta(&action_string)?;
+        let mut meta_bytes = Vec::<u8>::new();
+        meta_reader.read_to_end(&mut meta_bytes).await?;
+
+        let minimal_meta = ron::de::from_bytes::<AssetMetaMinimal>(&meta_bytes).expect("XXX TODO");
+
+        let loader_name = match &minimal_meta.asset {
+            AssetActionMinimal::Load { loader } => loader.as_str(),
+            _ => todo!("XXX TODO"),
+        };
+
+        let loader = asset_server
+            .get_asset_loader_with_type_name(loader_name)
+            .await
+            .expect("XXX TODO");
+
+        let meta = loader.deserialize_meta(&meta_bytes).expect("XXX TODO");
+
+        let mut asset_reader = self.pack_file.action_asset(&action_string)?;
+
+        let load_dependencies = true;
+        let populate_hashes = false;
+
+        // We're in published mode, so no need to update the dependency cache.
+        //
+        // XXX TODO: Review. We're making a fragile assumption. Should this value
+        // even matter if the dependency cache isn't available?
+        let update_dependency_cache = false;
+
+        // XXX TODO: Ew? Need to decide if we try to support the original path.
+        let fake_path = AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
+
+        Ok(asset_server
+            .load_with_settings_loader_and_reader(
+                &fake_path,
+                meta.loader_settings().expect("meta is set to Load"),
+                &*loader,
+                &mut asset_reader,
+                load_dependencies,
+                populate_hashes,
+                update_dependency_cache,
+            )
+            .await?)
     }
 }

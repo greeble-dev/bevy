@@ -60,7 +60,12 @@ pub async fn read_standalone_asset(
 
     let mut reader = SliceReader::new(asset_bytes);
 
-    let load_dependencies = false;
+    // XXX TODO: What's the correct value here? If we're in an action apply
+    // context then we shouldn't load dependencies, since we only need the
+    // asset value. But if we're a regular load then we do load dependencies.
+    // Need to work up the call chain and see what the choice should be made.
+    let load_dependencies = true;
+
     let populate_hashes = false;
 
     // Don't update the dependency cache. If we're loading from the action cache
@@ -109,6 +114,9 @@ pub async fn write_standalone_asset(
     // with certain settings then we should preserve them here? There might also
     // be situations where a saver/loader pair are expecting certain settings?
     // Could get messy.
+    //
+    // XXX TODO: Consider using a custom meta rather than `AssetMeta` - we don't
+    // want processing, so we just need the equivalent of `AssetAction::Load`.
     let meta_bytes = loader.default_meta().serialize();
 
     let mut writer = Vec::<u8>::new();
