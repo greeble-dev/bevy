@@ -14,7 +14,6 @@ use crate::{
 use downcast_rs::{impl_downcast, Downcast};
 use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
-use tracing::error;
 
 pub const META_FORMAT_VERSION: &str = "1.0";
 pub type MetaTransform = Box<dyn Fn(&mut dyn AssetMetaDyn) + Send + Sync>;
@@ -234,28 +233,6 @@ impl AssetLoader for () {
     fn extensions(&self) -> &[&str] {
         unreachable!();
     }
-}
-
-pub(crate) fn meta_transform_settings<S: Settings>(
-    meta: &mut dyn AssetMetaDyn,
-    settings: &(impl Fn(&mut S) + Send + Sync + 'static),
-) {
-    if let Some(loader_settings) = meta.loader_settings_mut() {
-        if let Some(loader_settings) = loader_settings.downcast_mut::<S>() {
-            settings(loader_settings);
-        } else {
-            error!(
-                "Configured settings type {} does not match AssetLoader settings type",
-                core::any::type_name::<S>(),
-            );
-        }
-    }
-}
-
-pub(crate) fn loader_settings_meta_transform<S: Settings>(
-    settings: impl Fn(&mut S) + Send + Sync + 'static,
-) -> MetaTransform {
-    Box::new(move |meta| meta_transform_settings(meta, &settings))
 }
 
 pub type AssetHash = [u8; 32];

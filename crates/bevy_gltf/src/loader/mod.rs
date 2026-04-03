@@ -2014,14 +2014,13 @@ impl ImageOrPath {
                 is_srgb,
                 sampler_descriptor,
                 render_asset_usages,
-            } => load_context
-                .loader()
-                .with_settings(move |settings: &mut ImageLoaderSettings| {
+            } => load_context.loader().load(path.with_settings(
+                move |settings: &mut ImageLoaderSettings| {
                     settings.is_srgb = is_srgb;
                     settings.sampler = ImageSampler::Descriptor(sampler_descriptor.clone());
                     settings.asset_usage = render_asset_usages;
-                })
-                .load(path),
+                },
+            )),
         };
         handles.push(handle);
     }

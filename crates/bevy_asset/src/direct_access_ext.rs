@@ -2,8 +2,9 @@
 //! you have is a `World`.
 
 use bevy_ecs::world::World;
+use serde::Serialize;
 
-use crate::{meta::Settings, Asset, AssetPath, AssetRef, AssetServer, Assets, Handle};
+use crate::{meta::Settings, Asset, AssetPath, AssetServer, Assets, Handle};
 
 /// An extension trait for methods for working with assets directly from a [`World`].
 pub trait DirectAssetAccessExt {
@@ -14,9 +15,9 @@ pub trait DirectAssetAccessExt {
     fn load_asset<'a, A: Asset>(&self, path: impl Into<AssetPath<'a>>) -> Handle<A>; // XXX TODO: Should this function take an `AssetRef`?
 
     /// Load an asset with settings, similarly to [`AssetServer::load_with_settings`].
-    fn load_asset_with_settings<'a, A: Asset, S: Settings>(
+    fn load_asset_with_settings<'a, A: Asset, S: Settings + Serialize + Default>(
         &self,
-        path: impl Into<AssetRef<'a>>,
+        path: impl Into<AssetPath<'a>>,
         settings: impl Fn(&mut S) + Send + Sync + 'static,
     ) -> Handle<A>;
 }
@@ -41,9 +42,9 @@ impl DirectAssetAccessExt for World {
     ///
     /// # Panics
     /// If `self` doesn't have an [`AssetServer`] resource initialized yet.
-    fn load_asset_with_settings<'a, A: Asset, S: Settings>(
+    fn load_asset_with_settings<'a, A: Asset, S: Settings + Serialize + Default>(
         &self,
-        path: impl Into<AssetRef<'a>>,
+        path: impl Into<AssetPath<'a>>,
         settings: impl Fn(&mut S) + Send + Sync + 'static,
     ) -> Handle<A> {
         self.resource::<AssetServer>()

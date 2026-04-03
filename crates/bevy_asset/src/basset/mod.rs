@@ -434,13 +434,35 @@ where
     }
 }
 
-#[derive(Default)]
 pub struct DevelopmentActionSourceSettings {
     file_cache_path: Option<PathBuf>,
     validate_dependency_cache: bool,
     validate_action_cache: bool,
     action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
+}
+
+impl Default for DevelopmentActionSourceSettings {
+    fn default() -> Self {
+        let mut action_type_name_to_action =
+            HashMap::<&'static str, Box<dyn ErasedBassetAction>>::new();
+
+        // XXX TODO: Review if we should be doing this. Maybe should be added
+        // afterwards so it's not exposed to the user. Maybe shouldn't even go
+        // in here since it could be special cases?
+        action_type_name_to_action.insert(
+            core::any::type_name::<action::LoadPath>(),
+            Box::new(action::LoadPath),
+        );
+
+        Self {
+            file_cache_path: Default::default(),
+            validate_dependency_cache: Default::default(),
+            validate_action_cache: Default::default(),
+            action_type_name_to_action,
+            asset_type_name_to_saver: Default::default(),
+        }
+    }
 }
 
 impl DevelopmentActionSourceSettings {
@@ -1274,5 +1296,48 @@ impl ActionSource for PublishedActionSource {
                 )
                 .await?)
         })
+    }
+}
+
+pub mod action {
+    use super::*;
+    use alloc::string::String;
+
+    pub struct LoadPath;
+
+    #[derive(Serialize, Deserialize, Default)]
+    pub struct LoadPathParams {
+        // XXX TODO: Should be RootAssetPath? Avoiding for now to simplify lifetimes and defaults.
+        pub path: String,
+        #[serde(default)]
+        pub loader_settings: Option<Box<ron::value::RawValue>>,
+        // XXX TODO?
+        //loader_name: Option<String>,
+    }
+
+    impl BassetAction for LoadPath {
+        type Params = LoadPathParams;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            mut context: ApplyContext<'_>,
+            params: &Self::Params,
+        ) -> Result<ErasedLoadedAsset, Self::Error> {
+            // XXX TODO: Try to avoid clones? But will mean changing lifetimes
+            // of `BassetAction::apply`.
+            let path = AssetPath::parse(&params.path).into_owned();
+
+            // XXX TODO: Selecting a subasset should be done by the `AssetAction2::label`,
+            // not here. How do we make this more robust?
+            assert!(path.label().is_none());
+
+            let settings = params.loader_settings.clone();
+
+            context.erased_load_dependee_path(&path, &settings).await
+
+            // XXX TODO: Note that we're not calling `context.finish()`. Probably
+            // correct but double check.
+        }
     }
 }

@@ -31,42 +31,10 @@ use bevy_asset::{
 };
 use core::{marker::PhantomData, result::Result};
 use serde::{Deserialize, Serialize};
-use std::{any::TypeId, boxed::Box, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 mod action {
     use super::*;
-
-    pub struct LoadPath;
-
-    #[derive(Serialize, Deserialize, Default)]
-    pub struct LoadPathParams {
-        pub path: String, // XXX TODO: Should be AssetPath. Avoiding for now to simplify lifetimes.
-        #[serde(default)]
-        pub loader_settings: Option<Box<ron::value::RawValue>>,
-        // XXX TODO?
-        //loader_name: Option<String>,
-    }
-
-    impl BassetAction for LoadPath {
-        type Params = LoadPathParams;
-        type Error = BevyError;
-
-        async fn apply(
-            &self,
-            mut context: ApplyContext<'_>,
-            params: &Self::Params,
-        ) -> Result<ErasedLoadedAsset, Self::Error> {
-            // XXX TODO: Try to avoid clones? But will mean changing lifetimes
-            // of `BassetAction::apply`.
-            let path = AssetPath::parse(&params.path).into_owned();
-            let settings = params.loader_settings.clone();
-
-            context.erased_load_dependee_path(&path, &settings).await
-
-            // XXX TODO: Note that we're not calling `context.finish()`. Probably
-            // correct but double check.
-        }
-    }
 
     pub struct JoinStrings;
 
@@ -434,10 +402,6 @@ where
 mod acme {
     use super::*;
     use bevy::pbr::experimental::meshlet::MeshletMesh3d;
-    use bevy_image::{
-        ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler,
-        ImageSamplerDescriptor,
-    };
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMesh {
@@ -452,7 +416,6 @@ mod acme {
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMaterial {
         pub base_color_texture: Option<AssetRef<'static>>,
-        pub base_color_texture_sampler: Option<ImageSampler>,
     }
 
     #[derive(Serialize, Deserialize, Default, Debug)]
@@ -481,15 +444,15 @@ mod acme {
     ) -> &'a T {
         asset
             .get_labeled_by_id(sub_asset_handle.id().untyped())
-            .expect("TODO")
+            .expect("XXX TODO")
             .get::<T>()
-            .expect("TODO")
+            .expect("XXX TODO")
     }
 
     pub fn from_gltf(asset: &ErasedLoadedAsset) -> AcmeScene {
         let mut entities = Vec::<AcmeEntity>::new();
 
-        let gltf = asset.get::<Gltf>().expect("TODO");
+        let gltf = asset.get::<Gltf>().expect("XXX TODO");
 
         // Add all the root nodes to the stack.
         let mut stack = gltf
@@ -518,36 +481,17 @@ mod acme {
             {
                 for primitive in mesh.primitives.iter() {
                     let mesh = Some(AcmeMesh {
-                        asset: primitive.mesh.path().expect("TODO").clone(),
+                        asset: primitive.mesh.path().expect("XXX TODO").clone(),
                     });
 
                     let standard_material =
-                        get_sub_asset(asset, primitive.material.as_ref().expect("TODO"));
+                        get_sub_asset(asset, primitive.material.as_ref().expect("XXX TODO"));
 
                     let material = Some(AcmeMaterial {
-                        base_color_texture: standard_material
+                        base_color_texture: std::dbg!(standard_material
                             .base_color_texture
                             .clone()
-                            .map(|p| p.path().expect("TODO").clone()),
-                        // XXX TODO: This is a temporary hack just to get `BoxTextures.gltf`
-                        // working. Should hopefully go away if `load_settings` is
-                        // changed to use an `AssetRef` internally?
-                        base_color_texture_sampler: Some(ImageSampler::Descriptor(
-                            ImageSamplerDescriptor {
-                                label: None,
-                                address_mode_u: ImageAddressMode::Repeat,
-                                address_mode_v: ImageAddressMode::Repeat,
-                                address_mode_w: ImageAddressMode::ClampToEdge,
-                                mag_filter: ImageFilterMode::Linear,
-                                min_filter: ImageFilterMode::Nearest,
-                                mipmap_filter: ImageFilterMode::Linear,
-                                lod_min_clamp: 0.0,
-                                lod_max_clamp: 32.0,
-                                compare: None,
-                                anisotropy_clamp: 1,
-                                border_color: None,
-                            },
-                        )),
+                            .map(|p| p.path().expect("XXX TODO").clone())),
                     });
 
                     entities.push(AcmeEntity {
@@ -592,22 +536,11 @@ mod acme {
                     meshlet_debug_material_assets.add(MeshletDebugMaterial::default()),
                 ));
             } else if let Some(material) = &scene_entity.material {
-                let sampler = material
-                    .base_color_texture_sampler
-                    .clone()
-                    .unwrap_or_default();
-
                 let standard_material = StandardMaterial {
-                    base_color_texture: material.base_color_texture.as_ref().map(|p| {
-                        asset_server.load_with_settings::<Image, ImageLoaderSettings>(
-                            p,
-                            move |settings: &mut ImageLoaderSettings| {
-                                // XXX TODO: How do we get `is_srgb` right?
-                                settings.is_srgb = true;
-                                settings.sampler = sampler.clone();
-                            },
-                        )
-                    }),
+                    base_color_texture: material
+                        .base_color_texture
+                        .as_ref()
+                        .map(|p| asset_server.load(p)),
                     ..Default::default()
                 };
 
@@ -935,7 +868,7 @@ fn main() {
             // (TypeId::of::<demo::StringAsset>(), "world.string".into()),
             // (TypeId::of::<demo::IntAsset>(), "1234.int".into()),
             // (TypeId::of::<demo::IntAsset>(), "int.basset".into()),
-            (TypeId::of::<demo::StringAsset>(), "string.basset".into()),
+            // (TypeId::of::<demo::StringAsset>(), "string.basset".into()),
             (
                 TypeId::of::<demo::StringAsset>(),
                 "string_loader_uppercase.basset".into(),
@@ -955,11 +888,11 @@ fn main() {
             // ),
         ],
         scenes: vec![
-            // (
-            //     "scene_from_gltf_with_dependencies.basset".into(),
-            //     Transform::from_xyz(-1.0, 1.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
+            (
+                "scene_from_gltf_with_dependencies.basset".into(),
+                Transform::from_xyz(-1.0, 1.0, 0.0)
+                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            ),
             // (
             //     "scene_from_gltf.basset".into(),
             //     Transform::from_xyz(-1.0, 0.0, 0.0)
@@ -1000,7 +933,6 @@ fn main() {
                     .with_file_cache_path("target/basset/cache".into())
                     .with_validate_dependency_cache(args.validate_dependency_cache)
                     .with_validate_action_cache(args.validate_action_cache)
-                    .with_action(action::LoadPath)
                     .with_action(action::JoinStrings)
                     .with_action(action::UppercaseString)
                     .with_action(action::AcmeSceneFromGltf)

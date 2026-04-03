@@ -383,7 +383,7 @@ pub enum LoadDirectError {
     RequestedSubasset(AssetPath<'static>),
     #[error("Failed to load dependency {dependency:?} {error}")]
     LoadError {
-        dependency: AssetPath<'static>,
+        dependency: AssetRef<'static>,
         error: AssetLoadError,
     },
 }
@@ -718,7 +718,7 @@ impl<'a> LoadContext<'a> {
             )
             .await
             .map_err(|error| LoadDirectError::LoadError {
-                dependency: path.clone(),
+                dependency: path.clone().into(),
                 error,
             })?;
         let hash = processed_info.map(|i| i.full_hash).unwrap_or_default();
@@ -740,7 +740,7 @@ impl<'a> LoadContext<'a> {
     /// a load will not be kicked off automatically. It is then the calling context's responsibility to begin a load if necessary.
     ///
     /// If you need to override asset settings, asset type, or load directly, please see [`LoadContext::loader`].
-    pub fn load<'b, A: Asset>(&mut self, path: impl Into<AssetPath<'b>>) -> Handle<A> {
+    pub fn load<'b, A: Asset>(&mut self, path: impl Into<AssetRef<'b>>) -> Handle<A> {
         self.loader().load(path)
     }
 

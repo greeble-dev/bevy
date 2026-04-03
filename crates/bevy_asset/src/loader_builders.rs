@@ -2,9 +2,7 @@
 //! [`LoadContext::loader`].
 
 use crate::{
-    io::Reader,
-    meta::{meta_transform_settings, AssetMetaDyn, MetaTransform, Settings},
-    Asset, AssetLoadError, AssetPath, AssetRef, ErasedAssetLoader, ErasedLoadedAsset, Handle,
+    io::Reader, Asset, AssetLoadError, AssetRef, ErasedAssetLoader, ErasedLoadedAsset, Handle,
     LoadContext, LoadDirectError, LoadedAsset, LoadedUntypedAsset, UntypedHandle,
 };
 use alloc::{borrow::ToOwned, boxed::Box, sync::Arc};
@@ -117,7 +115,6 @@ impl ReaderRef<'_> {
 /// [`LoadTransformAndSave`]: crate::processor::LoadTransformAndSave
 pub struct NestedLoader<'ctx, 'builder, T, M> {
     load_context: &'builder mut LoadContext<'ctx>,
-    meta_transform: Option<MetaTransform>,
     typing: T,
     mode: M,
 }
@@ -168,7 +165,6 @@ impl<'ctx, 'builder> NestedLoader<'ctx, 'builder, StaticTyped, Deferred> {
     pub(crate) fn new(load_context: &'builder mut LoadContext<'ctx>) -> Self {
         NestedLoader {
             load_context,
-            meta_transform: None,
             typing: StaticTyped(()),
             mode: Deferred(()),
         }
@@ -176,36 +172,6 @@ impl<'ctx, 'builder> NestedLoader<'ctx, 'builder, StaticTyped, Deferred> {
 }
 
 impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'builder, T, M> {
-    // XXX TODO: Review if this can be pub.
-    pub fn with_transform(
-        mut self,
-        transform: impl Fn(&mut dyn AssetMetaDyn) + Send + Sync + 'static,
-    ) -> Self {
-        if let Some(prev_transform) = self.meta_transform {
-            self.meta_transform = Some(Box::new(move |meta| {
-                prev_transform(meta);
-                transform(meta);
-            }));
-        } else {
-            self.meta_transform = Some(Box::new(transform));
-        }
-        self
-    }
-
-    /// Configure the settings used to load the asset.
-    ///
-    /// If the settings type `S` does not match the settings expected by `A`'s asset loader, an error will be printed to the log
-    /// and the asset load will fail.
-    #[must_use]
-    pub fn with_settings<S: Settings>(
-        self,
-        settings: impl Fn(&mut S) + Send + Sync + 'static,
-    ) -> Self {
-        self.with_transform(move |meta| meta_transform_settings(meta, &settings))
-    }
-
-    // convert between `T`s
-
     /// When [`load`]ing, you must pass in the asset type as a type parameter
     /// statically.
     ///
@@ -219,7 +185,6 @@ impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'bui
     pub fn with_static_type(self) -> NestedLoader<'ctx, 'builder, StaticTyped, M> {
         NestedLoader {
             load_context: self.load_context,
-            meta_transform: self.meta_transform,
             typing: StaticTyped(()),
             mode: self.mode,
         }
@@ -236,7 +201,6 @@ impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'bui
     ) -> NestedLoader<'ctx, 'builder, DynamicTyped, M> {
         NestedLoader {
             load_context: self.load_context,
-            meta_transform: self.meta_transform,
             typing: DynamicTyped { asset_type_id },
             mode: self.mode,
         }
@@ -250,7 +214,6 @@ impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'bui
     pub fn with_unknown_type(self) -> NestedLoader<'ctx, 'builder, UnknownTyped, M> {
         NestedLoader {
             load_context: self.load_context,
-            meta_transform: self.meta_transform,
             typing: UnknownTyped(()),
             mode: self.mode,
         }
@@ -265,7 +228,6 @@ impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'bui
     pub fn deferred(self) -> NestedLoader<'ctx, 'builder, T, Deferred> {
         NestedLoader {
             load_context: self.load_context,
-            meta_transform: self.meta_transform,
             typing: self.typing,
             mode: Deferred(()),
         }
@@ -282,7 +244,6 @@ impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'bui
     pub fn immediate<'c>(self) -> NestedLoader<'ctx, 'builder, T, Immediate<'builder, 'c>> {
         NestedLoader {
             load_context: self.load_context,
-            meta_transform: self.meta_transform,
             typing: self.typing,
             mode: Immediate { reader: None },
         }
@@ -303,26 +264,21 @@ impl NestedLoader<'_, '_, StaticTyped, Deferred> {
     ///
     /// [`with_dynamic_type`]: Self::with_dynamic_type
     /// [`with_unknown_type`]: Self::with_unknown_type
-    pub fn load<'c, A: Asset>(self, path: impl Into<AssetPath<'c>>) -> Handle<A> {
+    pub fn load<'c, A: Asset>(self, path: impl Into<AssetRef<'c>>) -> Handle<A> {
         let path = path.into().to_owned();
         let handle = if self.load_context.should_load_dependencies {
-            self.load_context.asset_server.load_with_meta_transform(
-                path.clone(),
-                self.meta_transform,
-                (),
-                true,
-            )
+            self.load_context.asset_server.load(path.clone())
         } else {
             self.load_context
                 .asset_server
-                .get_or_create_path_handle(path.clone(), self.meta_transform)
+                .get_or_create_path_handle(path.clone(), None)
         };
-        // `load_with_meta_transform` and `get_or_create_path_handle` always returns a Strong
+        // `load` and `get_or_create_path_handle` always returns a Strong
         // variant, so we are safe to unwrap.
         let index = (&handle).try_into().unwrap();
         self.load_context
             .dependencies
-            .insert(index, Some(AssetRef::from(path.into_owned())));
+            .insert(index, Some(path.into_owned()));
         handle
     }
 }
@@ -340,27 +296,17 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
         let handle = if self.load_context.should_load_dependencies {
             self.load_context
                 .asset_server
-                .load_erased_with_meta_transform(
-                    path.clone(),
-                    self.typing.asset_type_id,
-                    self.meta_transform,
-                    (),
-                )
+                .load_erased(self.typing.asset_type_id, path.clone())
         } else {
             self.load_context
                 .asset_server
-                .get_or_create_path_handle_erased(
-                    path.clone(),
-                    self.typing.asset_type_id,
-                    self.meta_transform,
-                )
+                .get_or_create_path_handle_erased(path.clone(), self.typing.asset_type_id, None)
         };
         // `load_erased_with_meta_transform` and `get_or_create_path_handle_erased` always returns a
         // Strong variant, so we are safe to unwrap.
         let index = (&handle).try_into().unwrap();
         self.load_context
             .dependencies
-            // XXX TODO: Review clones.
             .insert(index, Some(path.into_owned()));
         handle
     }
@@ -371,23 +317,23 @@ impl NestedLoader<'_, '_, UnknownTyped, Deferred> {
     /// a dependency of this asset.
     ///
     /// This will infer the asset type from metadata.
-    pub fn load<'p>(self, path: impl Into<AssetPath<'p>>) -> Handle<LoadedUntypedAsset> {
+    pub fn load<'p>(self, path: impl Into<AssetRef<'p>>) -> Handle<LoadedUntypedAsset> {
         let path = path.into().to_owned();
         let handle = if self.load_context.should_load_dependencies {
             self.load_context
                 .asset_server
-                .load_unknown_type_with_meta_transform(path.clone(), self.meta_transform)
+                .load_unknown_type_with_meta_transform(path.clone(), None)
         } else {
             self.load_context
                 .asset_server
-                .get_or_create_path_handle(path.clone(), self.meta_transform)
+                .get_or_create_path_handle(path.clone(), None)
         };
         // `load_unknown_type_with_meta_transform` and `get_or_create_path_handle` always returns a
         // Strong variant, so we are safe to unwrap.
         let index = (&handle).try_into().unwrap();
         self.load_context
             .dependencies
-            .insert(index, Some(AssetRef::from(path.into_owned())));
+            .insert(index, Some(path.into_owned()));
         handle
     }
 }
@@ -404,9 +350,12 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
 
     async fn load_internal(
         self,
-        path: &AssetPath<'static>,
+        path: &AssetRef<'static>,
         asset_type_id: Option<TypeId>,
     ) -> Result<(Arc<dyn ErasedAssetLoader>, ErasedLoadedAsset), LoadDirectError> {
+        // XXX TODO: Support `AssetRef`.
+        let path = &path.path().expect("XXX TODO").clone_owned();
+
         if path.label().is_some() {
             return Err(LoadDirectError::RequestedSubasset(path.clone()));
         }
@@ -415,14 +364,14 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
             .write_infos()
             .stats
             .started_load_tasks += 1;
-        let (mut meta, loader, mut reader) = if let Some(reader) = self.mode.reader {
+        let (meta, loader, mut reader) = if let Some(reader) = self.mode.reader {
             let loader = if let Some(asset_type_id) = asset_type_id {
                 self.load_context
                     .asset_server
                     .get_asset_loader_with_asset_type_id(asset_type_id)
                     .await
                     .map_err(|error| LoadDirectError::LoadError {
-                        dependency: path.clone(),
+                        dependency: path.clone().into(),
                         error: error.into(),
                     })?
             } else {
@@ -431,7 +380,7 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
                     .get_path_asset_loader(path)
                     .await
                     .map_err(|error| LoadDirectError::LoadError {
-                        dependency: path.clone(),
+                        dependency: path.clone().into(),
                         error: error.into(),
                     })?
             };
@@ -444,15 +393,11 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
                 .get_meta_loader_and_reader(path, asset_type_id)
                 .await
                 .map_err(|error| LoadDirectError::LoadError {
-                    dependency: path.clone(),
+                    dependency: path.clone().into(),
                     error,
                 })?;
             (meta, loader, ReaderRef::Boxed(reader))
         };
-
-        if let Some(meta_transform) = self.meta_transform {
-            meta_transform(&mut *meta);
-        }
 
         let asset = self
             .load_context
@@ -482,7 +427,7 @@ impl NestedLoader<'_, '_, StaticTyped, Immediate<'_, '_>> {
     #[expect(clippy::result_large_err, reason = "Asset loading is not a hot path.")]
     pub async fn load<'p, A: Asset>(
         self,
-        path: impl Into<AssetPath<'p>>,
+        path: impl Into<AssetRef<'p>>,
     ) -> Result<LoadedAsset<A>, LoadDirectError> {
         let path = path.into().into_owned();
         self.load_internal(&path, Some(TypeId::of::<A>()))
@@ -493,7 +438,7 @@ impl NestedLoader<'_, '_, StaticTyped, Immediate<'_, '_>> {
                     .map_err(|_| LoadDirectError::LoadError {
                         dependency: path.clone(),
                         error: AssetLoadError::RequestedHandleTypeMismatch {
-                            path: path.into(),
+                            path,
                             requested: TypeId::of::<A>(),
                             // XXX TODO: Needs work now that asset_type_name is Option. Could use untyped_asset.asset_type_name()? But needs refactoring as that's already been moved.
                             actual_asset_name: "", // loader.asset_type_name(),
@@ -513,7 +458,7 @@ impl NestedLoader<'_, '_, DynamicTyped, Immediate<'_, '_>> {
     /// [`with_dynamic_type`]: Self::with_dynamic_type
     pub async fn load<'p>(
         self,
-        path: impl Into<AssetPath<'p>>,
+        path: impl Into<AssetRef<'p>>,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
         let path = path.into().into_owned();
         let asset_type_id = Some(self.typing.asset_type_id);
@@ -529,7 +474,7 @@ impl NestedLoader<'_, '_, UnknownTyped, Immediate<'_, '_>> {
     /// This will infer the asset type from metadata.
     pub async fn load<'p>(
         self,
-        path: impl Into<AssetPath<'p>>,
+        path: impl Into<AssetRef<'p>>,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
         let path = path.into().into_owned();
         self.load_internal(&path, None)

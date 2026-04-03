@@ -13,10 +13,7 @@ use crate::{
         MissingProcessedAssetReaderError, Reader,
     },
     loader::{AssetLoader, ErasedAssetLoader, LoadContext, LoadedAsset},
-    meta::{
-        loader_settings_meta_transform, AssetActionMinimal, AssetMetaDyn, AssetMetaMinimal,
-        MetaTransform, Settings,
-    },
+    meta::{AssetActionMinimal, AssetMetaDyn, AssetMetaMinimal, MetaTransform, Settings},
     path::AssetPath,
     Asset, AssetAction2, AssetEvent, AssetHandleProvider, AssetId, AssetIndex,
     AssetLoadFailedEvent, AssetMetaCheck, AssetRef, Assets, DeserializeMetaError, ErasedAssetIndex,
@@ -43,6 +40,7 @@ use either::Either;
 use futures_lite::{FutureExt, StreamExt};
 use info::*;
 use loaders::*;
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tracing::{error, info};
@@ -437,17 +435,12 @@ impl AssetServer {
     /// [`AssetLoader`] settings. The type `S` _must_ match the configured [`AssetLoader::Settings`] or `settings` changes
     /// will be ignored and an error will be printed to the log.
     #[must_use = "not using the returned strong handle may result in the unexpected release of the asset"]
-    pub fn load_with_settings<'a, A: Asset, S: Settings>(
+    pub fn load_with_settings<'a, A: Asset, S: Settings + Serialize + Default>(
         &self,
-        path: impl Into<AssetRef<'a>>,
+        path: impl Into<AssetPath<'a>>,
         settings: impl Fn(&mut S) + Send + Sync + 'static,
     ) -> Handle<A> {
-        self.load_with_meta_transform(
-            path.into(),
-            Some(loader_settings_meta_transform(settings)),
-            (),
-            false,
-        )
+        self.load(path.into().with_settings(settings))
     }
 
     /// Same as [`load`](AssetServer::load_with_settings), but you can load assets from unapproved paths
@@ -455,17 +448,12 @@ impl AssetServer {
     /// is [`Deny`](UnapprovedPathMode::Deny).
     ///
     /// See [`UnapprovedPathMode`] and [`AssetPath::is_unapproved`]
-    pub fn load_with_settings_override<'a, A: Asset, S: Settings>(
+    pub fn load_with_settings_override<'a, A: Asset, S: Settings + Serialize + Default>(
         &self,
         path: impl Into<AssetPath<'a>>,
         settings: impl Fn(&mut S) + Send + Sync + 'static,
     ) -> Handle<A> {
-        self.load_with_meta_transform(
-            path.into(),
-            Some(loader_settings_meta_transform(settings)),
-            (),
-            true,
-        )
+        self.load_with_meta_transform(path.into().with_settings(settings), None, (), true)
     }
 
     /// Begins loading an [`Asset`] of type `A` stored at `path` while holding a guard item.
@@ -478,18 +466,18 @@ impl AssetServer {
     /// [`AssetLoader`] settings. The type `S` _must_ match the configured [`AssetLoader::Settings`] or `settings` changes
     /// will be ignored and an error will be printed to the log.
     #[must_use = "not using the returned strong handle may result in the unexpected release of the asset"]
-    pub fn load_acquire_with_settings<'a, A: Asset, S: Settings, G: Send + Sync + 'static>(
+    pub fn load_acquire_with_settings<
+        'a,
+        A: Asset,
+        S: Settings + Serialize + Default,
+        G: Send + Sync + 'static,
+    >(
         &self,
         path: impl Into<AssetPath<'a>>,
         settings: impl Fn(&mut S) + Send + Sync + 'static,
         guard: G,
     ) -> Handle<A> {
-        self.load_with_meta_transform(
-            path.into(),
-            Some(loader_settings_meta_transform(settings)),
-            guard,
-            false,
-        )
+        self.load_with_meta_transform(path.into().with_settings(settings), None, guard, false)
     }
 
     /// Same as [`load`](AssetServer::load_acquire_with_settings), but you can load assets from unapproved paths
@@ -500,7 +488,7 @@ impl AssetServer {
     pub fn load_acquire_with_settings_override<
         'a,
         A: Asset,
-        S: Settings,
+        S: Settings + Serialize + Default,
         G: Send + Sync + 'static,
     >(
         &self,
@@ -508,12 +496,7 @@ impl AssetServer {
         settings: impl Fn(&mut S) + Send + Sync + 'static,
         guard: G,
     ) -> Handle<A> {
-        self.load_with_meta_transform(
-            path.into(),
-            Some(loader_settings_meta_transform(settings)),
-            guard,
-            true,
-        )
+        self.load_with_meta_transform(path.into().with_settings(settings), None, guard, true)
     }
 
     pub(crate) fn load_with_meta_transform<'a, A: Asset, G: Send + Sync + 'static>(
@@ -628,10 +611,15 @@ impl AssetServer {
 
     pub(crate) fn load_unknown_type_with_meta_transform<'a>(
         &self,
-        path: impl Into<AssetPath<'a>>,
+        path: impl Into<AssetRef<'a>>,
         meta_transform: Option<MetaTransform>,
     ) -> Handle<LoadedUntypedAsset> {
         let path = path.into().into_owned();
+
+        // XXX TODO: Work out how to support `AssetRef` when the code below
+        // depends on modifying the source.
+        let path = path.path().expect("XXX TODO").clone_owned();
+
         let untyped_source = AssetSourceId::Name(match path.source() {
             AssetSourceId::Default => CowArc::Static(UNTYPED_SOURCE_SUFFIX),
             AssetSourceId::Name(source) => {
@@ -714,7 +702,7 @@ impl AssetServer {
     /// This indirection enables a non blocking load of an untyped asset, since I/O is
     /// required to figure out the asset type before a handle can be created.
     #[must_use = "not using the returned strong handle may result in the unexpected release of the assets"]
-    pub fn load_untyped<'a>(&self, path: impl Into<AssetPath<'a>>) -> Handle<LoadedUntypedAsset> {
+    pub fn load_untyped<'a>(&self, path: impl Into<AssetRef<'a>>) -> Handle<LoadedUntypedAsset> {
         self.load_unknown_type_with_meta_transform(path, None)
     }
 

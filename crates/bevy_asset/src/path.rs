@@ -1,4 +1,8 @@
-use crate::io::AssetSourceId;
+use crate::{
+    basset::action::{LoadPath, LoadPathParams},
+    io::AssetSourceId,
+    meta::Settings,
+};
 use alloc::{
     borrow::ToOwned,
     boxed::Box,
@@ -584,6 +588,39 @@ impl<'a> AssetPath<'a> {
         }
 
         false
+    }
+
+    /// XXX TODO: Review and document. Interface is awkward for backwards
+    /// compatibility.
+    pub fn with_settings<S: Settings + Serialize + Default>(
+        self,
+        settings: impl Fn(&mut S) + Send + Sync + 'static,
+    ) -> AssetAction2<'static> {
+        let mut settings_value = S::default();
+        settings(&mut settings_value);
+
+        // XXX TODO: This whole dance is pretty heinous due to all the serialized
+        // RON. Would go away if we changed `AssetRef` to store the action params
+        // as a `Box<dyn>` rather than RON.
+
+        let settings_ron = ron::value::RawValue::from_boxed_ron(
+            ron::ser::to_string(&settings_value)
+                .expect("XXX TODO")
+                .into(),
+        )
+        .expect("XXX TODO");
+
+        let params_value = LoadPathParams {
+            path: self.to_string(),
+            loader_settings: Some(settings_ron),
+        };
+
+        let params_ron = ron::value::RawValue::from_boxed_ron(
+            ron::ser::to_string(&params_value).expect("XXX TODO").into(),
+        )
+        .expect("XXX TODO");
+
+        AssetAction2::new(core::any::type_name::<LoadPath>().into(), params_ron, None)
     }
 }
 
