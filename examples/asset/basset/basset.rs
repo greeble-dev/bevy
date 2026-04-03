@@ -1,5 +1,8 @@
 //! Basset proof of concept.
 
+// XXX TODO: Remove when no longer needed.
+#![allow(clippy::allow_attributes, reason = "XXX TODO")]
+
 use argh::FromArgs;
 use bevy::{
     asset::{
@@ -425,6 +428,10 @@ where
 mod acme {
     use super::*;
     use bevy::pbr::experimental::meshlet::MeshletMesh3d;
+    use bevy_image::{
+        ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler,
+        ImageSamplerDescriptor,
+    };
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMesh {
@@ -439,6 +446,7 @@ mod acme {
     #[derive(Serialize, Deserialize, Debug)]
     pub struct AcmeMaterial {
         pub base_color_texture: Option<AssetRef<'static>>,
+        pub base_color_texture_sampler: Option<ImageSampler>,
     }
 
     #[derive(Serialize, Deserialize, Default, Debug)]
@@ -515,6 +523,25 @@ mod acme {
                             .base_color_texture
                             .clone()
                             .map(|p| p.path().expect("TODO").clone()),
+                        // XXX TODO: This is a temporary hack just to get `BoxTextures.gltf`
+                        // working. Should hopefully go away if `load_settings` is
+                        // changed to use an `AssetRef` internally?
+                        base_color_texture_sampler: Some(ImageSampler::Descriptor(
+                            ImageSamplerDescriptor {
+                                label: None,
+                                address_mode_u: ImageAddressMode::Repeat,
+                                address_mode_v: ImageAddressMode::Repeat,
+                                address_mode_w: ImageAddressMode::ClampToEdge,
+                                mag_filter: ImageFilterMode::Linear,
+                                min_filter: ImageFilterMode::Nearest,
+                                mipmap_filter: ImageFilterMode::Linear,
+                                lod_min_clamp: 0.0,
+                                lod_max_clamp: 32.0,
+                                compare: None,
+                                anisotropy_clamp: 1,
+                                border_color: None,
+                            },
+                        )),
                     });
 
                     entities.push(AcmeEntity {
@@ -559,11 +586,22 @@ mod acme {
                     meshlet_debug_material_assets.add(MeshletDebugMaterial::default()),
                 ));
             } else if let Some(material) = &scene_entity.material {
+                let sampler = material
+                    .base_color_texture_sampler
+                    .clone()
+                    .unwrap_or_default();
+
                 let standard_material = StandardMaterial {
-                    base_color_texture: material
-                        .base_color_texture
-                        .as_ref()
-                        .map(|p| asset_server.load::<Image>(p)),
+                    base_color_texture: material.base_color_texture.as_ref().map(|p| {
+                        asset_server.load_with_settings::<Image, ImageLoaderSettings>(
+                            p,
+                            move |settings: &mut ImageLoaderSettings| {
+                                // XXX TODO: How do we get `is_srgb` right?
+                                settings.is_srgb = true;
+                                settings.sampler = sampler.clone();
+                            },
+                        )
+                    }),
                     ..Default::default()
                 };
 
@@ -647,6 +685,7 @@ struct AssetPaths {
     scenes: Vec<(AssetRef<'static>, Transform)>,
 }
 
+#[allow(unused, reason = "XXX TODO")]
 const INLINE_JOIN_STRINGS_RON: &str = r#"
 (
     separator: ", ",
@@ -720,31 +759,49 @@ fn print_events<T: Asset + std::fmt::Debug>(
     asset_server: &AssetServer,
     assets: &Assets<T>,
     events: &mut MessageReader<AssetEvent<T>>,
+    print_value: bool,
 ) {
     for event in events.read() {
         match *event {
             AssetEvent::Added { id } | AssetEvent::Modified { id } => {
-                let path = asset_server.get_path(id).unwrap();
-                let value = assets.get(id).unwrap();
-                info!(target: "load_events", ?path, ?value, "Loaded");
+                // XXX TODO: Do something if path is `None`?
+                if let Some(path) = asset_server.get_path(id)
+                    && !path.to_string().starts_with("embedded://")
+                {
+                    let value = assets.get(id).unwrap();
+
+                    if print_value {
+                        info!(target: "load_events", ?path, ?value, "Loaded");
+                    } else {
+                        info!(target: "load_events", ?path, "Loaded");
+                    }
+                }
             }
             _ => (),
         }
     }
 }
 
+// XXX TODO: Annoying boilerplate. Isn't there an easier way to track all asset
+// loads?
 fn print(
     asset_server: Res<AssetServer>,
     string_assets: Res<Assets<demo::StringAsset>>,
     int_assets: Res<Assets<demo::IntAsset>>,
     scene_assets: Res<Assets<acme::AcmeScene>>,
+    image_assets: Res<Assets<Image>>,
+    gltf_assets: Res<Assets<Gltf>>,
     mut string_events: MessageReader<AssetEvent<demo::StringAsset>>,
     mut int_events: MessageReader<AssetEvent<demo::IntAsset>>,
     mut scene_events: MessageReader<AssetEvent<acme::AcmeScene>>,
+    mut image_events: MessageReader<AssetEvent<Image>>,
+    mut gltf_events: MessageReader<AssetEvent<Gltf>>,
 ) {
-    print_events(&asset_server, &string_assets, &mut string_events);
-    print_events(&asset_server, &int_assets, &mut int_events);
-    print_events(&asset_server, &scene_assets, &mut scene_events);
+    print_events(&asset_server, &string_assets, &mut string_events, true);
+    print_events(&asset_server, &int_assets, &mut int_events, true);
+    print_events(&asset_server, &scene_assets, &mut scene_events, true);
+    print_events(&asset_server, &image_assets, &mut image_events, false);
+    print_events(&asset_server, &gltf_assets, &mut gltf_events, false);
 }
 
 // XXX TODO: The `done` is annoying. Better way to run once?
@@ -878,26 +935,26 @@ fn main() {
             //     // TODO: Unsupported until we work through `basset::apply_settings` issues.
             //     "string_loader_uppercase.basset".into(),
             // ),
-            (
-                TypeId::of::<demo::StringAsset>(),
-                "join_strings.basset".into(),
-            ),
-            (
-                TypeId::of::<demo::StringAsset>(),
-                AssetAction2::new(
-                    "basset::action::JoinStrings".into(),
-                    ron::value::RawValue::from_boxed_ron(INLINE_JOIN_STRINGS_RON.into()).unwrap(),
-                    None,
-                )
-                .into(),
-            ),
+            // (
+            //     TypeId::of::<demo::StringAsset>(),
+            //     "join_strings.basset".into(),
+            // ),
+            // (
+            //     TypeId::of::<demo::StringAsset>(),
+            //     AssetAction2::new(
+            //         "basset::action::JoinStrings".into(),
+            //         ron::value::RawValue::from_boxed_ron(INLINE_JOIN_STRINGS_RON.into()).unwrap(),
+            //         None,
+            //     )
+            //     .into(),
+            // ),
         ],
         scenes: vec![
-            // (
-            //     "scene_from_gltf_with_dependencies.basset".into(),
-            //     Transform::from_xyz(-1.0, 1.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
+            (
+                "scene_from_gltf_with_dependencies.basset".into(),
+                Transform::from_xyz(-1.0, 1.0, 0.0)
+                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            ),
             // (
             //     "scene_from_gltf.basset".into(),
             //     Transform::from_xyz(-1.0, 0.0, 0.0)

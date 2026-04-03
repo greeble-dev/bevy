@@ -439,7 +439,7 @@ impl AssetServer {
     #[must_use = "not using the returned strong handle may result in the unexpected release of the asset"]
     pub fn load_with_settings<'a, A: Asset, S: Settings>(
         &self,
-        path: impl Into<AssetPath<'a>>,
+        path: impl Into<AssetRef<'a>>,
         settings: impl Fn(&mut S) + Send + Sync + 'static,
     ) -> Handle<A> {
         self.load_with_meta_transform(
