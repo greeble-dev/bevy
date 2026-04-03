@@ -949,16 +949,16 @@ impl ActionSource for DevelopmentActionSource {
                     }
                 }
 
-                info!(?input_asset, "Publishing");
+                info!(%input_asset, "Publishing");
             }
 
-            info!("Writing pack file");
+            info!("Writing pack file {pack_path:?}");
 
             write_pack_file(pack, pack_path).await;
 
             info!(
                 "Publishing finished in {:.2}s",
-                begin_time.elapsed().as_secs()
+                begin_time.elapsed().as_secs_f32()
             );
         }))
     }

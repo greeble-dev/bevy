@@ -21,14 +21,14 @@ use bevy::{
     time::common_conditions::on_timer,
 };
 use bevy_asset::{
-    basset::publisher::{read_pack_file, PublishInput},
-    io::Writer,
+    basset::publisher::{published_asset_source, read_pack_file, PublishInput},
+    io::{AssetSourceId, Writer},
     saver::SavedAsset,
     AssetPath, AsyncWriteExt,
 };
 use core::{marker::PhantomData, result::Result};
 use serde::{Deserialize, Serialize};
-use std::{boxed::Box, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{any::TypeId, boxed::Box, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 mod action {
     use super::*;
@@ -639,7 +639,13 @@ struct MeshletDebugMaterial {
 impl Material for MeshletDebugMaterial {}
 
 #[derive(Resource)]
-struct Handles(Vec<UntypedHandle>);
+struct AssetHandles(Vec<UntypedHandle>);
+
+#[derive(Resource, Clone)]
+struct AssetPaths {
+    regular: Vec<(TypeId, AssetRef<'static>)>,
+    scenes: Vec<(AssetRef<'static>, Transform)>,
+}
 
 const INLINE_JOIN_STRINGS_RON: &str = r#"
 (
@@ -659,67 +665,24 @@ const INLINE_JOIN_STRINGS_RON: &str = r#"
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    asset_paths: Res<AssetPaths>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // XXX TODO
-    //let _inline_path = BassetPathSerializable::Path("1234.int".into()).to_asset_path();
-
-    commands.insert_resource(Handles(vec![
-        /*
-        asset_server
-            .load::<demo::StringAsset>("hello.string")
-            .untyped(),
-        asset_server
-            .load::<demo::StringAsset>("world.string")
-            .untyped(),
-        asset_server.load::<demo::IntAsset>("1234.int").untyped(),
-        asset_server.load::<demo::IntAsset>("int.basset").untyped(),
-        asset_server
-            .load::<demo::StringAsset>("string.basset")
-            .untyped(),
-        */
-        // Disabled until we can work out how apply_settings works with dynamic types.
-        /*
-        asset_server
-            .load::<demo::StringAsset>("string_loader_uppercase.basset")
-            .untyped(),
-            */
-        asset_server
-            .load::<demo::StringAsset>("join_strings.basset")
-            .untyped(),
-        asset_server
-            .load::<demo::StringAsset>(AssetAction2::new(
-                "basset::action::JoinStrings".into(),
-                ron::value::RawValue::from_boxed_ron(INLINE_JOIN_STRINGS_RON.into()).unwrap(),
-                None,
-            ))
-            .untyped(),
-    ]));
-
-    /*
-    commands.spawn((
-        acme::AcmeSceneSpawner(
-            asset_server.load::<acme::AcmeScene>("scene_from_gltf_with_dependencies.basset"),
-        ),
-        Transform::from_xyz(-1.0, 1.0, 0.0)
-            .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-    ));
-    */
-
-    /*
-    commands.spawn((
-        acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("scene_from_gltf.basset")),
-        Transform::from_xyz(-1.0, 0.0, 0.0)
-            .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+    commands.insert_resource(AssetHandles(
+        asset_paths
+            .regular
+            .iter()
+            .map(|(type_id, path)| asset_server.load_erased(*type_id, path))
+            .collect(),
     ));
 
-    commands.spawn((
-        acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>("meshlet_scene.basset")),
-        Transform::from_xyz(1.0, 0.0, 0.0)
-            .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-    ));
-    */
+    for (path, transform) in &asset_paths.scenes {
+        commands.spawn((
+            acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>(path.clone())),
+            *transform,
+        ));
+    }
 
     commands.spawn((
         Camera3d::default(),
@@ -789,7 +752,7 @@ fn reload(
     mut done: Local<bool>,
     args: Res<Args>,
     asset_server: Res<AssetServer>,
-    handles: Res<Handles>,
+    handles: Res<AssetHandles>,
 ) {
     if *done {
         return;
@@ -903,44 +866,98 @@ fn main() {
     );
     */
 
-    let pack_file_path = PathBuf::from("target/basset/published.pack");
-
-    let action_source_builder: Arc<dyn ActionSourceBuilder> = if args.mode == ArgMode::Published {
-        let pack_file = block_on(read_pack_file(&pack_file_path));
-
-        Arc::new(PublishedActionSourceBuilder::new(Arc::new(pack_file)))
-    } else {
-        Arc::new(DevelopmentActionSourceBuilder::new(
-            DevelopmentActionSourceSettings::default()
-                .with_file_cache_path("target/basset/cache".into())
-                .with_validate_dependency_cache(args.validate_dependency_cache)
-                .with_validate_action_cache(args.validate_action_cache)
-                .with_action(action::LoadPath)
-                .with_action(action::JoinStrings)
-                .with_action(action::UppercaseString)
-                .with_action(action::AcmeSceneFromGltf)
-                .with_action(action::MeshletFromMesh)
-                .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
-                .with_saver(demo::StringAssetSaver)
-                .with_saver(demo::IntAssetSaver)
-                .with_saver(MeshletMeshSaver)
-                .with_saver(acme::AcmeSceneAssetSaver::default()),
-        ))
+    let asset_paths = AssetPaths {
+        regular: vec![
+            // (TypeId::of::<demo::StringAsset>(), "hello.string".into()),
+            // (TypeId::of::<demo::StringAsset>(), "world.string".into()),
+            // (TypeId::of::<demo::IntAsset>(), "1234.int".into()),
+            // (TypeId::of::<demo::IntAsset>(), "int.basset".into()),
+            // (TypeId::of::<demo::StringAsset>(), "string.basset".into()),
+            // (
+            //     TypeId::of::<demo::StringAsset>(),
+            //     // TODO: Unsupported until we work through `basset::apply_settings` issues.
+            //     "string_loader_uppercase.basset".into(),
+            // ),
+            (
+                TypeId::of::<demo::StringAsset>(),
+                "join_strings.basset".into(),
+            ),
+            (
+                TypeId::of::<demo::StringAsset>(),
+                AssetAction2::new(
+                    "basset::action::JoinStrings".into(),
+                    ron::value::RawValue::from_boxed_ron(INLINE_JOIN_STRINGS_RON.into()).unwrap(),
+                    None,
+                )
+                .into(),
+            ),
+        ],
+        scenes: vec![
+            // (
+            //     "scene_from_gltf_with_dependencies.basset".into(),
+            //     Transform::from_xyz(-1.0, 1.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
+            // (
+            //     "scene_from_gltf.basset".into(),
+            //     Transform::from_xyz(-1.0, 0.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
+            // (
+            //     "meshlet_scene.basset".into(),
+            //     Transform::from_xyz(1.0, 0.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
+        ],
     };
 
     let mut app = App::new();
 
+    let pack_file_path = PathBuf::from("target/basset/published.pack");
+
+    let asset_plugin = if args.mode == ArgMode::Published {
+        // XXX TODO: Avoid `block_on`.
+        let pack_file = Arc::new(block_on(read_pack_file(&pack_file_path)));
+
+        app.register_asset_source(
+            AssetSourceId::default(),
+            published_asset_source(AssetSourceId::default(), pack_file.clone()),
+        );
+
+        AssetPlugin {
+            basset_action_source_builder: Some(Arc::new(PublishedActionSourceBuilder::new(
+                pack_file.clone(),
+            ))),
+            ..Default::default()
+        }
+    } else {
+        AssetPlugin {
+            file_path: "examples/asset/basset/assets".to_string(),
+            basset_action_source_builder: Some(Arc::new(DevelopmentActionSourceBuilder::new(
+                DevelopmentActionSourceSettings::default()
+                    .with_file_cache_path("target/basset/cache".into())
+                    .with_validate_dependency_cache(args.validate_dependency_cache)
+                    .with_validate_action_cache(args.validate_action_cache)
+                    .with_action(action::LoadPath)
+                    .with_action(action::JoinStrings)
+                    .with_action(action::UppercaseString)
+                    .with_action(action::AcmeSceneFromGltf)
+                    .with_action(action::MeshletFromMesh)
+                    .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
+                    .with_saver(demo::StringAssetSaver)
+                    .with_saver(demo::IntAssetSaver)
+                    .with_saver(MeshletMeshSaver)
+                    .with_saver(acme::AcmeSceneAssetSaver::default()),
+            ))),
+            ..Default::default()
+        }
+    };
+
     app.add_plugins((
-        DefaultPlugins
-            .set(AssetPlugin {
-                file_path: "examples/asset/basset/assets".to_string(),
-                basset_action_source_builder: Some(action_source_builder),
-                ..default()
-            })
-            .set(LogPlugin {
-                filter: bevy::log::DEFAULT_FILTER.to_string() + "bevy_asset::basset=debug",
-                ..Default::default()
-            }),
+        DefaultPlugins.set(asset_plugin).set(LogPlugin {
+            filter: bevy::log::DEFAULT_FILTER.to_string() + "bevy_asset::basset=info",
+            ..Default::default()
+        }),
         BassetPlugin,
         MaterialPlugin::<MeshletDebugMaterial>::default(),
         FreeCameraPlugin,
@@ -953,7 +970,8 @@ fn main() {
     .init_asset::<acme::AcmeScene>()
     .register_asset_loader(demo::StringAssetLoader)
     .register_asset_loader(demo::IntAssetLoader)
-    .register_asset_loader(acme::AcmeSceneAssetLoader::default());
+    .register_asset_loader(acme::AcmeSceneAssetLoader::default())
+    .insert_resource(asset_paths.clone());
 
     match args.mode {
         ArgMode::Development | ArgMode::Published => {
@@ -972,16 +990,12 @@ fn main() {
             let asset_server = app.world().resource::<AssetServer>();
 
             let input = PublishInput {
-                paths: vec![
-                    "join_strings.basset".into(),
-                    AssetAction2::new(
-                        "basset::action::JoinStrings".into(),
-                        ron::value::RawValue::from_boxed_ron(INLINE_JOIN_STRINGS_RON.into())
-                            .unwrap(),
-                        None,
-                    )
-                    .into(),
-                ],
+                paths: asset_paths
+                    .regular
+                    .iter()
+                    .map(|(_, path)| path.clone())
+                    .chain(asset_paths.scenes.iter().map(|(path, _)| path.clone()))
+                    .collect(),
             };
 
             block_on(

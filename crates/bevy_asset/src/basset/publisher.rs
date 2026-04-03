@@ -391,9 +391,10 @@ pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) {
     async_fs::rename(temp_path, path).await.expect("XXX TODO");
 }
 
-async fn published_asset_source(source: AssetSourceId<'static>, path: &Path) -> AssetSourceBuilder {
-    let pack_file = Arc::new(read_pack_file(path).await);
-
+pub fn published_asset_source(
+    source: AssetSourceId<'static>,
+    pack_file: Arc<ReadablePackFile>,
+) -> AssetSourceBuilder {
     AssetSourceBuilder::new(move || {
         Box::new(PublishedAssetReader {
             source: source.clone(),
