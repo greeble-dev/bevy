@@ -40,10 +40,10 @@ mod action {
 
     #[derive(Serialize, Deserialize, Default)]
     pub struct LoadPathParams {
-        pub path: String, // TODO: Should be AssetPath. Avoiding for now to simplify lifetimes.
+        pub path: String, // XXX TODO: Should be AssetPath. Avoiding for now to simplify lifetimes.
         #[serde(default)]
         pub loader_settings: Option<Box<ron::value::RawValue>>,
-        // TODO
+        // XXX TODO?
         //loader_name: Option<String>,
     }
 
@@ -53,12 +53,18 @@ mod action {
 
         async fn apply(
             &self,
-            _context: ApplyContext<'_>,
-            _params: &Self::Params,
+            mut context: ApplyContext<'_>,
+            params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
-            // Work out what this should do so that any settings correctly
-            // influence the action key.
-            todo!();
+            // XXX TODO: Try to avoid clones? But will mean changing lifetimes
+            // of `BassetAction::apply`.
+            let path = AssetPath::parse(&params.path).into_owned();
+            let settings = params.loader_settings.clone();
+
+            context.erased_load_dependee_path(&path, &settings).await
+
+            // XXX TODO: Note that we're not calling `context.finish()`. Probably
+            // correct but double check.
         }
     }
 
@@ -470,17 +476,17 @@ mod acme {
     }
 
     fn get_sub_asset<'a, T: Asset>(
-        asset: &'a PartialErasedLoadedAsset,
+        asset: &'a ErasedLoadedAsset,
         sub_asset_handle: &Handle<T>,
     ) -> &'a T {
         asset
-            .get_labeled_by_id(sub_asset_handle.into())
+            .get_labeled_by_id(sub_asset_handle.id().untyped())
             .expect("TODO")
             .get::<T>()
             .expect("TODO")
     }
 
-    pub fn from_gltf(asset: &PartialErasedLoadedAsset) -> AcmeScene {
+    pub fn from_gltf(asset: &ErasedLoadedAsset) -> AcmeScene {
         let mut entities = Vec::<AcmeEntity>::new();
 
         let gltf = asset.get::<Gltf>().expect("TODO");
@@ -929,12 +935,11 @@ fn main() {
             // (TypeId::of::<demo::StringAsset>(), "world.string".into()),
             // (TypeId::of::<demo::IntAsset>(), "1234.int".into()),
             // (TypeId::of::<demo::IntAsset>(), "int.basset".into()),
-            // (TypeId::of::<demo::StringAsset>(), "string.basset".into()),
-            // (
-            //     TypeId::of::<demo::StringAsset>(),
-            //     // TODO: Unsupported until we work through `basset::apply_settings` issues.
-            //     "string_loader_uppercase.basset".into(),
-            // ),
+            (TypeId::of::<demo::StringAsset>(), "string.basset".into()),
+            (
+                TypeId::of::<demo::StringAsset>(),
+                "string_loader_uppercase.basset".into(),
+            ),
             // (
             //     TypeId::of::<demo::StringAsset>(),
             //     "join_strings.basset".into(),
@@ -950,11 +955,11 @@ fn main() {
             // ),
         ],
         scenes: vec![
-            (
-                "scene_from_gltf_with_dependencies.basset".into(),
-                Transform::from_xyz(-1.0, 1.0, 0.0)
-                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            ),
+            // (
+            //     "scene_from_gltf_with_dependencies.basset".into(),
+            //     Transform::from_xyz(-1.0, 1.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
             // (
             //     "scene_from_gltf.basset".into(),
             //     Transform::from_xyz(-1.0, 0.0, 0.0)

@@ -305,65 +305,38 @@ impl From<LabeledAsset> for PartialErasedLoadedLabeledAsset {
     }
 }
 
-// Similar to `ErasedLoadedAsset`, but stores sub-assets as a distinct `PartialErasedLoadedLabeledAsset`
-// type. This avoids the awkwardly recursive nature of `ErasedLoadedAsset` storing
-// sub-assets as `ErasedLoadedAsset`.
-pub struct PartialErasedLoadedAsset {
-    pub(crate) value: Box<dyn AssetContainer>,
-    pub(crate) labeled_assets: Vec<PartialErasedLoadedLabeledAsset>,
-    #[expect(unused, reason = "XXX TODO?")]
-    pub(crate) label_to_asset_index: HashMap<CowArc<'static, str>, usize>,
-    pub(crate) asset_id_to_asset_index: HashMap<UntypedAssetId, usize>,
-}
-
-// XXX TODO: Duplicates a lot of `ErasedLoadedAsset`.
-impl PartialErasedLoadedAsset {
-    pub fn get<A: Asset>(&self) -> Option<&A> {
-        self.value.downcast_ref::<A>()
-    }
-
-    pub fn downcast<A: Asset>(mut self) -> Result<A, PartialErasedLoadedAsset> {
-        match self.value.downcast::<A>() {
-            Ok(value) => Ok(*value),
-            Err(value) => {
-                self.value = value;
-                Err(self)
-            }
-        }
-    }
-
-    pub fn get_labeled_by_id(
-        &self,
-        id: UntypedAssetId,
-    ) -> Option<&PartialErasedLoadedLabeledAsset> {
-        self.asset_id_to_asset_index
-            .get(&id)
-            .map(|&index| &self.labeled_assets[index])
-    }
-}
-
-impl From<ErasedLoadedAsset> for PartialErasedLoadedAsset {
-    fn from(value: ErasedLoadedAsset) -> Self {
-        let labeled_assets = value
-            .labeled_assets
-            .into_iter()
-            .map(PartialErasedLoadedLabeledAsset::from)
-            .collect();
-
-        Self {
-            value: value.value,
-            labeled_assets,
-            label_to_asset_index: value.label_to_asset_index,
-            asset_id_to_asset_index: value.asset_id_to_asset_index,
-        }
-    }
-}
-
 impl ApplyContext<'_> {
+    pub async fn erased_load_dependee_path(
+        &mut self,
+        path: &AssetPath<'static>,
+        settings: &Option<Box<ron::value::RawValue>>,
+    ) -> Result<ErasedLoadedAsset, BevyError> {
+        // XXX TODO: Avoid clone?
+
+        let (asset, _) = load_path(
+            self.asset_server,
+            &RootAssetPath::without_label(path.clone()),
+            settings,
+        )
+        .await?;
+
+        // XXX TODO: Remainder duplicates `erased_load_dependee`. Refactor?
+
+        // XXX TODO: Decide what to do here. The hash only appears to be used
+        // for asset processing, so maybe can ignore for now.
+        let hash = [0u8; 32];
+
+        self.loader_dependencies.insert(path.clone().into(), hash);
+
+        asset
+            .take_labeled(path.label_cow())
+            .map_err(|_| format!("Couldn't find labeled asset \"{path:?}\".").into())
+    }
+
     pub async fn erased_load_dependee(
         &mut self,
         path: &AssetRef<'static>,
-    ) -> Result<PartialErasedLoadedAsset, BevyError> {
+    ) -> Result<ErasedLoadedAsset, BevyError> {
         // XXX TODO: Avoid clone?
         let asset = load_ref(
             self.asset_server,
@@ -379,7 +352,6 @@ impl ApplyContext<'_> {
 
         asset
             .take_labeled(path.label_cow())
-            .map(PartialErasedLoadedAsset::from)
             .map_err(|_| format!("Couldn't find labeled asset \"{path:?}\".").into())
     }
 
@@ -387,12 +359,12 @@ impl ApplyContext<'_> {
         &mut self,
         path: &AssetRef<'static>,
     ) -> Result<T, BevyError> {
-        match self.erased_load_dependee(path).await?.downcast::<T>() {
-            Ok(result) => Ok(result),
+        match self.erased_load_dependee(path).await?.value.downcast::<T>() {
+            Ok(result) => Ok(*result),
             Err(original) => panic!(
                 "Should have made type {}, actually made type {}. Path: {path:?}",
                 core::any::type_name::<T>(),
-                original.value.asset_type_name(),
+                original.asset_type_name(),
             ),
         }
     }
@@ -1047,27 +1019,19 @@ impl ErasedAssetLoader for BassetLoader {
     fn asset_type_id(&self) -> Option<core::any::TypeId> {
         None
     }
-}
 
-fn apply_settings(settings: Option<&mut dyn Settings>, ron: &Option<Box<ron::value::RawValue>>) {
-    let Some(_settings) = settings else {
-        return;
-    };
-
-    let Some(_ron) = ron else {
-        return;
-    };
-
-    // XXX TODO: Need some way to apply a dyn Settings without knowing the type.
-    todo!();
-    /*
-    if let Some(settings) = settings.downcast_mut::<demo::StringAssetSettings>() {
-        *settings = ron
-            .clone()
-            .into_rust::<demo::StringAssetSettings>()
-            .expect("TODO");
+    fn meta_from_settings(
+        &self,
+        settings: &[u8],
+    ) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
+        // XXX TODO: Review. Is this going to be problematic since we don't know the loader type?
+        Ok(Box::new(AssetMeta::<FakeAssetLoader, ()>::new(
+            AssetAction::Load {
+                loader: self.type_path().to_string(),
+                settings: ron::de::from_bytes(settings)?,
+            },
+        )))
     }
-    */
 }
 
 async fn load_ref(
@@ -1099,7 +1063,9 @@ pub(crate) async fn load_path(
         .await
         .map_err(Into::<BevyError>::into)?;
 
-    apply_settings(meta.loader_settings_mut(), settings);
+    if let Some(settings) = settings {
+        meta = loader.meta_from_settings(settings.get_ron().as_bytes())?;
+    }
 
     // Roughly the same as LoadContext::load_direct_internal.
 

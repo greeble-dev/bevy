@@ -74,6 +74,12 @@ pub trait ErasedAssetLoader: Send + Sync + 'static {
     /// Returns the [`TypeId`] of the top-level [`Asset`] loaded by the [`AssetLoader`].
     /// XXX TODO: Document.
     fn asset_type_id(&self) -> Option<TypeId>;
+    /// XXX TODO: Document, and review if needed. Could technically implement
+    /// in terms of `deserialize_meta`, although that's a bit hacky.
+    fn meta_from_settings(
+        &self,
+        settings: &[u8],
+    ) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError>;
 }
 
 impl<L> ErasedAssetLoader for L
@@ -128,6 +134,18 @@ where
 
     fn asset_type_id(&self) -> Option<TypeId> {
         Some(TypeId::of::<L::Asset>())
+    }
+
+    fn meta_from_settings(
+        &self,
+        settings: &[u8],
+    ) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
+        Ok(Box::new(AssetMeta::<L, ()>::new(
+            crate::meta::AssetAction::Load {
+                loader: self.type_path().to_string(),
+                settings: ron::de::from_bytes(settings)?,
+            },
+        )))
     }
 }
 
