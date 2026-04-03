@@ -2119,6 +2119,25 @@ mod tests {
             asset_server.load_override::<CoolText>("../a.cool.ron"),
             Handle::default()
         );
+
+        assert_eq!(
+            LoadContext::new(&asset_server, "fake_path".into(), false, false)
+                .loader()
+                .deferred()
+                .load::<CoolText>("../a.cool.ron"),
+            Handle::default()
+        );
+
+        assert!(matches!(
+            bevy_tasks::block_on(
+                LoadContext::new(&asset_server, "fake_path".into(), false, false)
+                    .loader()
+                    .immediate()
+                    .load::<CoolText>("../a.cool.ron")
+            )
+            .err(),
+            Some(crate::LoadDirectError::UnapprovedPath { .. })
+        ));
     }
 
     #[test]
@@ -2130,6 +2149,24 @@ mod tests {
             asset_server.load::<CoolText>("../a.cool.ron"),
             Handle::default()
         );
+
+        assert_eq!(
+            LoadContext::new(&asset_server, AssetPath::parse("fake_path"), false, false)
+                .loader()
+                .load::<CoolText>("../a.cool.ron"),
+            Handle::default()
+        );
+
+        assert!(matches!(
+            bevy_tasks::block_on(
+                LoadContext::new(&asset_server, "fake_path".into(), false, false)
+                    .loader()
+                    .immediate()
+                    .load::<CoolText>("../a.cool.ron")
+            )
+            .err(),
+            Some(crate::LoadDirectError::UnapprovedPath { .. }),
+        ));
     }
 
     #[test]
@@ -2142,6 +2179,20 @@ mod tests {
 
         // Make sure this asset actually loads.
         run_app_until(&mut app, |_| asset_server.is_loaded(&handle).then_some(()));
+
+        let handle = LoadContext::new(&asset_server, AssetPath::parse("fake_path"), false, false)
+            .loader()
+            .load::<CoolText>("../a.cool.ron");
+
+        run_app_until(&mut app, |_| asset_server.is_loaded(&handle).then_some(()));
+
+        assert!(bevy_tasks::block_on(
+            LoadContext::new(&asset_server, "fake_path".into(), false, false)
+                .loader()
+                .immediate()
+                .load::<CoolText>("../a.cool.ron")
+        )
+        .is_ok());
     }
 
     #[test]
@@ -2154,6 +2205,20 @@ mod tests {
 
         // Make sure this asset actually loads.
         run_app_until(&mut app, |_| asset_server.is_loaded(&handle).then_some(()));
+
+        let handle = LoadContext::new(&asset_server, AssetPath::parse("fake_path"), false, false)
+            .loader()
+            .load::<CoolText>("../a.cool.ron");
+
+        run_app_until(&mut app, |_| asset_server.is_loaded(&handle).then_some(()));
+
+        assert!(bevy_tasks::block_on(
+            LoadContext::new(&asset_server, "fake_path".into(), false, false)
+                .loader()
+                .immediate()
+                .load::<CoolText>("../a.cool.ron")
+        )
+        .is_ok());
     }
 
     #[test]

@@ -346,6 +346,8 @@ pub enum LoadDirectError {
         dependency: AssetPath<'static>,
         error: AssetLoadError,
     },
+    #[error("The asset path {path} is unapproved. See UnapprovedPathMode for details.")]
+    UnapprovedPath { path: AssetPath<'static> },
 }
 
 /// An error that occurs while deserializing [`AssetMeta`].
