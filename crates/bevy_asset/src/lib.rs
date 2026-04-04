@@ -194,9 +194,7 @@ pub use futures_lite::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 pub use handle::*;
 pub use id::*;
 pub use loader::*;
-pub use loader_builders::{
-    Deferred, DynamicTyped, Immediate, NestedLoader, StaticTyped, UnknownTyped,
-};
+pub use loader_builders::NestedLoadBuilder;
 pub use path::*;
 pub use reflect::*;
 pub use render_asset::*;
@@ -810,8 +808,7 @@ mod tests {
             for dep in ron.embedded_dependencies {
                 let loaded = load_context
                     .loader()
-                    .immediate()
-                    .load::<CoolText>(&dep)
+                    .load_async::<CoolText>(&dep)
                     .await
                     .map_err(|_| Self::Error::CannotLoadDependency {
                         dependency: dep.into(),
@@ -1990,8 +1987,7 @@ mod tests {
                 // We expect this load to fail.
                 load_context
                     .loader()
-                    .immediate()
-                    .load::<SubText>("a.cool.ron#A")
+                    .load_async::<SubText>("a.cool.ron#A")
                     .await?;
                 Ok(TestAsset)
             }
@@ -2758,12 +2754,8 @@ mod tests {
             ) -> Result<Self::Asset, Self::Error> {
                 let mut nested_path = String::new();
                 reader.read_to_string(&mut nested_path).await?;
-                let deferred_nested: LoadedAsset<DeferredNested> = load_context
-                    .loader()
-                    .immediate()
-                    .load(nested_path)
-                    .await
-                    .unwrap();
+                let deferred_nested: LoadedAsset<DeferredNested> =
+                    load_context.loader().load_async(nested_path).await.unwrap();
                 Ok(ImmediateNested(deferred_nested.get().0.clone()))
             }
 
