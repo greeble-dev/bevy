@@ -1000,8 +1000,8 @@ impl AssetServer {
                 });
                 Ok(final_handle)
             }
-            Err(_) => {
-                todo!("XXX TODO");
+            Err(err) => {
+                todo!("XXX TODO {err}");
             }
         }
     }

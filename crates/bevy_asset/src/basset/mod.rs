@@ -13,10 +13,9 @@ use crate::{
         },
         standalone::{read_standalone_asset, write_standalone_asset},
     },
-    io::{AssetSourceId, AssetSources},
+    io::{AssetReaderError, AssetSourceId, AssetSources},
     meta::{AssetActionMinimal, AssetMetaMinimal},
-    Asset, AssetApp, AssetContainer, AssetServer, DeserializeMetaError, LabeledAsset,
-    UntypedAssetId,
+    Asset, AssetApp, AssetServer, DeserializeMetaError,
 };
 use alloc::{borrow::ToOwned, boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use atomicow::CowArc;
@@ -33,6 +32,7 @@ use bevy_platform::collections::{HashMap, HashSet};
 use bevy_reflect::TypePath;
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
+    any::type_name,
     fmt::{Debug, Display},
     ops::Deref,
     result::Result,
@@ -272,35 +272,11 @@ pub struct ApplyContext<'a> {
     loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
 }
 
-// XXX TODO: Oof, that name.
-pub struct PartialErasedLoadedLabeledAsset {
-    pub(crate) value: Box<dyn AssetContainer>,
-    #[expect(unused, reason = "XXX TODO?")]
-    pub(crate) id: UntypedAssetId,
-}
-
-// XXX TODO: Duplicates a lot of `PartialErasedLoadedAsset` and `ErasedLoadedAsset`.
-impl PartialErasedLoadedLabeledAsset {
-    pub fn get<A: Asset>(&self) -> Option<&A> {
-        self.value.downcast_ref::<A>()
-    }
-
-    pub fn downcast<A: Asset>(mut self) -> Result<A, PartialErasedLoadedLabeledAsset> {
-        match self.value.downcast::<A>() {
-            Ok(value) => Ok(*value),
-            Err(value) => {
-                self.value = value;
-                Err(self)
-            }
-        }
-    }
-}
-
-impl From<LabeledAsset> for PartialErasedLoadedLabeledAsset {
-    fn from(value: LabeledAsset) -> Self {
+impl<'a> ApplyContext<'a> {
+    pub fn new(asset_server: &'a AssetServer) -> Self {
         Self {
-            value: value.asset.value,
-            id: value.handle.id(),
+            asset_server,
+            loader_dependencies: Default::default(),
         }
     }
 }
@@ -363,7 +339,7 @@ impl ApplyContext<'_> {
             Ok(result) => Ok(*result),
             Err(original) => panic!(
                 "Should have made type {}, actually made type {}. Path: {path:?}",
-                core::any::type_name::<T>(),
+                type_name::<T>(),
                 original.asset_type_name(),
             ),
         }
@@ -450,10 +426,8 @@ impl Default for DevelopmentActionSourceSettings {
         // XXX TODO: Review if we should be doing this. Maybe should be added
         // afterwards so it's not exposed to the user. Maybe shouldn't even go
         // in here since it could be special cases?
-        action_type_name_to_action.insert(
-            core::any::type_name::<action::LoadPath>(),
-            Box::new(action::LoadPath),
-        );
+        action_type_name_to_action
+            .insert(type_name::<action::LoadPath>(), Box::new(action::LoadPath));
 
         Self {
             file_cache_path: Default::default(),
@@ -483,7 +457,7 @@ impl DevelopmentActionSourceSettings {
 
     pub fn with_action<T: BassetAction>(mut self, action: T) -> Self {
         self.action_type_name_to_action
-            .insert(core::any::type_name::<T>(), Box::new(action));
+            .insert(type_name::<T>(), Box::new(action));
 
         self
     }
@@ -493,7 +467,7 @@ impl DevelopmentActionSourceSettings {
         let settings = T::Settings::default();
 
         self.asset_type_name_to_saver.insert(
-            core::any::type_name::<T::Asset>(),
+            type_name::<T::Asset>(),
             (Box::new(saver), Box::new(settings)),
         );
 
@@ -621,10 +595,7 @@ impl ActionSource for DevelopmentActionSource {
             // an `AssetRef` but maybe could be specialized for an action.
             let path = RootAssetRef::from(action.clone());
 
-            let apply_context = ApplyContext {
-                asset_server,
-                loader_dependencies: HashMap::default(),
-            };
+            let apply_context = ApplyContext::new(asset_server);
 
             if let Some(action_cache) = &self.action_cache
                 && let Some(dependency_graph) = &self.dependency_graph
@@ -1251,9 +1222,25 @@ impl ActionSource for PublishedActionSource {
             // XXX TODO: The below duplicates a fair amount of `read_standalone_asset`.
             // Refactor?
 
-            let mut meta_reader = self.pack_file.action_meta(&action_string)?;
+            let Ok(mut readers) = self.pack_file.action(&action_string) else {
+                // XXX TODO: Review. We need to support at least some level of
+                // fallback to applying actions, since we have embedded assets
+                // that use `load_with_settings` (e.g. SmaaPlugin). Not sure if
+                // this should be special cased or generalized.
+                return if &*action.name == type_name::<action::LoadPath>() {
+                    let load_path = action::LoadPath;
+
+                    let apply_context = ApplyContext::new(asset_server);
+
+                    ErasedBassetAction::apply(&load_path, apply_context, &action.params).await
+                } else {
+                    // XXX TODO?
+                    Err(AssetReaderError::NotFound(action.to_string().into()).into())
+                };
+            };
+
             let mut meta_bytes = Vec::<u8>::new();
-            meta_reader.read_to_end(&mut meta_bytes).await?;
+            readers.meta.read_to_end(&mut meta_bytes).await?;
 
             let minimal_meta =
                 ron::de::from_bytes::<AssetMetaMinimal>(&meta_bytes).expect("XXX TODO");
@@ -1269,8 +1256,6 @@ impl ActionSource for PublishedActionSource {
                 .expect("XXX TODO");
 
             let meta = loader.deserialize_meta(&meta_bytes).expect("XXX TODO");
-
-            let mut asset_reader = self.pack_file.action_asset(&action_string)?;
 
             let load_dependencies = true;
             let populate_hashes = false;
@@ -1289,7 +1274,7 @@ impl ActionSource for PublishedActionSource {
                     &fake_path,
                     meta.loader_settings().expect("meta is set to Load"),
                     &*loader,
-                    &mut asset_reader,
+                    &mut readers.asset,
                     load_dependencies,
                     populate_hashes,
                     update_dependency_cache,

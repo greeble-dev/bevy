@@ -149,7 +149,7 @@ const PACK_VERSION: u16 = 1;
 pub(crate) struct ReadableStorage(pub(crate) Box<[u8]>);
 
 impl<'a> ReadableStorage {
-    fn read(&'a self, location: PackLocation) -> Result<impl Reader + 'a, AssetReaderError> {
+    fn read(&'a self, location: PackLocation) -> Result<SliceReader<'a>, AssetReaderError> {
         // XXX TODO: Bounds checking.
 
         Ok(SliceReader::new(
@@ -166,15 +166,22 @@ pub struct ReadablePackFile {
     pub(crate) storage: ReadableStorage,
 }
 
+pub(crate) struct MetaAndAssetReader<'a> {
+    pub(crate) meta: SliceReader<'a>,
+    pub(crate) asset: SliceReader<'a>,
+}
+
 impl<'a> ReadablePackFile {
     pub(crate) fn path_meta(
         &'a self,
         source: &AssetSourceId,
         path: &Path,
-    ) -> Result<impl Reader + 'a, AssetReaderError> {
+    ) -> Result<SliceReader<'a>, AssetReaderError> {
         let location = self
             .manifest
             .path(source, path)
+            // XXX TODO: Would be clearer if error mentioned pack files. Maybe
+            // need to catch and add more content higher up the chain?
             .ok_or_else(|| AssetReaderError::NotFound(path.into()))?;
 
         self.storage.read(location.meta)
@@ -185,7 +192,7 @@ impl<'a> ReadablePackFile {
         &'a self,
         source: &AssetSourceId,
         path: &Path,
-    ) -> Result<impl Reader + 'a, AssetReaderError> {
+    ) -> Result<SliceReader<'a>, AssetReaderError> {
         let location = self
             .manifest
             .path(source, path)
@@ -194,30 +201,19 @@ impl<'a> ReadablePackFile {
         self.storage.read(location.asset)
     }
 
-    // XXX TODO: Very similar to `ReadablePackFile::path_meta`. Refactor?
-    pub(crate) fn action_meta(
+    pub(crate) fn action(
         &'a self,
         action: &str,
-    ) -> Result<impl Reader + 'a, AssetReaderError> {
+    ) -> Result<MetaAndAssetReader<'a>, AssetReaderError> {
         let location = self
             .manifest
             .action(action)
-            .ok_or_else(|| AssetReaderError::NotFound("XXX TODO".into()))?;
+            .ok_or_else(|| AssetReaderError::NotFound(action.into()))?;
 
-        self.storage.read(location.meta)
-    }
-
-    // XXX TODO: Very similar to `ReadablePackFile::path_meta`. Refactor?
-    pub(crate) fn action_asset(
-        &'a self,
-        action: &str,
-    ) -> Result<impl Reader + 'a, AssetReaderError> {
-        let location = self
-            .manifest
-            .action(action)
-            .ok_or_else(|| AssetReaderError::NotFound("XXX TODO".into()))?;
-
-        self.storage.read(location.asset)
+        Ok(MetaAndAssetReader {
+            meta: self.storage.read(location.meta)?,
+            asset: self.storage.read(location.asset)?,
+        })
     }
 }
 
