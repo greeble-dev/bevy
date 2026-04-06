@@ -185,7 +185,7 @@ mod render_asset;
 mod server;
 
 pub use assets::*;
-pub use bevy_asset_macros::Asset;
+pub use bevy_asset_macros::{Asset, VisitAssetDependencies};
 use bevy_diagnostic::{Diagnostic, DiagnosticsStore, RegisterDiagnostic};
 pub use direct_access_ext::DirectAssetAccessExt;
 pub use event::*;
@@ -721,7 +721,7 @@ mod tests {
         loader::{AssetLoader, LoadContext},
         Asset, AssetApp, AssetEvent, AssetId, AssetLoadError, AssetLoadFailedEvent, AssetPath,
         AssetPlugin, AssetServer, Assets, InvalidGenerationError, LoadState, LoadedAsset,
-        UnapprovedPathMode, UntypedHandle, WriteDefaultMetaError,
+        UnapprovedPathMode, UntypedHandle, VisitAssetDependencies, WriteDefaultMetaError,
     };
     use alloc::{
         boxed::Box,
@@ -2018,6 +2018,12 @@ mod tests {
     #[derive(Asset, TypePath)]
     pub struct TestAsset;
 
+    // Test that `VisitAssetDependencies` can be derived without deriving
+    // `Asset`, and that the type can be used as a `#[dependency]` within an
+    // asset.
+    #[derive(VisitAssetDependencies)]
+    pub struct TestNonAssetType(#[dependency] Handle<TestAsset>);
+
     #[derive(Asset, TypePath)]
     #[expect(
         dead_code,
@@ -2040,6 +2046,8 @@ mod tests {
             map_handles: HashMap<String, Handle<TestAsset>>,
             #[dependency]
             untyped_map_handles: HashMap<String, UntypedHandle>,
+            #[dependency]
+            non_asset_type: TestNonAssetType,
         },
         StructStyle(#[dependency] TestAsset),
         Empty,
@@ -2067,6 +2075,8 @@ mod tests {
         map_handles: HashMap<String, Handle<TestAsset>>,
         #[dependency]
         untyped_map_handles: HashMap<String, UntypedHandle>,
+        #[dependency]
+        non_asset_type: TestNonAssetType,
     }
 
     #[expect(
