@@ -185,7 +185,7 @@ mod render_asset;
 mod server;
 
 pub use assets::*;
-pub use bevy_asset_macros::Asset;
+pub use bevy_asset_macros::{Asset, VisitAssetDependencies};
 use bevy_diagnostic::{Diagnostic, DiagnosticsStore, RegisterDiagnostic};
 pub use direct_access_ext::DirectAssetAccessExt;
 pub use event::*;
@@ -477,96 +477,120 @@ pub trait AsAssetId: Component {
     fn as_asset_id(&self) -> AssetId<Self::Asset>;
 }
 
+/// XXX TODO: Document.
+pub enum AssetDependency<'a> {
+    // XXX TODO: Might have to remove ID support, since the dependency graph needs the full path.
+    Id(UntypedAssetId),
+    Handle(&'a UntypedHandle),
+    // XXX TODO: Should expose `AssetRef` lifetime parameter?
+    Path(&'a AssetRef<'static>),
+}
+
+impl AssetDependency<'_> {
+    fn id(&self) -> Option<UntypedAssetId> {
+        match self {
+            AssetDependency::Handle(handle) => Some(handle.id()),
+            AssetDependency::Id(id) => Some(*id),
+            AssetDependency::Path(_) => None,
+        }
+    }
+
+    #[expect(unused, reason = "XXX TODO?")]
+    fn path(&self) -> Option<&AssetRef<'static>> {
+        match self {
+            AssetDependency::Handle(handle) => handle.path(),
+            AssetDependency::Id(_) => None,
+            AssetDependency::Path(path) => Some(path),
+        }
+    }
+}
+
 /// This trait defines how to visit the dependencies of an asset.
 /// For example, a 3D model might require both textures and meshes to be loaded.
 ///
 /// Note that this trait is automatically implemented when deriving [`Asset`].
 pub trait VisitAssetDependencies {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    );
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency));
 }
 
 impl<A: Asset> VisitAssetDependencies for Handle<A> {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
-        visit(self.id().untyped(), self.path());
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+        // XXX TODO: Doesn't feel great having to clone here.
+        //
+        // Note that if UUID assets are dropped then both `Handle<A>` and
+        // `UntypedHandle` are basically a `StrongHandle`, so maybe `Handle<A>`
+        // could simply be a wrapper around `UntypedHandle`?
+        //
+        // Another option might be for `AssetDependency` to include a `StrongHandle`
+        // variant?
+        //
+        // Yet another option is to give `VisitAssetDependencies` two separate visits -
+        // one for paths and one for handles/ids.
+        visit(AssetDependency::Handle(&self.clone().untyped()));
     }
 }
 
-impl<A: Asset> VisitAssetDependencies for Option<Handle<A>> {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
-        if let Some(handle) = self {
-            visit(handle.id().untyped(), handle.path());
-        }
-    }
-}
+// XXX TODO: Review this removal in favor of blanket Option impl below.
+// impl<A: Asset> VisitAssetDependencies for Option<Handle<A>> {
+//     fn visit_dependencies(
+//         &self,
+//         visit: &mut impl FnMut(AssetDependency),
+//     ) {
+//         if let Some(handle) = self {
+//             visit(handle.id().untyped(), handle.path());
+//         }
+//     }
+// }
 
 impl VisitAssetDependencies for UntypedHandle {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
-        visit(self.id(), self.path());
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+        visit(AssetDependency::Handle(self));
     }
 }
 
-impl VisitAssetDependencies for Option<UntypedHandle> {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
-        if let Some(handle) = self {
-            visit(handle.id(), handle.path());
-        }
-    }
-}
-
-/* XXX TODO: Can't support this due to lack of path?
+// XXX TODO: Review this removal in favor of blanket Option impl below.
+// impl VisitAssetDependencies for Option<UntypedHandle> {
+//     fn visit_dependencies(
+//         &self,
+//         visit: &mut impl FnMut(AssetDependency),
+//     ) {
+//         if let Some(handle) = self {
+//             visit(handle.id(), handle.path());
+//         }
+//     }
+// }
 
 impl VisitAssetDependencies for UntypedAssetId {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
-        visit(*self, self.path());
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+        visit(AssetDependency::Id(*self));
     }
 }
-*/
+
+// XXX TODO: Should support `AssetRef` lifetime parameter?
+impl VisitAssetDependencies for AssetRef<'static> {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+        visit(AssetDependency::Path(self));
+    }
+}
 
 impl<A: Asset, const N: usize> VisitAssetDependencies for [Handle<A>; N] {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
         for dependency in self {
-            visit(dependency.id().untyped(), dependency.path());
+            dependency.visit_dependencies(visit);
         }
     }
 }
 
 impl<const N: usize> VisitAssetDependencies for [UntypedHandle; N] {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
         for dependency in self {
-            visit(dependency.id(), dependency.path());
+            dependency.visit_dependencies(visit);
         }
     }
 }
 
 impl<V: VisitAssetDependencies> VisitAssetDependencies for Vec<V> {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
         for dependency in self {
             dependency.visit_dependencies(visit);
         }
@@ -574,10 +598,7 @@ impl<V: VisitAssetDependencies> VisitAssetDependencies for Vec<V> {
 }
 
 impl<V: VisitAssetDependencies> VisitAssetDependencies for HashSet<V> {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
         for dependency in self {
             dependency.visit_dependencies(visit);
         }
@@ -585,23 +606,25 @@ impl<V: VisitAssetDependencies> VisitAssetDependencies for HashSet<V> {
 }
 
 impl<A: Asset, K> VisitAssetDependencies for HashMap<K, Handle<A>> {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
         for dependency in self.values() {
-            visit(dependency.id().untyped(), dependency.path());
+            dependency.visit_dependencies(visit);
         }
     }
 }
 
 impl<K> VisitAssetDependencies for HashMap<K, UntypedHandle> {
-    fn visit_dependencies(
-        &self,
-        visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-    ) {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
         for dependency in self.values() {
-            visit(dependency.id(), dependency.path());
+            dependency.visit_dependencies(visit);
+        }
+    }
+}
+
+impl<V: VisitAssetDependencies> VisitAssetDependencies for Option<V> {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+        if let Some(value) = self {
+            value.visit_dependencies(visit);
         }
     }
 }

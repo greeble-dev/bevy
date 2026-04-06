@@ -15,7 +15,7 @@ use crate::{
     },
     io::{AssetReaderError, AssetSourceId, AssetSources},
     meta::{AssetActionMinimal, AssetMetaMinimal},
-    Asset, AssetApp, AssetServer, DeserializeMetaError,
+    Asset, AssetApp, AssetDependency, AssetServer, DeserializeMetaError,
 };
 use alloc::{borrow::ToOwned, boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use atomicow::CowArc;
@@ -193,6 +193,8 @@ pub enum RootAssetRef<'a> {
 }
 
 impl<'a> RootAssetRef<'a> {
+    // XXX TODO: Consider a clone_without_label version - would avoid redundantly
+    // cloning the label for the common case of `RootAssetRef::without_label(path.clone())`.
     pub fn without_label(value: AssetRef<'a>) -> RootAssetRef<'a> {
         match value {
             AssetRef::Path(path) => Self::Path(RootAssetPath::without_label(path)),
@@ -719,15 +721,34 @@ impl ActionSource for DevelopmentActionSource {
                     loader_dependees.push((dependee_path, dependee_key));
                 }
 
-                let external_dependees = asset
-                    .dependencies
-                    .iter()
-                    .filter_map(|(_, path)| path.clone().map(RootAssetRef::without_label));
+                let mut external_dependees = HashSet::<RootAssetRef>::new();
 
-                // XXX TODO: We're not accounting for sub-asset dependencies.
+                asset.visit_dependencies(&mut |dependency| {
+                    if let Some(path) = match dependency {
+                        AssetDependency::Id(_) => todo!(
+                            "Decide if we disallow ids. Dependency tracking requires the path."
+                        ),
+                        AssetDependency::Handle(handle) => handle.path().cloned(),
+                        AssetDependency::Path(path) => Some(path.clone()),
+                    } {
+                        external_dependees.insert(RootAssetRef::without_label(path));
+                    }
+                });
 
-                let dependency_value =
-                    DependencyCacheValue::new(loader_dependees.into_iter(), external_dependees);
+                if !path.to_string().contains("embedded://") {
+                    std::dbg!(&path, &external_dependees); // XXX DO NOT CHECK IN
+
+                    if path.to_string() == "BoxTextured\\CesiumLogoFlat.png" {
+                        panic!();
+                    }
+                }
+
+                // XXX TODO: Are we account for sub-asset dependencies?
+
+                let dependency_value = DependencyCacheValue::new(
+                    loader_dependees.into_iter(),
+                    external_dependees.into_iter(),
+                );
 
                 dependency_graph.register_dependencies(path, dependency_key, dependency_value)
             } else {
@@ -760,7 +781,7 @@ impl ActionSource for DevelopmentActionSource {
     fn dump_dependency_graph(&self) {
         self.dependency_graph
             .as_ref()
-            .inspect(|g| debug!("GRAPH DUMP\n{:?}", g));
+            .inspect(|g| info!("GRAPH DUMP\n{:?}", g));
     }
 
     fn publish<'a>(
@@ -810,14 +831,16 @@ impl ActionSource for DevelopmentActionSource {
                             .await
                             .expect("XXX TODO");
 
-                        input_stack.extend(
-                            loaded
-                                .dependencies
-                                .values()
-                                .flatten()
-                                .cloned()
-                                .map(RootAssetRef::without_label),
-                        );
+                        // XXX TODO: Duplicated in `RootAssetRef::Action` case?
+                        loaded.visit_dependencies(&mut |dependency| {
+                            if let Some(path) = match dependency {
+                                AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
+                                AssetDependency::Handle(handle) => handle.path().cloned(),
+                                AssetDependency::Path(path) => Some(path.clone()),
+                            } {
+                                input_stack.push(RootAssetRef::without_label(path));
+                            };
+                        });
 
                         input_stack.extend(
                             loaded
@@ -899,14 +922,15 @@ impl ActionSource for DevelopmentActionSource {
                             },
                         );
 
-                        input_stack.extend(
-                            loaded
-                                .dependencies
-                                .values()
-                                .flatten()
-                                .cloned()
-                                .map(RootAssetRef::without_label),
-                        );
+                        loaded.visit_dependencies(&mut |dependency| {
+                            if let Some(path) = match dependency {
+                                AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
+                                AssetDependency::Handle(handle) => handle.path().cloned(),
+                                AssetDependency::Path(path) => Some(path.clone()),
+                            } {
+                                input_stack.push(RootAssetRef::without_label(path));
+                            };
+                        });
 
                         // XXX TODO: We're not accounting for the standalone asset having
                         // loader dependencies. Not sure if we can work them out unless
@@ -1146,8 +1170,12 @@ pub trait ActionSource: Send + Sync + 'static {
     }
 
     // XXX TODO: Less hacky debugging.
-    fn dump_dependency_graph(&self) {}
+    fn dump_dependency_graph(&self) {
+        // XXX TODO?
+        tracing::error!("dump_dependency_graph not implemented");
+    }
 
+    // XXX TODO: Should this be here?
     fn publish<'a>(
         &'a self,
         _input: PublishInput,
@@ -1319,6 +1347,23 @@ pub mod action {
 
             let settings = params.loader_settings.clone();
 
+            // XXX TODO: Need to think through dependencies - I don't think this is
+            // right.
+            //
+            // First, inside `erased_load_dependee_path` there's a call to `load_path`,
+            // which will call `load_with_settings_loader_and_reader`, which will register
+            // the file in the dependency tree _without_ settings. Should it even do this?
+            //
+            // Second, `erased_load_dependee_path` then registers the file (again without settings)
+            // as a loader dependency in `ApplyContext`, but we don't call `ApplyContext::finish`,
+            // so it's never used. This means the file the action is loading is not actually
+            // registered as a loader dependency of this action. That seems wrong - it means
+            // this action has no dependencies in the loader dependency graph.
+            //
+            // Suspect that we need to distinguish between bytes-only dependencies and
+            // those that go through a loader. So technically the path we're loading
+            // here is a bytes-only dependency, and any dependencies is has when actually
+            // loaded become this action's loader dependencies.
             context.erased_load_dependee_path(&path, &settings).await
 
             // XXX TODO: Note that we're not calling `context.finish()`. Probably

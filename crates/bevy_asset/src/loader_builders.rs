@@ -276,9 +276,7 @@ impl NestedLoader<'_, '_, StaticTyped, Deferred> {
         // `load` and `get_or_create_path_handle` always returns a Strong
         // variant, so we are safe to unwrap.
         let index = (&handle).try_into().unwrap();
-        self.load_context
-            .dependencies
-            .insert(index, Some(path.into_owned()));
+        self.load_context.dependencies.insert(index);
         handle
     }
 }
@@ -305,9 +303,7 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
         // `load_erased_with_meta_transform` and `get_or_create_path_handle_erased` always returns a
         // Strong variant, so we are safe to unwrap.
         let index = (&handle).try_into().unwrap();
-        self.load_context
-            .dependencies
-            .insert(index, Some(path.into_owned()));
+        self.load_context.dependencies.insert(index);
         handle
     }
 }
@@ -331,9 +327,7 @@ impl NestedLoader<'_, '_, UnknownTyped, Deferred> {
         // `load_unknown_type_with_meta_transform` and `get_or_create_path_handle` always returns a
         // Strong variant, so we are safe to unwrap.
         let index = (&handle).try_into().unwrap();
-        self.load_context
-            .dependencies
-            .insert(index, Some(path.into_owned()));
+        self.load_context.dependencies.insert(index);
         handle
     }
 }

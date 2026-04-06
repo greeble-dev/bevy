@@ -402,39 +402,47 @@ where
 mod acme {
     use super::*;
     use bevy::pbr::experimental::meshlet::MeshletMesh3d;
+    use bevy_asset::VisitAssetDependencies;
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, VisitAssetDependencies)]
     pub struct AcmeMesh {
+        #[dependency]
         pub asset: AssetRef<'static>,
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, VisitAssetDependencies)]
     pub struct AcmeMeshletMesh {
+        #[dependency]
         pub asset: AssetRef<'static>,
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, VisitAssetDependencies)]
     pub struct AcmeMaterial {
+        #[dependency]
         pub base_color_texture: Option<AssetRef<'static>>,
     }
 
-    #[derive(Serialize, Deserialize, Default, Debug)]
+    #[derive(Serialize, Deserialize, Default, Debug, VisitAssetDependencies)]
     pub struct AcmeEntity {
         #[serde(default)]
         pub transform: Transform,
 
         #[serde(default)]
+        #[dependency]
         pub mesh: Option<AcmeMesh>,
 
         #[serde(default)]
+        #[dependency]
         pub meshlet_mesh: Option<AcmeMeshletMesh>,
 
         #[serde(default)]
+        #[dependency]
         pub material: Option<AcmeMaterial>,
     }
 
     #[derive(Asset, TypePath, Serialize, Deserialize, Default, Debug)]
     pub struct AcmeScene {
+        #[dependency]
         pub entities: Vec<AcmeEntity>,
     }
 
@@ -488,10 +496,10 @@ mod acme {
                         get_sub_asset(asset, primitive.material.as_ref().expect("XXX TODO"));
 
                     let material = Some(AcmeMaterial {
-                        base_color_texture: std::dbg!(standard_material
+                        base_color_texture: standard_material
                             .base_color_texture
                             .clone()
-                            .map(|p| p.path().expect("XXX TODO").clone())),
+                            .map(|p| p.path().expect("XXX TODO").clone()),
                     });
 
                     entities.push(AcmeEntity {
@@ -869,10 +877,10 @@ fn main() {
             // (TypeId::of::<demo::IntAsset>(), "1234.int".into()),
             // (TypeId::of::<demo::IntAsset>(), "int.basset".into()),
             // (TypeId::of::<demo::StringAsset>(), "string.basset".into()),
-            (
-                TypeId::of::<demo::StringAsset>(),
-                "string_loader_uppercase.basset".into(),
-            ),
+            // (
+            //     TypeId::of::<demo::StringAsset>(),
+            //     "string_loader_uppercase.basset".into(),
+            // ),
             // (
             //     TypeId::of::<demo::StringAsset>(),
             //     "join_strings.basset".into(),

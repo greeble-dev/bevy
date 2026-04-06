@@ -601,7 +601,7 @@ mod tests {
     use core::hash::BuildHasher;
     use uuid::Uuid;
 
-    use crate::tests::create_app;
+    use crate::{tests::create_app, AssetDependency};
 
     use super::*;
 
@@ -716,11 +716,7 @@ mod tests {
         }
         impl Asset for MyAsset {}
         impl VisitAssetDependencies for MyAsset {
-            fn visit_dependencies(
-                &self,
-                _visit: &mut impl FnMut(UntypedAssetId, Option<&AssetRef<'static>>),
-            ) {
-            }
+            fn visit_dependencies(&self, _visit: &mut impl FnMut(AssetDependency)) {}
         }
 
         let mut app = create_app().0;

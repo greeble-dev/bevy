@@ -419,6 +419,8 @@ impl CacheKey for DependencyCacheKey {
 pub(crate) struct DependencyCacheValue {
     // XXX TODO: Could store some debug info on the input?
     loader_dependees: Vec<(RootAssetRef<'static>, DependencyCacheKey)>,
+    // XXX TODO: Reconsider name? These are any `Handle` or `AssetRef` dependencies
+    // stored in the asset value.
     external_dependees: Vec<RootAssetRef<'static>>,
 }
 
