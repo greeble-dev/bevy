@@ -17,8 +17,8 @@ use crate::{
     path::AssetPath,
     Asset, AssetAction2, AssetEvent, AssetHandleProvider, AssetId, AssetIndex,
     AssetLoadFailedEvent, AssetMetaCheck, AssetRef, Assets, DeserializeMetaError, ErasedAssetIndex,
-    ErasedLoadedAsset, Handle, LoadedUntypedAsset, UnapprovedPathMode, UntypedAssetId,
-    UntypedAssetLoadFailedEvent, UntypedHandle,
+    ErasedLoadedAsset, Handle, LoadedUntypedAsset, PolyAssetLoader, UnapprovedPathMode,
+    UntypedAssetId, UntypedAssetLoadFailedEvent, UntypedHandle,
 };
 use alloc::{borrow::ToOwned, boxed::Box, vec, vec::Vec};
 use alloc::{
@@ -210,8 +210,8 @@ impl AssetServer {
     }
 
     /// XXX TODO: Document.
-    pub fn register_erased_loader(&self, loader: Box<dyn ErasedAssetLoader>) {
-        self.write_loaders().push_erased(loader);
+    pub fn register_poly_loader<L: PolyAssetLoader>(&self, loader: L) {
+        self.write_loaders().push_poly(loader);
     }
 
     /// Registers a new [`Asset`] type. [`Asset`] types must be registered before assets of that type can be loaded.

@@ -70,9 +70,11 @@ pub trait ErasedAssetLoader: Send + Sync + 'static {
     fn type_id(&self) -> TypeId;
     /// Returns the type name of the top-level [`Asset`] loaded by the [`AssetLoader`].
     /// XXX TODO: Document.
+    // XXX TODO: We changed this to `Option`. Review where it's used to double check everything's ok.
     fn asset_type_name(&self) -> Option<&'static str>;
     /// Returns the [`TypeId`] of the top-level [`Asset`] loaded by the [`AssetLoader`].
     /// XXX TODO: Document.
+    // XXX TODO: We changed this to `Option`. Review where it's used to double check everything's ok.
     fn asset_type_id(&self) -> Option<TypeId>;
     /// XXX TODO: Document, and review if needed. Could technically implement
     /// in terms of `deserialize_meta`, although that's a bit hacky.
@@ -82,10 +84,9 @@ pub trait ErasedAssetLoader: Send + Sync + 'static {
     ) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError>;
 }
 
-impl<L> ErasedAssetLoader for L
-where
-    L: AssetLoader + Send + Sync,
-{
+pub(crate) struct ErasedUniAssetLoader<L: AssetLoader>(pub(crate) L);
+
+impl<L: AssetLoader> ErasedAssetLoader for ErasedUniAssetLoader<L> {
     /// Processes the asset in an asynchronous closure.
     fn load<'a>(
         &'a self,
@@ -97,7 +98,7 @@ where
             let settings = settings
                 .downcast_ref::<L::Settings>()
                 .expect("AssetLoader settings should match the loader type");
-            let asset = <L as AssetLoader>::load(self, reader, settings, &mut load_context)
+            let asset = <L as AssetLoader>::load(&self.0, reader, settings, &mut load_context)
                 .await
                 .map_err(Into::into)?;
             Ok(load_context.finish(asset).into())
@@ -105,19 +106,21 @@ where
     }
 
     fn extensions(&self) -> &[&str] {
-        <L as AssetLoader>::extensions(self)
+        <L as AssetLoader>::extensions(&self.0)
     }
 
     fn deserialize_meta(&self, meta: &[u8]) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
-        let meta = AssetMeta::<L, ()>::deserialize(meta)?;
+        let meta = AssetMeta::<L::Settings, ()>::deserialize(meta)?;
         Ok(Box::new(meta))
     }
 
     fn default_meta(&self) -> Box<dyn AssetMetaDyn> {
-        Box::new(AssetMeta::<L, ()>::new(crate::meta::AssetAction::Load {
-            loader: self.type_path().to_string(),
-            settings: L::Settings::default(),
-        }))
+        Box::new(AssetMeta::<L::Settings, ()>::new(
+            crate::meta::AssetAction::Load {
+                loader: self.type_path().to_string(),
+                settings: L::Settings::default(),
+            },
+        ))
     }
 
     fn type_path(&self) -> &'static str {
@@ -140,7 +143,99 @@ where
         &self,
         settings: &[u8],
     ) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
-        Ok(Box::new(AssetMeta::<L, ()>::new(
+        Ok(Box::new(AssetMeta::<L::Settings, ()>::new(
+            crate::meta::AssetAction::Load {
+                loader: self.type_path().to_string(),
+                settings: ron::de::from_bytes(settings)?,
+            },
+        )))
+    }
+}
+
+pub trait PolyAssetLoader: TypePath + Send + Sync + 'static {
+    /// The settings type used by this [`PolyAssetLoader`].
+    type Settings: Settings + Default + Serialize + for<'a> Deserialize<'a>;
+    /// The type of [error](`std::error::Error`) which could be encountered by this loader.
+    type Error: Into<BevyError>;
+    /// Asynchronously loads an asset from the bytes provided by [`Reader`].
+    ///
+    /// Implementors should use `load_context.finish` to turn their asset into
+    /// an `ErasedLoadedAsset`.
+    ///
+    /// XXX TODO: Reconsider the `load_context.finish` requirement. Maybe more robust
+    /// if this returns a separate type and the asset system calls `finish`.
+    fn load(
+        &self,
+        reader: &mut dyn Reader,
+        settings: &Self::Settings,
+        load_context: LoadContext,
+    ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, Self::Error>>;
+
+    /// Returns a list of extensions supported by this [`PolyAssetLoader`], without the preceding dot.
+    fn extensions(&self) -> &[&str];
+}
+
+pub(crate) struct ErasedPolyAssetLoader<L: PolyAssetLoader>(pub(crate) L);
+
+impl<L> ErasedAssetLoader for ErasedPolyAssetLoader<L>
+where
+    L: PolyAssetLoader + Send + Sync,
+{
+    fn load<'a>(
+        &'a self,
+        reader: &'a mut dyn Reader,
+        settings: &'a dyn Settings,
+        load_context: LoadContext<'a>,
+    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+        Box::pin(async move {
+            let settings = settings
+                .downcast_ref::<L::Settings>()
+                .expect("PolyAssetLoader settings should match the loader type");
+            <L as PolyAssetLoader>::load(&self.0, reader, settings, load_context)
+                .await
+                .map_err(Into::into)
+        })
+    }
+
+    fn extensions(&self) -> &[&str] {
+        <L as PolyAssetLoader>::extensions(&self.0)
+    }
+
+    fn deserialize_meta(&self, meta: &[u8]) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
+        let meta = AssetMeta::<L::Settings, ()>::deserialize(meta)?;
+        Ok(Box::new(meta))
+    }
+
+    fn default_meta(&self) -> Box<dyn AssetMetaDyn> {
+        Box::new(AssetMeta::<L::Settings, ()>::new(
+            crate::meta::AssetAction::Load {
+                loader: self.type_path().to_string(),
+                settings: L::Settings::default(),
+            },
+        ))
+    }
+
+    fn type_path(&self) -> &'static str {
+        L::type_path()
+    }
+
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<L>()
+    }
+
+    fn asset_type_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn asset_type_id(&self) -> Option<TypeId> {
+        None
+    }
+
+    fn meta_from_settings(
+        &self,
+        settings: &[u8],
+    ) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
+        Ok(Box::new(AssetMeta::<L::Settings, ()>::new(
             crate::meta::AssetAction::Load {
                 loader: self.type_path().to_string(),
                 settings: ron::de::from_bytes(settings)?,

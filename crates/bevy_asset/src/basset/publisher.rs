@@ -22,7 +22,7 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
-use futures_lite::{AsyncWriteExt, Stream};
+use futures_lite::{AsyncReadExt, AsyncWriteExt, Stream};
 use serde::{Deserialize, Serialize};
 use std::{
     format,

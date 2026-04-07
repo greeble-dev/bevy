@@ -1,6 +1,7 @@
 use crate::{
     loader::{AssetLoader, ErasedAssetLoader},
     path::AssetPath,
+    ErasedPolyAssetLoader, ErasedUniAssetLoader, PolyAssetLoader,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use async_broadcast::RecvError;
@@ -18,6 +19,7 @@ pub(crate) struct AssetLoaders {
     extension_to_loaders: HashMap<Box<str>, Vec<usize>>,
     type_path_to_loader: HashMap<&'static str, usize>,
     type_path_to_preregistered_loader: HashMap<&'static str, usize>,
+    extension_to_poly_loader: HashMap<Box<str>, usize>,
 }
 
 impl AssetLoaders {
@@ -28,17 +30,12 @@ impl AssetLoaders {
 
     /// Registers a new [`AssetLoader`]. [`AssetLoader`]s must be registered before they can be used.
     pub(crate) fn push<L: AssetLoader>(&mut self, loader: L) {
-        self.push_erased(Box::new(loader));
-    }
-
-    /// Registers a new [`ErasedAssetLoader`]. [`AssetLoader`]s must be registered before they can be used.
-    pub(crate) fn push_erased(&mut self, loader: Box<dyn ErasedAssetLoader>) {
+        let type_path = L::type_path();
         // TODO: Allow using the short path of loaders.
-        let type_path = loader.type_path();
-        let loader_asset_type = loader.asset_type_id();
-        let loader_asset_type_name = loader.asset_type_name();
+        let loader_asset_type = TypeId::of::<L::Asset>();
+        let loader_asset_type_name = core::any::type_name::<L::Asset>();
 
-        let loader = Arc::<dyn ErasedAssetLoader>::from(loader);
+        let loader = Arc::new(ErasedUniAssetLoader(loader));
 
         let (loader_index, is_new) =
             if let Some(index) = self.type_path_to_preregistered_loader.remove(type_path) {
@@ -48,11 +45,9 @@ impl AssetLoaders {
             };
 
         if is_new {
-            // XXX TODO: Review this. Is awkward due to loader_asset_type and loader_asset_type_name being Option.
-            let existing_loaders_for_type_id = loader_asset_type
-                .and_then(|loader_asset_type| self.type_id_to_loaders.get(&loader_asset_type));
+            let existing_loaders_for_type_id = self.type_id_to_loaders.get(&loader_asset_type);
             let mut duplicate_extensions = Vec::new();
-            for extension in loader.extensions() {
+            for extension in AssetLoader::extensions(&loader.0) {
                 let list = self
                     .extension_to_loaders
                     .entry((*extension).into())
@@ -70,22 +65,16 @@ impl AssetLoaders {
                 list.push(loader_index);
             }
             if !duplicate_extensions.is_empty() {
-                // XXX TODO: Avoid awkward unwrap.
-                let loader_asset_type_name = loader_asset_type_name.unwrap_or("TODO");
                 warn!("Duplicate AssetLoader registered for Asset type `{loader_asset_type_name}` with extensions `{duplicate_extensions:?}`. \
-                    Loader must be specified in a .meta file in order to load assets of this type with these extensions.");
+                Loader must be specified in a .meta file in order to load assets of this type with these extensions.");
             }
 
             self.type_path_to_loader.insert(type_path, loader_index);
 
-            // XXX TODO: Review implications of loader_asset_type being Option, which
-            // means we can't update type_id_to_loaders.
-            if let Some(loader_asset_type) = loader_asset_type {
-                self.type_id_to_loaders
-                    .entry(loader_asset_type)
-                    .or_default()
-                    .push(loader_index);
-            }
+            self.type_id_to_loaders
+                .entry(loader_asset_type)
+                .or_default()
+                .push(loader_index);
 
             self.loaders.push(MaybeAssetLoader::Ready(loader));
         } else {
@@ -104,6 +93,33 @@ impl AssetLoaders {
                 }
             }
         }
+    }
+
+    pub(crate) fn push_poly<L: PolyAssetLoader>(&mut self, loader: L) {
+        let loader_index = self.loaders.len();
+
+        // XXX TODO: What if extension is already taken?
+        for &extension in loader.extensions() {
+            if self
+                .extension_to_poly_loader
+                .contains_key(&Box::<str>::from(extension))
+            {
+                todo!("XXX TODO");
+            }
+
+            self.extension_to_poly_loader
+                .insert(extension.into(), loader_index);
+
+            let list = self
+                .extension_to_loaders
+                .entry((*extension).into())
+                .or_default();
+
+            list.push(loader_index);
+        }
+
+        let loader = Arc::new(ErasedPolyAssetLoader(loader));
+        self.loaders.push(MaybeAssetLoader::Ready(loader));
     }
 
     /// Pre-register an [`AssetLoader`] that will later be added.
@@ -177,11 +193,19 @@ impl AssetLoaders {
             return self.get_by_name(type_name);
         }
 
-        // XXX TODO: Looking up the loader by type id is a problem. It means
-        // `load::<XyzAsset>("foo.basset")` will try to use XysAsset's loader
-        // instead of the basset loader. Arguably it should prefer the extension
-        // if one is present? Review rationale in https://github.com/bevyengine/bevy/pull/11644.
-        /*
+        // XXX TODO: Document why we're checking polymorphic loaders first.
+        if let Some(full_extension) = asset_path.and_then(AssetPath::get_full_extension) {
+            if let Some(&index) = self.extension_to_poly_loader.get(full_extension) {
+                return self.get_by_index(index);
+            }
+
+            for extension in AssetPath::iter_secondary_extensions(full_extension) {
+                if let Some(&index) = self.extension_to_poly_loader.get(extension) {
+                    return self.get_by_index(index);
+                }
+            }
+        }
+
         // The presence of a label will affect loader choice
         let label = asset_path.as_ref().and_then(|path| path.label());
 
@@ -195,8 +219,6 @@ impl AssetLoaders {
         } else {
             None
         };
-        */
-        let candidates: Option<&Vec<usize>> = None;
 
         if let Some(candidates) = candidates {
             if candidates.is_empty() {

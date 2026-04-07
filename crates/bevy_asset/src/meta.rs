@@ -23,7 +23,8 @@ pub type MetaTransform = Box<dyn Fn(&mut dyn AssetMetaDyn) + Send + Sync>;
 /// `L` is the [`AssetLoader`] (if one is configured) for the [`AssetAction`]. This can be `()` if it is not required.
 /// `P` is the [`Process`] processor, if one is configured for the [`AssetAction`]. This can be `()` if it is not required.
 #[derive(Serialize, Deserialize)]
-pub struct AssetMeta<L: AssetLoader, P: Process> {
+// XXX TODO: Change to `ProcessSettings` as well for consistency?
+pub struct AssetMeta<LoaderSettings, P: Process> {
     /// The version of the meta format being used. This will change whenever a breaking change is made to
     /// the meta format.
     pub meta_format_version: String,
@@ -34,11 +35,14 @@ pub struct AssetMeta<L: AssetLoader, P: Process> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub processed_info: Option<ProcessedInfo>,
     /// How to handle this asset in the asset system. See [`AssetAction`].
-    pub asset: AssetAction<L::Settings, P::Settings>,
+    pub asset: AssetAction<LoaderSettings, P::Settings>,
 }
 
-impl<L: AssetLoader, P: Process> AssetMeta<L, P> {
-    pub fn new(asset: AssetAction<L::Settings, P::Settings>) -> Self {
+impl<LoaderSettings, P: Process> AssetMeta<LoaderSettings, P>
+where
+    LoaderSettings: for<'a> Deserialize<'a>,
+{
+    pub fn new(asset: AssetAction<LoaderSettings, P::Settings>) -> Self {
         Self {
             meta_format_version: META_FORMAT_VERSION.to_string(),
             processed_info: None,
@@ -139,7 +143,10 @@ pub trait AssetMetaDyn: Downcast + Send + Sync {
     fn processed_info_mut(&mut self) -> &mut Option<ProcessedInfo>;
 }
 
-impl<L: AssetLoader, P: Process> AssetMetaDyn for AssetMeta<L, P> {
+impl<LoaderSettings, P: Process> AssetMetaDyn for AssetMeta<LoaderSettings, P>
+where
+    LoaderSettings: Settings + Default + Serialize + for<'a> Deserialize<'a>,
+{
     fn loader_settings(&self) -> Option<&dyn Settings> {
         if let AssetAction::Load { settings, .. } = &self.asset {
             Some(settings)

@@ -551,10 +551,11 @@ pub async fn save_using_saver<S: AssetSaver>(
 
     file_writer.flush().await.map_err(AssetWriterError::Io)?;
 
-    let meta = AssetMeta::<S::OutputLoader, ()>::new(AssetAction::Load {
-        loader: S::OutputLoader::type_path().into(),
-        settings: loader_settings,
-    });
+    let meta =
+        AssetMeta::<<S::OutputLoader as AssetLoader>::Settings, ()>::new(AssetAction::Load {
+            loader: S::OutputLoader::type_path().into(),
+            settings: loader_settings,
+        });
 
     let meta = AssetMetaDyn::serialize(&meta);
     writer.write_meta_bytes(path.path(), &meta).await?;

@@ -14,18 +14,17 @@ use crate::{
         standalone::{read_standalone_asset, write_standalone_asset},
     },
     io::{AssetReaderError, AssetSourceId, AssetSources},
-    meta::{AssetActionMinimal, AssetMetaMinimal},
-    Asset, AssetApp, AssetDependency, AssetServer, DeserializeMetaError,
+    meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
+    Asset, AssetApp, AssetDependency, AssetPath, AssetServer, PolyAssetLoader,
 };
 use alloc::{borrow::ToOwned, boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use atomicow::CowArc;
 use bevy_app::{App, Plugin};
 use bevy_asset::{
     io::Reader,
-    meta::{AssetAction, AssetHash, AssetMeta, AssetMetaDyn, Settings},
+    meta::Settings,
     saver::{AssetSaver, ErasedAssetSaver},
-    AssetAction2, AssetLoader, AssetPath, AssetRef, ErasedAssetLoader, ErasedLoadedAsset,
-    LoadContext, LoadedAsset,
+    AssetAction2, AssetRef, ErasedAssetLoader, ErasedLoadedAsset, LoadContext, LoadedAsset,
 };
 use bevy_ecs::error::BevyError;
 use bevy_platform::collections::{HashMap, HashSet};
@@ -57,7 +56,7 @@ pub struct BassetPlugin;
 
 impl Plugin for BassetPlugin {
     fn build(&self, app: &mut App) {
-        app.register_erased_asset_loader(Box::new(BassetLoader));
+        app.register_poly_asset_loader(BassetLoader);
     }
 }
 
@@ -735,15 +734,7 @@ impl ActionSource for DevelopmentActionSource {
                     }
                 });
 
-                if !path.to_string().contains("embedded://") {
-                    std::dbg!(&path, &external_dependees); // XXX DO NOT CHECK IN
-
-                    if path.to_string() == "BoxTextured\\CesiumLogoFlat.png" {
-                        panic!();
-                    }
-                }
-
-                // XXX TODO: Are we account for sub-asset dependencies?
+                // XXX TODO: Are we accounting for sub-asset dependencies?
 
                 let dependency_value = DependencyCacheValue::new(
                     loader_dependees.into_iter(),
@@ -963,91 +954,49 @@ struct BassetFileSerializable {
 #[derive(TypePath)]
 struct BassetLoader;
 
-impl ErasedAssetLoader for BassetLoader {
-    fn load<'a>(
-        &'a self,
-        reader: &'a mut dyn Reader,
-        _settings: &'a dyn Settings,
-        load_context: LoadContext<'a>,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+impl PolyAssetLoader for BassetLoader {
+    type Settings = ();
+    type Error = BevyError;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _settings: &Self::Settings,
+        load_context: LoadContext<'_>,
+    ) -> Result<ErasedLoadedAsset, BevyError> {
         assert!(
             load_context.path().label().is_none(),
             "Paranoia. {:?}",
             load_context.path()
         );
 
-        Box::pin(async move {
-            let mut bytes = Vec::new();
-            reader.read_to_end(&mut bytes).await?;
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
 
-            let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
+        let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
 
-            let root_without_label = RootAssetRef::without_label(basset.root.clone());
+        let root_without_label = RootAssetRef::without_label(basset.root.clone());
 
-            let asset = load_ref(load_context.asset_server(), &root_without_label)
-                .await
-                .map(|mut asset| {
-                    // XXX TODO: See other cases of ignoring the hash.
-                    let hash = [0u8; 32];
+        let asset = load_ref(load_context.asset_server(), &root_without_label)
+            .await
+            .map(|mut asset| {
+                // XXX TODO: See other cases of ignoring the hash.
+                let hash = [0u8; 32];
 
-                    // XXX TODO: Justify this dependency replacement.
-                    asset.loader_dependencies.clear();
-                    asset.loader_dependencies.insert(basset.root.clone(), hash);
+                // XXX TODO: Justify this dependency replacement.
+                asset.loader_dependencies.clear();
+                asset.loader_dependencies.insert(basset.root.clone(), hash);
 
-                    asset
-                })?;
+                asset
+            })?;
 
-            asset
-                .take_labeled(basset.root.label_cow())
-                .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", &basset.root).into())
-        })
+        asset
+            .take_labeled(basset.root.label_cow())
+            .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", &basset.root).into())
     }
 
     fn extensions(&self) -> &[&str] {
         &["basset"]
-    }
-
-    fn deserialize_meta(&self, meta: &[u8]) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
-        // XXX TODO: Review. Is this going to be problematic since we don't know the loader type?
-        let meta = AssetMeta::<FakeAssetLoader, ()>::deserialize(meta)?;
-        Ok(Box::new(meta))
-    }
-
-    fn default_meta(&self) -> Box<dyn AssetMetaDyn> {
-        // XXX TODO: Review. Is this going to be problematic since we don't know the loader type?
-        Box::new(AssetMeta::<FakeAssetLoader, ()>::new(AssetAction::Load {
-            loader: self.type_path().to_string(),
-            settings: <FakeAssetLoader as AssetLoader>::Settings::default(),
-        }))
-    }
-
-    fn type_path(&self) -> &'static str {
-        <Self as TypePath>::type_path()
-    }
-
-    fn type_id(&self) -> core::any::TypeId {
-        core::any::TypeId::of::<Self>()
-    }
-
-    fn asset_type_name(&self) -> Option<&'static str> {
-        None
-    }
-
-    fn asset_type_id(&self) -> Option<core::any::TypeId> {
-        None
-    }
-
-    fn meta_from_settings(
-        &self,
-        settings: &[u8],
-    ) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
-        // XXX TODO: Review. Is this going to be problematic since we don't know the loader type?
-        Ok(Box::new(AssetMeta::<FakeAssetLoader, ()>::new(
-            AssetAction::Load {
-                loader: self.type_path().to_string(),
-                settings: ron::de::from_bytes(settings)?,
-            },
-        )))
     }
 }
 
@@ -1105,26 +1054,6 @@ pub(crate) async fn load_path(
         .map_err(Into::<BevyError>::into)?;
 
     Ok((asset, loader.clone()))
-}
-
-// TODO: Review this. Awkward hack so that `BassetLoader::default_meta` and
-// `BassetLoader::deserialize_meta` can return a meta even if it's wrong.
-#[derive(TypePath)]
-struct FakeAssetLoader;
-
-impl AssetLoader for FakeAssetLoader {
-    type Asset = ();
-    type Settings = ();
-    type Error = std::io::Error;
-
-    async fn load(
-        &self,
-        _reader: &mut dyn Reader,
-        _settings: &Self::Settings,
-        _load_context: &mut LoadContext<'_>,
-    ) -> Result<Self::Asset, Self::Error> {
-        Ok(())
-    }
 }
 
 // XXX TODO: Review name? Does have some similarities to `AssetSource` but not

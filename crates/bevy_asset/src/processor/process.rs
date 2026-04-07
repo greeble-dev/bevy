@@ -254,11 +254,15 @@ impl<P: Process> ErasedProcessor for P {
         Box::pin(async move {
             let settings = settings.downcast_ref().ok_or(ProcessError::WrongMetaType)?;
             let loader_settings = <P as Process>::process(self, context, settings, writer).await?;
-            let output_meta: Box<dyn AssetMetaDyn> =
-                Box::new(AssetMeta::<P::OutputLoader, ()>::new(AssetAction::Load {
+            let output_meta: Box<dyn AssetMetaDyn> = Box::new(AssetMeta::<
+                <P::OutputLoader as AssetLoader>::Settings,
+                (),
+            >::new(
+                AssetAction::Load {
                     loader: P::OutputLoader::type_path().to_string(),
                     settings: loader_settings,
-                }));
+                },
+            ));
             Ok(output_meta)
         })
     }
