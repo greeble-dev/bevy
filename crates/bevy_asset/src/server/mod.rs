@@ -1556,7 +1556,7 @@ impl AssetServer {
                     // TODO: Handle error transformation
                     let loader = {
                         self.read_loaders()
-                            .find(None, asset_type_id, None, Some(asset_path))
+                            .find(None, asset_type_id, Some(asset_path))
                     };
 
                     let error = || AssetLoadError::MissingAssetLoader {
@@ -1576,7 +1576,7 @@ impl AssetServer {
         } else {
             let loader = {
                 self.read_loaders()
-                    .find(None, asset_type_id, None, Some(asset_path))
+                    .find(None, asset_type_id, Some(asset_path))
             };
 
             let error = || AssetLoadError::MissingAssetLoader {
