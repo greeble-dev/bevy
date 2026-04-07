@@ -724,7 +724,7 @@ impl PipelineCache {
             for (id, shader) in shaders.iter() {
                 let mut shader = shader.clone();
                 shader.shader_defs.extend(cache.global_shader_defs.clone());
-                cache.set_shader(id, shader);
+                cache.set_shader(id.into(), shader);
             }
             // Drain events so we don't double-process shaders we just loaded.
             for _ in events.read() {}

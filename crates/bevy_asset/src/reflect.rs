@@ -19,8 +19,8 @@ use bevy_reflect::{
 };
 
 use crate::{
-    Asset, AssetData, AssetEntity, AssetPath, AssetServer, AssetUuidMap, DirectAssetAccessExt, Handle, InsertAssetError,
-    UntypedAssetId, UntypedHandle,
+    Asset, AssetData, AssetEntity, AssetId, AssetPath, AssetServer, AssetUuidMap,
+    DirectAssetAccessExt, Handle, InsertAssetError, LoadContext, UntypedAssetId, UntypedHandle,
 };
 
 /// Type data for the [`TypeRegistry`] used to operate on reflected [`Asset`]s.
@@ -605,9 +605,8 @@ mod tests {
 
     use crate::{
         tests::{create_app, run_app_until, CoolText, CoolTextLoader, CoolTextRon, SubText},
-        Asset, AssetApp, AssetServer, Assets, DirectAssetAccessExt, EphemeralHandleBehavior,
-        Handle, HandleDeserializeProcessor, HandleSerializeProcessor, LoadedUntypedAsset,
-        ReflectAsset, UntypedHandle,
+        Asset, AssetApp, AssetServer, DirectAssetAccessExt, EphemeralHandleBehavior, Handle,
+        HandleDeserializeProcessor, HandleSerializeProcessor, ReflectAsset, UntypedHandle,
     };
     use bevy_ecs::reflect::AppTypeRegistry;
     use bevy_reflect::{
@@ -710,15 +709,9 @@ mod tests {
 
             let untyped = asset_server.load_untyped("def.cool.ron");
             run_app_until(&mut app, |_| asset_server.is_loaded(&untyped).then_some(()));
-            let untyped = app
-                .world()
-                .resource::<Assets<LoadedUntypedAsset>>()
-                .get(&untyped)
-                .unwrap()
-                .handle
-                .clone();
+            let untyped = app.world().get_asset(untyped.id()).unwrap().handle.clone();
 
-            let ephemeral = app.world_mut().add_asset(OtherAsset);
+            let ephemeral = app.world_mut().spawn_asset(OtherAsset);
 
             let stuff = Stuff {
                 typed: asset_server.load("abc.cool.ron"),
@@ -785,17 +778,12 @@ mod tests {
 
         // Make sure that the handles actually do end up with the correct assets.
         assert_eq!(
-            app.world()
-                .resource::<Assets<CoolText>>()
-                .get(&stuff.typed)
-                .unwrap()
-                .text,
+            app.world().get_asset(stuff.typed.id()).unwrap().text,
             "hello"
         );
         assert_eq!(
             app.world()
-                .resource::<Assets<CoolText>>()
-                .get(&stuff.untyped.try_typed::<CoolText>().unwrap())
+                .get_asset(stuff.untyped.try_typed::<CoolText>().unwrap().id())
                 .unwrap()
                 .text,
             "world"

@@ -295,9 +295,8 @@ impl Plugin for PbrPlugin {
             .is_some_and(|render_app| render_app.world().is_resource_added::<LtcLuts>());
 
         if !has_ltc_luts {
-            let mut images = app.world_mut().resource_mut::<Assets<Image>>();
             let ltc_luts = LtcLuts {
-                ltc_1: images.add(
+                ltc_1: app.world_mut().spawn_asset(
                     Image::from_buffer(
                         include_bytes!("ltc/ltc1.ktx2"),
                         ImageType::Extension("ktx2"),
@@ -308,7 +307,7 @@ impl Plugin for PbrPlugin {
                     )
                     .expect("Failed to decode embedded LTC LUT 1"),
                 ),
-                ltc_2: images.add(
+                ltc_2: app.world_mut().spawn_asset(
                     Image::from_buffer(
                         include_bytes!("ltc/ltc2.ktx2"),
                         ImageType::Extension("ktx2"),

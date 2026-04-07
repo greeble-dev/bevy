@@ -13,8 +13,7 @@ use bevy_asset::{
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     component::Component, message::MessageReader, reflect::ReflectComponent, resource::Resource,
-    system::ResMut,
-    template::FromTemplate,
+    system::ResMut, template::FromTemplate,
 };
 use bevy_platform::collections::HashMap;
 use bevy_reflect::{prelude::ReflectDefault, Reflect, TypePath};

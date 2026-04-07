@@ -4,10 +4,7 @@ use alloc::{borrow::Cow, sync::Arc};
 use bevy_asset::{Asset, AssetEvent, AssetId, Assets, AssetsMut, Handle};
 use bevy_color::{ColorToComponents, Gray, LinearRgba};
 use bevy_ecs::{
-    component::Component,
-    lifecycle::HookContext,
-    message::MessageReader,
-    template::FromTemplate,
+    component::Component, lifecycle::HookContext, message::MessageReader, template::FromTemplate,
     world::DeferredWorld,
 };
 use bevy_image::Image;

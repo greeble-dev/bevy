@@ -2102,7 +2102,7 @@ pub struct MorphTargetNames {
 mod test {
     use std::path::Path;
 
-    use crate::{Gltf, GltfAssetLabel, GltfMaterial, GltfNode};
+    use crate::{Gltf, GltfAssetLabel, GltfMaterial};
     use bevy_app::{App, TaskPoolPlugin};
     use bevy_asset::{
         io::{

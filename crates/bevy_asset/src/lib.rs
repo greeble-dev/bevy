@@ -1267,6 +1267,7 @@ mod tests {
             {
                 SystemState::<Assets<CoolText>>::new(app.world_mut())
                     .get(app.world_mut())
+                    .unwrap()
                     .count()
             },
             0,
@@ -1277,6 +1278,7 @@ mod tests {
         assert_eq!(
             SystemState::<Assets<SubText>>::new(app.world_mut())
                 .get(app.world_mut())
+                .unwrap()
                 .count(),
             0,
             "SubText asset entities should be despawned when no more handles exist"

@@ -207,9 +207,9 @@ fn try_plot(
     event: On<TryPlot>,
     sprite: Query<(&Sprite, &Anchor, &GlobalTransform), With<SpriteToSave>>,
     camera: Single<(&Camera, &GlobalTransform)>,
-    texture_atlases: Res<Assets<TextureAtlasLayout>>,
+    texture_atlases: Assets<TextureAtlasLayout>,
     draw_color: Res<DrawColor>,
-    mut images: ResMut<Assets<Image>>,
+    mut images: Assets<Image>,
 ) {
     let Ok((sprite, anchor, sprite_transform)) = sprite.get(event.entity) else {
         return;
