@@ -227,7 +227,9 @@ pub async fn read_pack_file(path: &Path) -> ReadablePackFile {
     // XXX TODO: Avoid full load. Need `BlobReader` or an alternative to support
     // reading from `Read`.
     let mut bytes = Vec::<u8>::new();
-    file.read_to_end(&mut bytes).await.expect("XXX TODO");
+    AsyncReadExt::read_to_end(&mut file, &mut bytes)
+        .await
+        .expect("XXX TODO");
 
     let mut blob = BlobReader::new(&bytes);
 

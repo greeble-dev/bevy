@@ -3,7 +3,7 @@ mod loaders;
 
 use crate::{
     basset::{
-        ActionSource, ActionSourceBuilder, NullActionSource, RootAssetAction2, RootAssetPath,
+        ActionSource, ActionSourceBuilder, MinimalActionSource, RootAssetAction2, RootAssetPath,
         RootAssetRef,
     },
     folder::LoadedFolder,
@@ -147,7 +147,7 @@ impl AssetServer {
 
         let basset_action_source = basset_action_source_builder
             .map(|s| s.build(sources.clone()))
-            .unwrap_or_else(|| Arc::new(NullActionSource));
+            .unwrap_or_else(|| Arc::new(MinimalActionSource));
         Self {
             data: Arc::new(AssetServerData {
                 sources,

@@ -1119,27 +1119,47 @@ pub trait ActionSourceBuilder: Send + Sync + 'static {
     fn build(&self, sources: Arc<AssetSources>) -> Arc<dyn ActionSource>;
 }
 
-// XXX TODO: Still needed?
-#[expect(unused, reason = "XXX TODO")]
-pub(crate) struct NullActionSourceBuilder;
-
-impl ActionSourceBuilder for NullActionSourceBuilder {
-    fn build(&self, _sources: Arc<AssetSources>) -> Arc<dyn ActionSource> {
-        Arc::new(NullActionSource)
+// XXX TODO: Review use cases.
+async fn fallback_action_handler(
+    action: &RootAssetAction2,
+    asset_server: &AssetServer,
+) -> Result<ErasedLoadedAsset, BevyError> {
+    if &*action.name == type_name::<action::LoadPath>() {
+        ErasedBassetAction::apply(
+            &action::LoadPath,
+            ApplyContext::new(asset_server),
+            &action.params,
+        )
+        .await
+    } else {
+        // XXX TODO?
+        Err(AssetReaderError::NotFound(action.to_string().into()).into())
     }
 }
 
-pub(crate) struct NullActionSource;
+// XXX TODO: Still needed?
+#[expect(unused, reason = "XXX TODO")]
+pub(crate) struct MinimalActionSourceBuilder;
 
-impl ActionSource for NullActionSource {
+impl ActionSourceBuilder for MinimalActionSourceBuilder {
+    fn build(&self, _sources: Arc<AssetSources>) -> Arc<dyn ActionSource> {
+        Arc::new(MinimalActionSource)
+    }
+}
+
+// XXX TODO: Review use cases. Is useful if tests can support `load_with_settings`,
+// which means supporting the `LoadPath` action.
+pub(crate) struct MinimalActionSource;
+
+impl ActionSource for MinimalActionSource {
     fn apply<'a>(
         &'a self,
-        _action: &RootAssetAction2,
+        action: &'a RootAssetAction2,
         // XXX TODO: Review and see if we can use something narrower than the
         // entire asset server.
-        _asset_server: &AssetServer,
+        asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
-        Box::pin(async move { todo!("XXX TODO? Return error?") })
+        Box::pin(async move { fallback_action_handler(action, asset_server).await })
     }
 }
 
@@ -1180,20 +1200,7 @@ impl ActionSource for PublishedActionSource {
             // Refactor?
 
             let Ok(mut readers) = self.pack_file.action(&action_string) else {
-                // XXX TODO: Review. We need to support at least some level of
-                // fallback to applying actions, since we have embedded assets
-                // that use `load_with_settings` (e.g. SmaaPlugin). Not sure if
-                // this should be special cased or generalized.
-                return if &*action.name == type_name::<action::LoadPath>() {
-                    let load_path = action::LoadPath;
-
-                    let apply_context = ApplyContext::new(asset_server);
-
-                    ErasedBassetAction::apply(&load_path, apply_context, &action.params).await
-                } else {
-                    // XXX TODO?
-                    Err(AssetReaderError::NotFound(action.to_string().into()).into())
-                };
+                return fallback_action_handler(action, asset_server).await;
             };
 
             let mut meta_bytes = Vec::<u8>::new();
@@ -1245,6 +1252,8 @@ pub mod action {
     use super::*;
     use alloc::string::String;
 
+    // XXX TODO: Consider renaming to `LoadWithSettings` and making the `settings`
+    // member non-optional? Not sure if we have any use case outside of `load_with_settings.`
     pub struct LoadPath;
 
     #[derive(Serialize, Deserialize, Default)]
