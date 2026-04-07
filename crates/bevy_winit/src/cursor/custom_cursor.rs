@@ -205,7 +205,7 @@ mod tests {
                 let layout_handle = app.world_mut().spawn_asset(layout);
 
                 let mut state = SystemState::<Assets<TextureAtlasLayout>>::new(app.world_mut());
-                let texture_atlases = state.get(app.world());
+                let texture_atlases = state.get(app.world()).unwrap();
 
                 let image = create_image_rgba8(&[0; 3 * 3 * 4]); // 3x3 image
 
