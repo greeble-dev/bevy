@@ -37,7 +37,7 @@ const ASSET_PATH: &str = "art_project.png";
 
 fn perform_save(
     image_to_save: Res<ImageToSave>,
-    images: Res<Assets<Image>>,
+    images: Assets<Image>,
     asset_server: Res<AssetServer>,
 ) {
     let image = images.get(&image_to_save.0).unwrap();
@@ -121,23 +121,21 @@ F5 - Save image"
     // image into that handle. If the load succeeds, the image will be replaced with the loaded
     // contents. If it fails, the default image will remain. In real code, you likely want to poll
     // `AssetServer::load_state` and only insert this on load failure.
-    asset_commands
-        .insert_asset(&handle, {
-            let mut image = Image::new_fill(
-                Extent3d {
-                    width: 100,
-                    height: 100,
-                    depth_or_array_layers: 1,
-                },
-                TextureDimension::D2,
-                &[0, 0, 0, 255],
-                TextureFormat::Rgba8Unorm,
-                RenderAssetUsages::all(),
-            );
-            image.sampler = ImageSampler::nearest();
-            image
-        })
-        .unwrap();
+    asset_commands.insert_asset(&handle, {
+        let mut image = Image::new_fill(
+            Extent3d {
+                width: 100,
+                height: 100,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            &[0, 0, 0, 255],
+            TextureFormat::Rgba8Unorm,
+            RenderAssetUsages::all(),
+        );
+        image.sampler = ImageSampler::nearest();
+        image
+    });
 
     commands.insert_resource(ImageToSave(handle));
 
@@ -209,7 +207,7 @@ fn try_plot(
     camera: Single<(&Camera, &GlobalTransform)>,
     texture_atlases: Assets<TextureAtlasLayout>,
     draw_color: Res<DrawColor>,
-    mut images: Assets<Image>,
+    mut images: AssetsMut<Image>,
 ) {
     let Ok((sprite, anchor, sprite_transform)) = sprite.get(event.entity) else {
         return;
@@ -226,7 +224,7 @@ fn try_plot(
     let Ok(pixel_space) = sprite.compute_pixel_space_point(
         relative_to_sprite.xy(),
         *anchor,
-        &images,
+        &images.as_readonly(),
         &texture_atlases,
     ) else {
         return;

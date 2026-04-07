@@ -562,11 +562,7 @@ mod color_consistency {
     const STRIP_WIDTH: f32 = DEFAULT_WIDTH / 3.0;
     const STRIP_HEIGHT: f32 = DEFAULT_HEIGHT / 3.0;
 
-    pub fn setup(
-        mut commands: Commands,
-        mut meshes: ResMut<Assets<Mesh>>,
-        mut materials: ResMut<Assets<ColorMaterial>>,
-    ) {
+    pub fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
         // The window background is drawn with the clear color.
         commands.insert_resource(ClearColor(TEST_COLOR));
 
@@ -590,8 +586,10 @@ mod color_consistency {
 
         // Middle third for 2D meshes
         commands.spawn((
-            Mesh2d(meshes.add(Rectangle::new(STRIP_WIDTH, STRIP_HEIGHT))),
-            MeshMaterial2d(materials.add(ColorMaterial::from_color(TEST_COLOR))),
+            Mesh2d(
+                asset_commands.spawn_asset(Mesh::from(Rectangle::new(STRIP_WIDTH, STRIP_HEIGHT))),
+            ),
+            MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from_color(TEST_COLOR))),
             Transform::from_xyz(0.0, 0.0, 0.0),
             DespawnOnExit(super::Scene::ColorConsistency),
         ));

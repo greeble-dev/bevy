@@ -315,8 +315,8 @@ struct ParticleAssets {
 impl FromWorld for ParticleAssets {
     fn from_world(world: &mut World) -> Self {
         Self {
-            mesh: world.add_asset::<Mesh>(Sphere::new(10.0)),
-            material: world.add_asset::<StandardMaterial>(StandardMaterial {
+            mesh: world.spawn_asset(Mesh::from(Sphere::new(10.0))),
+            material: world.spawn_asset(StandardMaterial {
                 base_color: Color::WHITE,
                 ..Default::default()
             }),

@@ -706,14 +706,13 @@ mod render_layers {
 
     pub fn setup(
         mut commands: Commands,
-        mut meshes: ResMut<Assets<Mesh>>,
-        mut materials: ResMut<Assets<StandardMaterial>>,
+        mut asset_commands: AssetCommands,
         window: Single<&Window, With<PrimaryWindow>>,
     ) {
         // circular base
         commands.spawn((
-            Mesh3d(meshes.add(Circle::new(4.0))),
-            MeshMaterial3d(materials.add(Color::WHITE)),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Circle::new(4.0)))),
+            MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE))),
             Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
             RenderLayers::layer(0).with(1).with(2),
             DespawnOnExit(CURRENT_SCENE),
@@ -721,22 +720,28 @@ mod render_layers {
 
         // cubes
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-            MeshMaterial3d(materials.add(Color::srgb(1.0, 0.0, 0.0))),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)))),
+            MeshMaterial3d(
+                asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(1.0, 0.0, 0.0))),
+            ),
             Transform::from_xyz(-1.5, 0.5, 0.0),
             // No render layer for this one to test the default case
             DespawnOnExit(CURRENT_SCENE),
         ));
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-            MeshMaterial3d(materials.add(Color::srgb(0.0, 1.0, 0.0))),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)))),
+            MeshMaterial3d(
+                asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.0, 1.0, 0.0))),
+            ),
             Transform::from_xyz(0.0, 0.5, 0.0),
             RenderLayers::layer(1),
             DespawnOnExit(CURRENT_SCENE),
         ));
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-            MeshMaterial3d(materials.add(Color::srgb(0.0, 0.0, 1.0))),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)))),
+            MeshMaterial3d(
+                asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.0, 0.0, 1.0))),
+            ),
             Transform::from_xyz(1.5, 0.5, 0.0),
             RenderLayers::layer(2),
             DespawnOnExit(CURRENT_SCENE),
