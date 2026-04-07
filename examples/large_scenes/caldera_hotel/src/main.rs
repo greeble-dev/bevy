@@ -29,9 +29,9 @@ use bevy::{
         },
         view::NoIndirectDrawing,
     },
-    scene::SceneInstanceReady,
     window::{PresentMode, WindowResolution},
     winit::WinitSettings,
+    world_serialization::WorldInstanceReady,
 };
 
 #[derive(FromArgs, Resource, Clone)]
@@ -146,7 +146,7 @@ pub fn setup(
     let hotel_01 = asset_server.load("hotel_01.glb#Scene0");
     commands
         .spawn((
-            SceneRoot(hotel_01.clone()),
+            WorldAssetRoot(hotel_01.clone()),
             Transform::from_scale(Vec3::splat(0.01)),
             PostProcScene,
             Spin,
@@ -166,7 +166,7 @@ pub fn setup(
                     continue;
                 }
                 commands.spawn((
-                    SceneRoot(hotel_01.clone()),
+                    WorldAssetRoot(hotel_01.clone()),
                     Transform::from_xyz(x as f32 * 50.0, 0.0, z as f32 * 50.0)
                         .with_scale(Vec3::splat(0.01)),
                     Spin,
@@ -264,7 +264,7 @@ pub fn setup(
 // Each unique so instances are maintained.
 #[allow(clippy::too_many_arguments)]
 pub fn assign_rng_materials(
-    scene_ready: On<SceneInstanceReady>,
+    scene_ready: On<WorldInstanceReady>,
     mut commands: Commands,
     mut asset_commands: AssetCommands,
     meshes: Assets<Mesh>,
@@ -272,7 +272,7 @@ pub fn assign_rng_materials(
     mesh_instances: Query<(Entity, &Mesh3d)>,
     args: Res<Args>,
     asset_server: Res<AssetServer>,
-    scenes: Query<&SceneRoot>,
+    scenes: Query<&WorldAssetRoot>,
 ) {
     if !args.random_materials {
         return;

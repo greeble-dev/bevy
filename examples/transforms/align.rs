@@ -82,7 +82,7 @@ fn setup(
 
     // Finally, our ship that is going to rotate
     commands.spawn((
-        SceneRoot(
+        WorldAssetRoot(
             asset_server
                 .load(GltfAssetLabel::Scene(0).from_asset("models/ship/craft_speederD.gltf")),
         ),

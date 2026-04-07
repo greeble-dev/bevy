@@ -28,7 +28,7 @@ fn setup(
         ),
     ));
 
-    commands.spawn(SceneRoot(
+    commands.spawn(WorldAssetRoot(
         asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/animated/Fox.glb")),
     ));
 

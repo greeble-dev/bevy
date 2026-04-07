@@ -26,6 +26,7 @@ fn main() {
             FreeCameraPlugin,
         ))
         .add_systems(Startup, setup)
+        .add_systems(Update, bunny_wiggler)
         .run();
 }
 
@@ -70,7 +71,7 @@ fn setup(
     let debug_material = asset_commands.spawn_asset(MeshletDebugMaterial::default());
 
     for x in -2..=2 {
-        commands.spawn((
+        let mut bunny = commands.spawn((
             MeshletMesh3d(meshlet_mesh_handle.clone()),
             MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
                 base_color: match x {
@@ -88,6 +89,9 @@ fn setup(
                 .with_scale(Vec3::splat(0.2))
                 .with_translation(Vec3::new(x as f32 / 2.0, 0.0, -0.3)),
         ));
+        if x == 1 {
+            bunny.insert(BunnyWiggler);
+        }
     }
     for x in -2..=2 {
         commands.spawn((
@@ -108,6 +112,14 @@ fn setup(
             ..default()
         })),
     ));
+}
+
+#[derive(Component)]
+struct BunnyWiggler;
+
+fn bunny_wiggler(mut bunny: Query<&mut Transform, With<BunnyWiggler>>, time: Res<Time>) {
+    bunny.single_mut().as_deref_mut().unwrap().translation.z +=
+        ops::cos(time.elapsed_secs() * 10.0) * 0.003;
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Default)]

@@ -2,13 +2,10 @@
 
 use bevy::{
     asset::RenderAssetUsages,
-    mesh::{MeshVertexBufferLayoutRef, PrimitiveTopology},
-    pbr::{MaterialPipeline, MaterialPipelineKey},
+    mesh::{Indices, PrimitiveTopology},
     prelude::*,
     reflect::TypePath,
-    render::render_resource::{
-        AsBindGroup, PolygonMode, RenderPipelineDescriptor, SpecializedMeshPipelineError,
-    },
+    render::render_resource::AsBindGroup,
     shader::ShaderRef,
 };
 
@@ -50,8 +47,18 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
                     points: vec![
                         Vec3::ZERO,
                         Vec3::new(1.0, 1.0, 0.0),
-                        Vec3::new(1.0, 0.0, 0.0),
+                        Vec3::new(2.0, 0.0, 0.0),
+                        Vec3::new(2.0, 1.0, 0.0),
+                        Vec3::new(3.0, 1.0, 0.0),
                     ],
+                    indices: Indices::U16(vec![
+                        0,
+                        1,
+                        u16::MAX, /* primitive restart */
+                        2,
+                        3,
+                        4,
+                    ]),
                 }
                 .into(),
             ),
@@ -78,17 +85,6 @@ struct LineMaterial {
 impl Material for LineMaterial {
     fn fragment_shader() -> ShaderRef {
         SHADER_ASSET_PATH.into()
-    }
-
-    fn specialize(
-        _pipeline: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        _layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        // This is the important part to tell bevy to render this material as a line between vertices
-        descriptor.primitive.polygon_mode = PolygonMode::Line;
-        Ok(())
     }
 }
 
@@ -117,6 +113,7 @@ impl From<LineList> for Mesh {
 #[derive(Debug, Clone)]
 struct LineStrip {
     points: Vec<Vec3>,
+    indices: Indices,
 }
 
 impl From<LineStrip> for Mesh {
@@ -129,5 +126,6 @@ impl From<LineStrip> for Mesh {
         )
         // Add the point positions as an attribute
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, line.points)
+        .with_inserted_indices(line.indices)
     }
 }

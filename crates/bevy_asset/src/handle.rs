@@ -1,7 +1,15 @@
-use crate::{meta::MetaTransform, Asset, AssetEntity, AssetId, AssetPath, UntypedAssetId};
+use crate::{
+    meta::MetaTransform, Asset, AssetEntity, AssetId, AssetPath, AssetServer, ReflectHandle,
+    UntypedAssetId,
+};
 use alloc::sync::{Arc, Weak};
-use bevy_ecs::{component::Component, resource::Resource};
-use bevy_reflect::{std_traits::ReflectDefault, Reflect, TypePath};
+use bevy_ecs::{
+    component::Component,
+    resource::Resource,
+    template::{FromTemplate, SpecializeFromTemplate, Template, TemplateContext},
+};
+use bevy_platform::collections::Equivalent;
+use bevy_reflect::{Reflect, TypePath};
 use core::{
     any::TypeId,
     hash::{Hash, Hasher},
@@ -274,7 +282,7 @@ impl<A> Clone for EntityHandle<A> {
 ///
 /// [`Handle::Strong`], via [`StrongHandle`] also provides access to useful [`Asset`] metadata, such as the [`AssetPath`] (if it exists).
 #[derive(Reflect)]
-#[reflect(Default, Debug, Hash, PartialEq, Clone)]
+#[reflect(Debug, Hash, PartialEq, Clone, Handle)]
 pub enum Handle<A: Asset> {
     /// A "strong" reference to a live (or loading) [`Asset`]. If a [`Handle`] is [`Handle::Strong`], the [`Asset`] will be kept
     /// alive until the [`Handle`] is dropped. Strong handles also provide access to additional asset metadata.
@@ -365,6 +373,55 @@ impl<A: Asset> Default for Handle<A> {
     }
 }
 
+// This enables FromTemplate specialization for `Handle<T>` using the
+// ["auto trait specialization" trick](https://github.com/coolcatcoder/rust_techniques/issues/1)
+// This enables Handle to implement Default _and_ implement FromTemplate, without conflicting with the
+// blanket impl of FromTemplate for T: Default + Clone.
+impl<T: Asset> Unpin for Handle<T> where for<'a> [()]: SpecializeFromTemplate {}
+
+impl<T: Asset> FromTemplate for Handle<T> {
+    type Template = HandleTemplate<T>;
+}
+
+pub enum HandleTemplate<T: Asset> {
+    Path(AssetPath<'static>),
+    Handle(Handle<T>),
+}
+
+impl<T: Asset> Default for HandleTemplate<T> {
+    fn default() -> Self {
+        Self::Handle(Default::default())
+    }
+}
+
+impl<I: Into<AssetPath<'static>>, T: Asset> From<I> for HandleTemplate<T> {
+    fn from(value: I) -> Self {
+        Self::Path(value.into())
+    }
+}
+
+impl<T: Asset> From<Handle<T>> for HandleTemplate<T> {
+    fn from(value: Handle<T>) -> Self {
+        Self::Handle(value)
+    }
+}
+
+impl<T: Asset> Template for HandleTemplate<T> {
+    type Output = Handle<T>;
+    fn build_template(&self, context: &mut TemplateContext) -> bevy_ecs::error::Result<Handle<T>> {
+        Ok(match self {
+            HandleTemplate::Path(asset_path) => context.resource::<AssetServer>().load(asset_path),
+            HandleTemplate::Handle(handle) => handle.clone(),
+        })
+    }
+
+    fn clone_template(&self) -> Self {
+        match self {
+            HandleTemplate::Path(asset_path) => HandleTemplate::Path(asset_path.clone()),
+            HandleTemplate::Handle(handle) => HandleTemplate::Handle(handle.clone()),
+        }
+    }
+}
 impl<A: Asset> core::fmt::Debug for Handle<A> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let name = ShortName::of::<A>();
@@ -385,6 +442,13 @@ impl<A: Asset> Hash for Handle<A> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.id().hash(state);
+    }
+}
+
+// Handle uses AssetId when hashing. This enables using AssetId instead of handle with hashsets and hashmaps.
+impl<T: Asset> Equivalent<Handle<T>> for AssetId<T> {
+    fn equivalent(&self, key: &Handle<T>) -> bool {
+        *self == key.id()
     }
 }
 
@@ -435,6 +499,14 @@ pub enum UntypedHandle {
 }
 
 impl UntypedHandle {
+    /// Returns the equivalent of [`Handle`]'s default implementation for the given type ID.
+    pub fn default_for_type(type_id: TypeId) -> Self {
+        Self::Uuid {
+            type_id,
+            uuid: AssetId::<()>::DEFAULT_UUID,
+        }
+    }
+
     /// Returns the entity if this is a strong handle.
     ///
     /// While a UUID could refer to an entity as well, the handle must first be resolved with

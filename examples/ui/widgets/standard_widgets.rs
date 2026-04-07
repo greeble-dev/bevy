@@ -10,7 +10,7 @@ use bevy::{
     color::palettes::basic::*,
     input_focus::{
         tab_navigation::{TabGroup, TabIndex, TabNavigationPlugin},
-        InputDispatchPlugin, InputFocus,
+        InputFocus,
     },
     picking::hover::Hovered,
     prelude::*,
@@ -20,18 +20,13 @@ use bevy::{
         popover::{Popover, PopoverAlign, PopoverPlacement, PopoverSide},
         Activate, Button, Checkbox, CoreSliderDragState, MenuAction, MenuButton, MenuEvent,
         MenuItem, MenuPopup, RadioButton, RadioGroup, Slider, SliderRange, SliderThumb,
-        SliderValue, TrackClick, UiWidgetsPlugins, ValueChange,
+        SliderValue, TrackClick, ValueChange,
     },
 };
 
 fn main() {
     App::new()
-        .add_plugins((
-            DefaultPlugins,
-            UiWidgetsPlugins,
-            InputDispatchPlugin,
-            TabNavigationPlugin,
-        ))
+        .add_plugins((DefaultPlugins, TabNavigationPlugin))
         .insert_resource(DemoWidgetStates {
             slider_value: 50.0,
             slider_click: TrackClick::Snap,
@@ -400,6 +395,7 @@ fn slider(min: f32, max: f32, value: f32) -> impl Bundle {
         DemoSlider,
         Slider {
             track_click: TrackClick::Snap,
+            ..Default::default()
         },
         SliderValue(value),
         SliderRange::new(min, max),
@@ -837,7 +833,6 @@ fn spawn_menu(anchor: Entity, assets: Res<AssetServer>, mut commands: Commands) 
                 ..default()
             },
             MenuPopup::default(),
-            Visibility::Hidden, // Will be visible after positioning
             BorderColor::all(GREEN),
             BackgroundColor(GRAY.into()),
             BoxShadow::new(

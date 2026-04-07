@@ -20,7 +20,7 @@ pub fn main() {
             .set(LogPlugin {
                 // This will show some log events from Bevy to the native logger.
                 level: Level::DEBUG,
-                filter: "wgpu=error,bevy_render=info,bevy_ecs=trace".to_string(),
+                filter: "wgpu=error,naga=info,bevy_render=info,bevy_ecs=trace".to_string(),
                 ..Default::default()
             })
             .set(WindowPlugin {
@@ -93,7 +93,14 @@ fn touch_camera(
 }
 
 /// set up a simple 3D scene
-fn setup_scene(mut commands: Commands, mut asset_commands: AssetCommands) {
+fn setup_scene(
+    mut commands: Commands,
+    mut asset_commands: AssetCommands,
+    device: Res<bevy::render::renderer::RenderDevice>,
+) {
+    bevy::log::info!("Configured wgpu adapter Limits: {:#?}", device.limits());
+    bevy::log::info!("Configured wgpu adapter Features: {:#?}", device.features());
+
     // plane
     commands.spawn((
         Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(5.0, 5.0).into())),

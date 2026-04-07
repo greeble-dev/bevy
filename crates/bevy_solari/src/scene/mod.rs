@@ -12,13 +12,13 @@ use bevy_app::{App, Plugin};
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_render::{
     mesh::{
-        allocator::{allocate_and_free_meshes, MeshAllocator},
+        allocator::{allocate_and_free_meshes, MeshAllocatorSettings},
         RenderMesh,
     },
     render_asset::prepare_assets,
     render_resource::BufferUsages,
     renderer::RenderDevice,
-    ExtractSchedule, Render, RenderApp, RenderSystems,
+    ExtractSchedule, GpuResourceAppExt, Render, RenderApp, RenderSystems,
 };
 use binder::prepare_raytracing_scene_bindings;
 use blas::{compact_raytracing_blas, prepare_raytracing_blas, BlasManager};
@@ -51,12 +51,12 @@ impl Plugin for RaytracingScenePlugin {
 
         render_app
             .world_mut()
-            .resource_mut::<MeshAllocator>()
+            .resource_mut::<MeshAllocatorSettings>()
             .extra_buffer_usages |= BufferUsages::BLAS_INPUT | BufferUsages::STORAGE;
 
         render_app
-            .init_resource::<BlasManager>()
-            .init_resource::<StandardMaterialAssets>()
+            .init_gpu_resource::<BlasManager>()
+            .init_gpu_resource::<StandardMaterialAssets>()
             .insert_resource(RaytracingSceneBindings::new())
             .add_systems(
                 ExtractSchedule,

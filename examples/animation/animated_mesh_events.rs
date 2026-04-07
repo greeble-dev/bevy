@@ -128,7 +128,7 @@ fn setup(
     ));
 
     // Fox
-    commands.spawn(SceneRoot(
+    commands.spawn(WorldAssetRoot(
         asset_server.load(GltfAssetLabel::Scene(0).from_asset(FOX_PATH)),
     ));
 

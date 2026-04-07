@@ -272,7 +272,7 @@ fn spawn_mirror_camera(
 /// [`play_fox_animation`].
 fn spawn_fox(commands: &mut Commands, asset_server: &AssetServer) {
     commands.spawn((
-        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(FOX_ASSET_PATH))),
+        WorldAssetRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(FOX_ASSET_PATH))),
         Transform::from_xyz(-50.0, 0.0, -100.0),
     ));
 }
@@ -431,7 +431,7 @@ fn create_mirror_texture_image(
 
 // Moves the fox when the user moves the mouse with the left button down.
 fn move_fox_on_mouse_down(
-    mut scene_roots_query: Query<&mut Transform, With<SceneRoot>>,
+    mut scene_roots_query: Query<&mut Transform, With<WorldAssetRoot>>,
     windows_query: Query<&Window, With<PrimaryWindow>>,
     cameras_query: Query<(&Camera, &GlobalTransform)>,
     interactions_query: Query<&Interaction, With<RadioButton>>,
