@@ -5,6 +5,7 @@ use bevy_ecs::{
     entity::Entity,
     error::{BevyError, Result},
     relationship::Relationship,
+    system::SystemState,
     template::{
         EntityScopes, ErasedTemplate, ScopedEntities, ScopedEntityIndex, Template, TemplateContext,
     },
@@ -142,8 +143,11 @@ impl ResolvedScene {
     /// If this [`ResolvedScene`] inherits from another scene, that scene will be applied _first_.
     pub fn apply(&self, context: &mut TemplateContext) -> Result<(), ApplySceneError> {
         if let Some(inherited) = &self.inherited {
-            let scene_patches = context.resource::<Assets<ScenePatch>>();
-            let Some(patch) = scene_patches.get(inherited) else {
+            let mut state = context
+                .entity
+                .world_scope(|world| SystemState::<Assets<ScenePatch>>::new(world));
+            let scene_patch = state.get(context.entity.world()).unwrap();
+            let Some(patch) = scene_patch.get(inherited) else {
                 return Err(ApplySceneError::MissingInheritedScene {
                     path: inherited.path().cloned(),
                     id: inherited.id(),

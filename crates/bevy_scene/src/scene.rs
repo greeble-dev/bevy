@@ -109,18 +109,18 @@ pub enum ResolveSceneError {
 }
 
 /// Context used by [`Scene`] implementations during [`Scene::resolve`].
-pub struct ResolveContext<'a> {
+pub struct ResolveContext<'a, 'w, 's> {
     /// The current asset server
     pub assets: &'a AssetServer,
     /// The current [`ScenePatch`] asset collection
-    pub patches: &'a Assets<ScenePatch>,
+    pub patches: &'a Assets<'w, 's, ScenePatch>,
     /// The currently inherited [`ScenePatch`], if there is one.
     pub inherited: Option<&'a ScenePatch>,
     pub(crate) entity_scopes: &'a mut EntityScopes,
     pub(crate) current_scope: usize,
 }
 
-impl<'a> ResolveContext<'a> {
+impl<'a> ResolveContext<'a, '_, '_> {
     /// The current entity scope.
     #[inline]
     pub fn current_entity_scope(&self) -> usize {
