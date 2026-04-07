@@ -2,7 +2,7 @@ use core::hash::BuildHasher;
 use core::time::Duration;
 
 use crate::{ComputedNode, ComputedUiRenderTargetInfo, ContentSize, NodeMeasure};
-use bevy_asset::Assets;
+use bevy_asset::{AssetCommands, Assets, AssetsMut};
 
 use bevy_ecs::{
     change_detection::DetectChanges,
@@ -14,7 +14,7 @@ use bevy_ecs::{
 use bevy_image::prelude::*;
 use bevy_input_focus::InputFocus;
 use bevy_math::{Rect, Vec2};
-use bevy_platform::hash::FixedHasher;
+use bevy_platform::{collections::HashMap, hash::FixedHasher};
 use bevy_text::{
     add_glyph_to_atlas, get_glyph_atlas_info, resolve_font_source, EditableText, Font,
     FontAtlasKey, FontAtlasSet, FontCx, FontHinting, GlyphCacheKey, LayoutCx, LineBreak,
@@ -64,7 +64,6 @@ pub fn update_editable_text_content_size(
         Ref<ComputedUiRenderTargetInfo>,
         &mut ContentSize,
     )>,
-    fonts: Res<Assets<Font>>,
     rem_size: Res<RemSize>,
 ) {
     for (editable_text, text_font, line_height, target, mut content_size) in &mut text_input_query {
@@ -72,7 +71,6 @@ pub fn update_editable_text_content_size(
             || text_font.is_changed()
             || line_height.is_changed()
             || target.is_changed()
-            || fonts.is_changed()
             || rem_size.is_changed())
         {
             continue;
@@ -98,12 +96,13 @@ pub fn update_editable_text_content_size(
 /// Adds required glyphs to the texture atlas
 // TODO: add change detection logic here to improve performance
 pub fn editable_text_system(
-    fonts: Res<Assets<Font>>,
+    fonts: Assets<Font>,
     mut font_cx: ResMut<FontCx>,
     mut layout_cx: ResMut<LayoutCx>,
     mut scale_cx: ResMut<ScaleCx>,
     mut font_atlas_set: ResMut<FontAtlasSet>,
-    mut textures: ResMut<Assets<Image>>,
+    mut textures: AssetsMut<Image>,
+    mut asset_commands: AssetCommands,
     mut input_field_query: Query<(
         Entity,
         &TextFont,
@@ -134,7 +133,7 @@ pub fn editable_text_system(
         text_layout,
     ) in input_field_query.iter_mut()
     {
-        let Ok(font_family) = resolve_font_source(&text_font.font, fonts.as_ref()) else {
+        let Ok(font_family) = resolve_font_source(&text_font.font, &fonts) else {
             continue;
         };
 
@@ -202,6 +201,7 @@ pub fn editable_text_system(
         info.glyphs.clear();
         info.run_geometry.clear();
 
+        let mut deferred_atlases = HashMap::<_, Vec<_>>::new();
         for line in layout.lines() {
             for (line_index, item) in line.items().enumerate() {
                 match item {
@@ -225,8 +225,11 @@ pub fn editable_text_system(
 
                         for glyph in glyph_run.positioned_glyphs() {
                             let font_atlases = font_atlas_set.entry(font_atlas_key).or_default();
+                            let deferred_atlases =
+                                deferred_atlases.entry(font_atlas_key).or_default();
                             let Ok(atlas_info) = get_glyph_atlas_info(
                                 font_atlases,
+                                deferred_atlases,
                                 GlyphCacheKey {
                                     glyph_id: glyph.id as u16,
                                 },
@@ -246,7 +249,9 @@ pub fn editable_text_system(
                                     .build();
                                 add_glyph_to_atlas(
                                     font_atlases,
-                                    textures.as_mut(),
+                                    deferred_atlases,
+                                    &mut textures,
+                                    &mut asset_commands,
                                     &mut scaler,
                                     text_font.font_smoothing,
                                     glyph.id as u16,
@@ -287,6 +292,13 @@ pub fn editable_text_system(
                         // TODO: handle inline boxes
                     }
                 }
+            }
+        }
+
+        for (key, atlases) in deferred_atlases {
+            let font_atlases = font_atlas_set.entry(key).or_default();
+            for atlas in atlases {
+                font_atlases.push(atlas.to_font_atlas(&mut asset_commands));
             }
         }
 
