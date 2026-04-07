@@ -1554,10 +1554,9 @@ impl AssetServer {
                 }
                 Err(AssetReaderError::NotFound(_)) => {
                     // TODO: Handle error transformation
-                    let loader = { self.read_loaders().find(None, asset_type_id, asset_path) };
+                    let loader = { self.read_loaders().find(asset_type_id, asset_path) };
 
                     let error = || AssetLoadError::MissingAssetLoader {
-                        loader_name: None,
                         asset_type_id,
                         asset_path: asset_path.to_string(),
                     };
@@ -1570,10 +1569,9 @@ impl AssetServer {
                 Err(err) => return Err(err.into()),
             }
         } else {
-            let loader = { self.read_loaders().find(None, asset_type_id, asset_path) };
+            let loader = { self.read_loaders().find(asset_type_id, asset_path) };
 
             let error = || AssetLoadError::MissingAssetLoader {
-                loader_name: None,
                 asset_type_id,
                 asset_path: asset_path.to_string(),
             };
@@ -2102,9 +2100,8 @@ pub enum AssetLoadError {
         actual_asset_name: &'static str,
         loader_name: &'static str,
     },
-    #[error("Could not find an asset loader matching: Loader Name: {loader_name:?}; Asset Type: {asset_type_id:?}; Path: {asset_path:?};")]
+    #[error("Could not find an asset loader matching: Asset Type: {asset_type_id:?}; Path: {asset_path:?};")]
     MissingAssetLoader {
-        loader_name: Option<String>,
         asset_type_id: Option<TypeId>,
         asset_path: String,
     },

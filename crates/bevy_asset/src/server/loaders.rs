@@ -154,15 +154,9 @@ impl AssetLoaders {
     /// Find an [`AssetLoader`] based on provided search criteria
     pub(crate) fn find(
         &self,
-        type_name: Option<&str>,
         asset_type_id: Option<TypeId>,
         asset_path: &AssetPath<'_>,
     ) -> Option<MaybeAssetLoader> {
-        // If provided the type name of the loader, return that immediately
-        if let Some(type_name) = type_name {
-            return self.get_by_name(type_name);
-        }
-
         // The presence of a label will affect loader choice
         let label = asset_path.label();
 
@@ -589,7 +583,6 @@ mod tests {
         let loader = block_on(
             loaders
                 .find(
-                    None,
                     Some(TypeId::of::<A>()),
                     &AssetPath::from_path(Path::new("asset.a")),
                 )
@@ -609,7 +602,6 @@ mod tests {
         let loader = block_on(
             loaders
                 .find(
-                    None,
                     Some(TypeId::of::<B>()),
                     &AssetPath::from_path(Path::new("asset.b")),
                 )
@@ -629,7 +621,6 @@ mod tests {
         let loader = block_on(
             loaders
                 .find(
-                    None,
                     Some(TypeId::of::<C>()),
                     &AssetPath::from_path(Path::new("asset.c")),
                 )
@@ -651,7 +642,6 @@ mod tests {
         let loader = block_on(
             loaders
                 .find(
-                    None,
                     Some(TypeId::of::<C>()),
                     &AssetPath::from_path(Path::new("asset.a")),
                 )
@@ -671,7 +661,6 @@ mod tests {
         let loader = block_on(
             loaders
                 .find(
-                    None,
                     Some(TypeId::of::<C>()),
                     &AssetPath::from_path(Path::new("asset.b")),
                 )
@@ -693,7 +682,6 @@ mod tests {
         let loader = block_on(
             loaders
                 .find(
-                    None,
                     Some(TypeId::of::<A>()),
                     &AssetPath::from_path(Path::new("asset.x")),
                 )
@@ -713,7 +701,6 @@ mod tests {
         let loader = block_on(
             loaders
                 .find(
-                    None,
                     Some(TypeId::of::<A>()),
                     &AssetPath::from_path(Path::new("asset")),
                 )
@@ -751,7 +738,6 @@ mod tests {
         let loader = block_on(
             loaders
                 .find(
-                    None,
                     Some(TypeId::of::<A>()),
                     &AssetPath::from_path(Path::new("asset.a")),
                 )
@@ -769,7 +755,6 @@ mod tests {
         let loader = block_on(
             loaders
                 .find(
-                    None,
                     Some(TypeId::of::<A>()),
                     &AssetPath::from_path(Path::new("asset.x")),
                 )
@@ -787,7 +772,6 @@ mod tests {
         let loader = block_on(
             loaders
                 .find(
-                    None,
                     Some(TypeId::of::<A>()),
                     &AssetPath::from_path(Path::new("asset")),
                 )
