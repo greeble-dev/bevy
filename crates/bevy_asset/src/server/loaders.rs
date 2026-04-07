@@ -156,7 +156,7 @@ impl AssetLoaders {
         &self,
         type_name: Option<&str>,
         asset_type_id: Option<TypeId>,
-        asset_path: Option<&AssetPath<'_>>,
+        asset_path: &AssetPath<'_>,
     ) -> Option<MaybeAssetLoader> {
         // If provided the type name of the loader, return that immediately
         if let Some(type_name) = type_name {
@@ -164,7 +164,7 @@ impl AssetLoaders {
         }
 
         // The presence of a label will affect loader choice
-        let label = asset_path.as_ref().and_then(|path| path.label());
+        let label = asset_path.label();
 
         // Try by asset type
         let candidates = if let Some(type_id) = asset_type_id {
@@ -207,7 +207,7 @@ impl AssetLoaders {
         };
 
         // Try extracting the extension from the path
-        if let Some(full_extension) = asset_path.and_then(AssetPath::get_full_extension) {
+        if let Some(full_extension) = asset_path.get_full_extension() {
             if let Some(&index) = try_extension(full_extension) {
                 return self.get_by_index(index);
             }
@@ -591,7 +591,7 @@ mod tests {
                 .find(
                     None,
                     Some(TypeId::of::<A>()),
-                    Some(&AssetPath::from_path(Path::new("asset.a"))),
+                    &AssetPath::from_path(Path::new("asset.a")),
                 )
                 .unwrap()
                 .get(),
@@ -611,7 +611,7 @@ mod tests {
                 .find(
                     None,
                     Some(TypeId::of::<B>()),
-                    Some(&AssetPath::from_path(Path::new("asset.b"))),
+                    &AssetPath::from_path(Path::new("asset.b")),
                 )
                 .unwrap()
                 .get(),
@@ -631,7 +631,7 @@ mod tests {
                 .find(
                     None,
                     Some(TypeId::of::<C>()),
-                    Some(&AssetPath::from_path(Path::new("asset.c"))),
+                    &AssetPath::from_path(Path::new("asset.c")),
                 )
                 .unwrap()
                 .get(),
@@ -653,7 +653,7 @@ mod tests {
                 .find(
                     None,
                     Some(TypeId::of::<C>()),
-                    Some(&AssetPath::from_path(Path::new("asset.a"))),
+                    &AssetPath::from_path(Path::new("asset.a")),
                 )
                 .unwrap()
                 .get(),
@@ -673,7 +673,7 @@ mod tests {
                 .find(
                     None,
                     Some(TypeId::of::<C>()),
-                    Some(&AssetPath::from_path(Path::new("asset.b"))),
+                    &AssetPath::from_path(Path::new("asset.b")),
                 )
                 .unwrap()
                 .get(),
@@ -695,7 +695,7 @@ mod tests {
                 .find(
                     None,
                     Some(TypeId::of::<A>()),
-                    Some(&AssetPath::from_path(Path::new("asset.x"))),
+                    &AssetPath::from_path(Path::new("asset.x")),
                 )
                 .unwrap()
                 .get(),
@@ -715,7 +715,7 @@ mod tests {
                 .find(
                     None,
                     Some(TypeId::of::<A>()),
-                    Some(&AssetPath::from_path(Path::new("asset"))),
+                    &AssetPath::from_path(Path::new("asset")),
                 )
                 .unwrap()
                 .get(),
@@ -753,7 +753,7 @@ mod tests {
                 .find(
                     None,
                     Some(TypeId::of::<A>()),
-                    Some(&AssetPath::from_path(Path::new("asset.a"))),
+                    &AssetPath::from_path(Path::new("asset.a")),
                 )
                 .unwrap()
                 .get(),
@@ -771,7 +771,7 @@ mod tests {
                 .find(
                     None,
                     Some(TypeId::of::<A>()),
-                    Some(&AssetPath::from_path(Path::new("asset.x"))),
+                    &AssetPath::from_path(Path::new("asset.x")),
                 )
                 .unwrap()
                 .get(),
@@ -789,7 +789,7 @@ mod tests {
                 .find(
                     None,
                     Some(TypeId::of::<A>()),
-                    Some(&AssetPath::from_path(Path::new("asset"))),
+                    &AssetPath::from_path(Path::new("asset")),
                 )
                 .unwrap()
                 .get(),
