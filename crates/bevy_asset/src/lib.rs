@@ -2627,13 +2627,7 @@ mod tests {
         let handle_2 = load(asset_server, "test.u8", 2);
 
         // Handles should be different.
-
-        // These handles should be different, but due to
-        // https://github.com/bevyengine/bevy/pull/21564, they are not. Once 21564 is fixed, we
-        // should replace these expects.
-        //
-        // assert_ne!(handle_1, handle_2);
-        assert_eq!(handle_1, handle_2);
+        assert_ne!(handle_1, handle_2);
 
         run_app_until(&mut app, |world| {
             let (Some(asset_1), Some(asset_2)) = (
@@ -2644,14 +2638,8 @@ mod tests {
             };
 
             // Values should match the settings.
-
-            // These values should be different, but due to
-            // https://github.com/bevyengine/bevy/pull/21564, they are not. Once 21564 is fixed, we
-            // should replace these expects.
-            //
-            // assert_eq!(asset_1.0, 1);
-            // assert_eq!(asset_2.0, 2);
-            assert_eq!(asset_1.0, asset_2.0);
+            assert_eq!(asset_1.0, 1);
+            assert_eq!(asset_2.0, 2);
 
             Some(())
         });
