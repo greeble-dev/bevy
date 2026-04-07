@@ -1559,8 +1559,7 @@ impl AssetServer {
                     let error = || AssetLoadError::MissingAssetLoader {
                         loader_name: None,
                         asset_type_id,
-                        extension: None,
-                        asset_path: Some(asset_path.to_string()),
+                        asset_path: asset_path.to_string(),
                     };
 
                     let loader = loader.ok_or_else(error)?.get().await.map_err(|_| error())?;
@@ -1576,8 +1575,7 @@ impl AssetServer {
             let error = || AssetLoadError::MissingAssetLoader {
                 loader_name: None,
                 asset_type_id,
-                extension: None,
-                asset_path: Some(asset_path.to_string()),
+                asset_path: asset_path.to_string(),
             };
 
             let loader = loader.ok_or_else(error)?.get().await.map_err(|_| error())?;
@@ -2104,12 +2102,11 @@ pub enum AssetLoadError {
         actual_asset_name: &'static str,
         loader_name: &'static str,
     },
-    #[error("Could not find an asset loader matching: Loader Name: {loader_name:?}; Asset Type: {asset_type_id:?}; Extension: {extension:?}; Path: {asset_path:?};")]
+    #[error("Could not find an asset loader matching: Loader Name: {loader_name:?}; Asset Type: {asset_type_id:?}; Path: {asset_path:?};")]
     MissingAssetLoader {
         loader_name: Option<String>,
         asset_type_id: Option<TypeId>,
-        extension: Option<String>,
-        asset_path: Option<String>,
+        asset_path: String,
     },
     #[error(transparent)]
     MissingAssetLoaderForExtension(#[from] MissingAssetLoaderForExtensionError),
