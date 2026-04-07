@@ -116,7 +116,17 @@ impl<A: Asset> Assets<'_, '_, A> {
     }
 }
 
-impl<A: Asset> AssetsMut<'_, '_, A> {
+impl<A: Asset> Clone for Assets<'_, '_, A> {
+    fn clone(&self) -> Self {
+        Self {
+            assets: self.assets,
+            handles: self.handles,
+            uuid_map: Res::clone(&self.uuid_map),
+        }
+    }
+}
+
+impl<'s, A: Asset> AssetsMut<'_, 's, A> {
     /// Gets the data associated with the `id` if it exists.
     ///
     /// This can return [`None`] for several reasons. For example, the asset could be despawned,
@@ -184,6 +194,17 @@ impl<A: Asset> AssetsMut<'_, '_, A> {
     /// Returns the number of asset currently stored.
     pub fn count(&self) -> usize {
         self.assets.count()
+    }
+
+    /// Creates a readonly instance of this [`AssetsMut`].
+    ///
+    /// This allows calling code that only needs an [`Assets`].
+    pub fn as_readonly<'w>(&'w self) -> Assets<'w, 's, A> {
+        Assets {
+            uuid_map: Res::clone(&self.uuid_map),
+            assets: self.assets.as_readonly(),
+            handles: self.handles.as_readonly(),
+        }
     }
 }
 
