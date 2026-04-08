@@ -8,7 +8,7 @@ use bevy_asset::{
         memory::{Dir, MemoryAssetReader},
         AssetSourceBuilder, AssetSourceId,
     },
-    AssetApp, AssetLoader, AssetServer, Assets,
+    AssetApp, AssetLoader, AssetServer, DirectAssetAccessExt, Handle,
 };
 use bevy_ecs::prelude::*;
 use bevy_scene::{prelude::*, ScenePatch};
@@ -195,16 +195,11 @@ fn spawn(c: &mut Criterion) {
         dir.insert_asset_text(Path::new("button.bsn"), "");
 
         let asset_server = app.world().resource::<AssetServer>().clone();
-        let handle = asset_server.load("button.bsn");
-        assert!(app.world().get_resource::<Assets<ScenePatch>>().is_some());
+        let handle: Handle<ScenePatch> = asset_server.load("button.bsn");
 
         run_app_until(&mut app, || asset_server.is_loaded(&handle));
 
-        let patch = app
-            .world()
-            .resource::<Assets<ScenePatch>>()
-            .get(&handle)
-            .unwrap();
+        let patch = app.world().get_asset(handle.id()).unwrap();
         assert!(patch.resolved.is_some());
 
         b.iter(move || {

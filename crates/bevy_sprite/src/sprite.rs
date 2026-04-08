@@ -350,7 +350,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite.compute_pixel_space_point(
                 point,
@@ -373,7 +373,7 @@ mod tests {
         // This also tests the `custom_size` field.
         let sprite = Sprite::from_color(Color::BLACK, Vec2::new(50.0, 100.0));
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite
                 .compute_pixel_space_point(
@@ -405,7 +405,7 @@ mod tests {
         };
         let anchor = Anchor::BOTTOM_LEFT;
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite.compute_pixel_space_point(point, anchor, &image_assets, &texture_atlas_assets)
         };
@@ -428,7 +428,7 @@ mod tests {
         };
         let anchor = Anchor::TOP_RIGHT;
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite.compute_pixel_space_point(point, anchor, &image_assets, &texture_atlas_assets)
         };
@@ -452,7 +452,7 @@ mod tests {
         };
         let anchor = Anchor::BOTTOM_LEFT;
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite.compute_pixel_space_point(point, anchor, &image_assets, &texture_atlas_assets)
         };
@@ -476,7 +476,7 @@ mod tests {
         };
         let anchor = Anchor::TOP_RIGHT;
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite.compute_pixel_space_point(point, anchor, &image_assets, &texture_atlas_assets)
         };
@@ -500,7 +500,7 @@ mod tests {
         };
         let anchor = Anchor::BOTTOM_LEFT;
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite.compute_pixel_space_point(point, anchor, &image_assets, &texture_atlas_assets)
         };
@@ -529,7 +529,7 @@ mod tests {
         };
         let anchor = Anchor::BOTTOM_LEFT;
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite.compute_pixel_space_point(point, anchor, &image_assets, &texture_atlas_assets)
         };
@@ -560,7 +560,7 @@ mod tests {
         };
         let anchor = Anchor::BOTTOM_LEFT;
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite.compute_pixel_space_point(point, anchor, &image_assets, &texture_atlas_assets)
         };
@@ -582,7 +582,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite.compute_pixel_space_point(
                 point,
@@ -609,7 +609,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (image_assets, texture_atlas_assets) = state.get(app.world());
+        let (image_assets, texture_atlas_assets) = state.get(app.world()).unwrap();
         let compute = |point| {
             sprite.compute_pixel_space_point(
                 point,
