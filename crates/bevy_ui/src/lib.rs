@@ -256,7 +256,8 @@ fn build_text_interop(app: &mut App) {
                 .in_set(UiSystems::PostLayout)
                 .ambiguous_with(ui_stack_system)
                 .ambiguous_with(widget::text_system)
-                .ambiguous_with(bevy_sprite::calculate_bounds_text2d),
+                .ambiguous_with(bevy_sprite::calculate_bounds_text2d)
+                .ambiguous_with(bevy_sprite::update_text2d_layout),
         ),
     );
 
