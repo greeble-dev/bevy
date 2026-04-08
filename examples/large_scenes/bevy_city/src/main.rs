@@ -237,11 +237,17 @@ fn loading_screen(
 /// Eventually, this will also be used for things like generating LODs
 fn process_assets(
     mut commands: Commands,
+    mut asset_commands: AssetCommands,
     mut city_assets: ResMut<CityAssets>,
-    mut world_assets: ResMut<Assets<WorldAsset>>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    mut world_assets: AssetsMut<WorldAsset>,
+    meshes: Assets<Mesh>,
 ) {
-    merge_car_meshes(&mut city_assets, &mut world_assets, &mut meshes);
+    merge_car_meshes(
+        &mut city_assets,
+        &mut world_assets,
+        &meshes,
+        &mut asset_commands,
+    );
 
     // Use a Message instead of an Event so spawning the city happens in the next frame
     commands.write_message(CityAssetsReady);

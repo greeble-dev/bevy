@@ -76,7 +76,7 @@ pub fn load_assets(
 
     let car_texture: Handle<Image> =
         load_asset!(format!("{base_url}/car-kit/Textures/colormap.png"));
-    let car_material = materials.add(StandardMaterial {
+    let car_material = asset_commands.spawn_asset(StandardMaterial {
         base_color_texture: Some(car_texture),
         ..Default::default()
     });
@@ -259,21 +259,24 @@ pub fn load_assets(
 /// commands for each of those meshes.
 pub fn merge_car_meshes(
     city_assets: &mut CityAssets,
-    world_assets: &mut Assets<WorldAsset>,
-    meshes: &mut Assets<Mesh>,
+    world_assets: &mut AssetsMut<WorldAsset>,
+    meshes: &Assets<Mesh>,
+    asset_commands: &mut AssetCommands,
 ) {
     for car_scene in &city_assets.cars {
         let Some(merged) = merge_world_asset(world_assets, meshes, car_scene) else {
             continue;
         };
-        city_assets.car_meshes.push(meshes.add(merged));
+        city_assets
+            .car_meshes
+            .push(asset_commands.spawn_asset(merged));
     }
 }
 
 /// Merge an entire scene into a single mesh
 fn merge_world_asset(
-    world_assets: &mut Assets<WorldAsset>,
-    meshes: &mut Assets<Mesh>,
+    world_assets: &mut AssetsMut<WorldAsset>,
+    meshes: &Assets<Mesh>,
     scene_handle: &Handle<WorldAsset>,
 ) -> Option<Mesh> {
     let mut scene = world_assets.get_mut(scene_handle)?;
