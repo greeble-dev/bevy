@@ -449,7 +449,7 @@ mod tests {
                 .find_map(|(h, a)| (a.0 == i).then_some(h))
                 .unwrap();
             let mut asset = assets.get_mut(id).unwrap();
-            println!("setting new value for {}", (***asset).0);
+            println!("setting new value for {}", (*asset).0);
             asset.1 = "new_value";
         };
         match *run_count {

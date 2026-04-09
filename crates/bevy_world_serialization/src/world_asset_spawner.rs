@@ -305,11 +305,11 @@ impl WorldInstanceSpawner {
             .ok_or(WorldInstanceSpawnError::NonExistentDynamicWorld { id })?;
 
         // Hokey-pokey the dynamic scene out of the world.
-        let scene_to_spawn = core::mem::take(&mut dynamic_scene.bypass_change_detection().0);
+        let scene_to_spawn = core::mem::take(dynamic_scene.bypass_change_detection());
         scene_to_spawn.write_to_world(world, entity_map)?;
         let mut dynamic_scene = world.get_asset_mut(id).unwrap();
         // Put the scene data back into the asset.
-        dynamic_scene.bypass_change_detection().0 = scene_to_spawn;
+        *dynamic_scene.bypass_change_detection() = scene_to_spawn;
         Ok(())
     }
 
@@ -351,13 +351,13 @@ impl WorldInstanceSpawner {
 
         // Hokey-pokey the scene out of the world.
         let scene_to_spawn = core::mem::replace(
-            &mut scene.bypass_change_detection().0,
+            scene.bypass_change_detection(),
             WorldAsset::new(World::new()),
         );
         scene_to_spawn.write_to_world_with(world, entity_map, &type_registry)?;
         let mut scene = world.get_asset_mut(id).unwrap();
         // Put the scene data back into the asset.
-        scene.bypass_change_detection().0 = scene_to_spawn;
+        *scene.bypass_change_detection() = scene_to_spawn;
         Ok(())
     }
 

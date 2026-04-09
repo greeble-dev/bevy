@@ -733,7 +733,7 @@ pub fn spawn_queued(
                         // world mutable borrow. **IMPORTANT**: do not continue or break out of this
                         // loop, or the SceneListPatch will be dropped!
                         let list_patch = core::mem::replace(
-                            &mut { list_patch }.bypass_change_detection().0,
+                            { list_patch }.bypass_change_detection(),
                             SceneListPatch::dummy(),
                         );
 
@@ -759,13 +759,12 @@ pub fn spawn_queued(
                         }
 
                         // Put the asset back into the world.
-                        list_patches
+                        *list_patches
                             .get_mut(world)
                             .unwrap()
                             .get_mut(*id)
                             .unwrap()
-                            .bypass_change_detection()
-                            .0 = list_patch;
+                            .bypass_change_detection() = list_patch;
                     }
                 }
             },
@@ -823,20 +822,19 @@ impl QueuedScenes {
                 // borrow.
                 let list_patch = core::mem::replace(
                     // Consume the list_patch, then get a mutable borrow to its value to replace it.
-                    &mut { list_patch }.bypass_change_detection().0,
+                    { list_patch }.bypass_change_detection(),
                     SceneListPatch::dummy(),
                 );
                 let result = list_patch.spawn_with(world, |entity| {
                     (scene_list_spawn.insert)(entity, scene_list_spawn.entity);
                 });
                 // Put the asset back into the world.
-                list_patches
+                *list_patches
                     .get_mut(world)
                     .unwrap()
                     .get_mut(&handle)
                     .unwrap()
-                    .bypass_change_detection()
-                    .0 = list_patch;
+                    .bypass_change_detection() = list_patch;
 
                 if let Err(err) = result {
                     error!(
@@ -858,18 +856,17 @@ impl QueuedScenes {
         for handle in core::mem::take(&mut self.scene_list_spawns) {
             if let Some(mut list_patch) = list_patches.get_mut(world).unwrap().get_mut(&handle) {
                 let list_patch = core::mem::replace(
-                    &mut { list_patch }.bypass_change_detection().0,
+                    { list_patch }.bypass_change_detection(),
                     SceneListPatch::dummy(),
                 );
                 let result = list_patch.spawn(world);
                 // Put the asset back into the world.
-                list_patches
+                *list_patches
                     .get_mut(world)
                     .unwrap()
                     .get_mut(&handle)
                     .unwrap()
-                    .bypass_change_detection()
-                    .0 = list_patch;
+                    .bypass_change_detection() = list_patch;
 
                 if let Err(err) = result {
                     error!(

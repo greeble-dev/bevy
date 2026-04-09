@@ -314,7 +314,7 @@ pub fn generate_mipmaps<M: Material + GetImages>(
         match future::block_on(future::poll_once(task)) {
             Some(task_data) => {
                 if let Some(mut image) = images.get_mut(image_h) {
-                    ***image = task_data.image;
+                    *image = task_data.image;
                     progress.processed += 1;
                     let prev_cached_data_gb = bytes_to_gb(progress.cached_data_size_bytes);
                     progress.cached_data_size_bytes += task_data.added_cache_size;
