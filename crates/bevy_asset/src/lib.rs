@@ -56,7 +56,7 @@
 //!
 //! Bevy supports asset hot reloading, allowing you to change assets on disk and see the changes reflected in your game without restarting.
 //! When enabled, any changes to the underlying asset file will be detected by the [`AssetServer`], which will then reload the asset,
-//! mutating the asset data on its entity and thus updating all entities that use the asset.
+//! mutating the asset data on its entity and thus updating all other entities that use the asset.
 //! While it has limited uses in published games, it is very useful when developing, as it allows you to iterate quickly.
 //!
 //! To enable asset hot reloading on desktop platforms, enable `bevy`'s `file_watcher` cargo feature.
@@ -65,7 +65,7 @@
 //! # Procedural asset creation
 //!
 //! Not all assets are loaded from disk: some are generated at runtime, such as procedural materials, sounds or even levels.
-//! After creating an item of a type that implements [`Asset`], you can create one using [`AssetCommands::spawn_asset`].
+//! After creating an item of a type that implements [`Asset`], you can add it to the world using [`AssetCommands::spawn_asset`].
 //! Once spawned, this data can be operated on like any other asset.
 //!
 //! Note that, unlike assets loaded from a file path, no general mechanism currently exists to deduplicate procedural assets:
