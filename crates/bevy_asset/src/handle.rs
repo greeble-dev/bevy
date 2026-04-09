@@ -20,10 +20,18 @@ use disqualified::ShortName;
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Stores the handle of this asset (weakly).
+///
+/// This allows users to access an asset through a [`Query`](bevy_ecs::system::Query) and get its
+/// handle.
+///
+/// This stores a "weak" handle, preventing the asset from keeping itself from being dropped.
+/// Attempting to access the "strong" handle may fail if this asset is already enqueued for despawn.
 #[derive(Component)]
 pub struct AssetSelfHandle(pub(crate) Weak<StrongHandle>);
 
 impl AssetSelfHandle {
+    /// Attempts to get a [`Handle`] for this asset, assuming it is the given type.
     pub fn upgrade<A: Asset>(&self) -> Result<Handle<A>, HandleUpgradeError> {
         let handle = self
             .upgrade_untyped()
@@ -31,11 +39,16 @@ impl AssetSelfHandle {
         Ok(handle.try_typed()?)
     }
 
+    /// Attempts to get an [`UntypedHandle`] to this asset.
+    ///
+    /// This may return [`None`] if the asset handle has expired, meaning that the asset is already
+    /// enqueued for despawn.
     pub fn upgrade_untyped(&self) -> Option<UntypedHandle> {
         self.0.upgrade().map(UntypedHandle::Strong)
     }
 }
 
+/// Error for upgrading a "weak" (and untyped) handle into a strong, typed handle.
 #[derive(Error, Debug, Clone)]
 pub enum HandleUpgradeError {
     #[error("The underlying handle has been dropped, so the handle can't be upgraded")]
