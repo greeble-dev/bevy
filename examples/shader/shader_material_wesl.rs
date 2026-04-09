@@ -51,7 +51,7 @@ impl Plugin for CustomMaterialPlugin {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // cube
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(CustomMaterial {
             time: Vec4::ZERO,
             party_mode: false,

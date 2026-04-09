@@ -54,7 +54,7 @@ fn test(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Spawn something for the 3D camera to look at
     commands
         .spawn((
-            Mesh3d(asset_commands.spawn_asset(Cuboid::new(5.0, 5.0, 5.0).into())),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(5.0, 5.0, 5.0)))),
             MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE))),
             Transform::from_xyz(0.0, 0.0, -10.0),
             Shape,

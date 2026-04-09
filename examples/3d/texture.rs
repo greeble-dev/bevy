@@ -24,7 +24,7 @@ fn setup(
     // create a new quad mesh. this is what we will apply the texture to
     let quad_width = 8.0;
     let quad_handle =
-        asset_commands.spawn_asset(Rectangle::new(quad_width, quad_width * aspect).into());
+        asset_commands.spawn_asset(Mesh::from(Rectangle::new(quad_width, quad_width * aspect)));
 
     // this material renders the texture normally
     let material_handle = asset_commands.spawn_asset(StandardMaterial {

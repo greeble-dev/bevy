@@ -26,35 +26,35 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(5.0, 5.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(5.0, 5.0)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3))),
         ),
     ));
     // cubes
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6))),
         ),
         Transform::from_xyz(1.5, 0.5, 1.5),
     ));
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6))),
         ),
         Transform::from_xyz(1.5, 0.5, -1.5),
     ));
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6))),
         ),
         Transform::from_xyz(-1.5, 0.5, 1.5),
     ));
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6))),
         ),

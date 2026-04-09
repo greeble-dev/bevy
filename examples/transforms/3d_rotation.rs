@@ -21,7 +21,7 @@ fn main() {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Spawn a cube to rotate.
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE))),
         Transform::from_translation(Vec3::ZERO),
         Rotatable { speed: 0.3 },

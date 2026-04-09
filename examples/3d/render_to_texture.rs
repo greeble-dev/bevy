@@ -32,7 +32,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     let image_handle = asset_commands.spawn_asset(image);
 
-    let cube_handle = asset_commands.spawn_asset(Cuboid::new(4.0, 4.0, 4.0).into());
+    let cube_handle = asset_commands.spawn_asset(Mesh::from(Cuboid::new(4.0, 4.0, 4.0)));
     let cube_material_handle = asset_commands.spawn_asset(StandardMaterial {
         base_color: Color::srgb(0.8, 0.7, 0.6),
         reflectance: 0.02,
@@ -77,7 +77,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     let cube_size = 4.0;
     let cube_handle =
-        asset_commands.spawn_asset(Cuboid::new(cube_size, cube_size, cube_size).into());
+        asset_commands.spawn_asset(Mesh::from(Cuboid::new(cube_size, cube_size, cube_size)));
 
     // This material has the texture that has been rendered.
     let material_handle = asset_commands.spawn_asset(StandardMaterial {

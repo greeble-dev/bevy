@@ -13,7 +13,7 @@ fn main() {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(5.0, 5.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(5.0, 5.0)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3))),
         ),
@@ -21,7 +21,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // Cube
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6))),
         ),

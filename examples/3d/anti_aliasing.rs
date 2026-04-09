@@ -416,7 +416,7 @@ fn setup(
 ) {
     // Plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(20.0, 20.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(20.0, 20.0)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.1, 0.2, 0.1))),
         ),
@@ -431,7 +431,7 @@ fn setup(
     // Cubes
     for i in 0..5 {
         commands.spawn((
-            Mesh3d(asset_commands.spawn_asset(Cuboid::new(0.25, 0.25, 0.25).into())),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.25, 0.25, 0.25)))),
             MeshMaterial3d(cube_material.clone()),
             Transform::from_xyz(i as f32 * 0.25 - 1.0, 0.125, -i as f32 * 0.5),
         ));

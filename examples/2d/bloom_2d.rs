@@ -40,7 +40,7 @@ fn setup(
 
     // Circle mesh
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Circle::new(100.).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Circle::new(100.)))),
         // 3. Put something bright in a dark environment to see the effect
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(7.5, 0.0, 7.5)))),
         Transform::from_translation(Vec3::new(-200., 0., 0.)),
@@ -48,7 +48,7 @@ fn setup(
 
     // Hexagon mesh
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(RegularPolygon::new(100., 6).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(RegularPolygon::new(100., 6)))),
         // 3. Put something bright in a dark environment to see the effect
         MeshMaterial2d(
             asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(6.25, 9.4, 9.1))),

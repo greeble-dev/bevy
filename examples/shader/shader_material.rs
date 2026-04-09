@@ -22,7 +22,7 @@ fn setup(
 ) {
     // cube
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(CustomMaterial {
             color: LinearRgba::BLUE,
             color_texture: Some(asset_server.load("branding/icon.png")),

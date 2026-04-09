@@ -51,29 +51,24 @@ fn main() {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Triangle: Never renders a wireframe
     commands.spawn((
-        Mesh2d(
-            asset_commands.spawn_asset(
-                Triangle2d::new(
-                    Vec2::new(0.0, 50.0),
-                    Vec2::new(-50.0, -50.0),
-                    Vec2::new(50.0, -50.0),
-                )
-                .into(),
-            ),
-        ),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Triangle2d::new(
+            Vec2::new(0.0, 50.0),
+            Vec2::new(-50.0, -50.0),
+            Vec2::new(50.0, -50.0),
+        )))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from_color(Color::BLACK))),
         Transform::from_xyz(-150.0, 0.0, 0.0),
         NoWireframe2d,
     ));
     // Rectangle: Follows global wireframe setting
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(100.0, 100.0).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(100.0, 100.0)))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from_color(Color::BLACK))),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
     // Circle: Always renders a wireframe
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Circle::new(50.0).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Circle::new(50.0)))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from_color(Color::BLACK))),
         Transform::from_xyz(150.0, 0.0, 0.0),
         Wireframe2d,

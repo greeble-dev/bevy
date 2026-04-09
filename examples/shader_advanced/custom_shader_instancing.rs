@@ -51,7 +51,7 @@ fn main() {
 
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(0.5, 0.5, 0.5).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.5, 0.5, 0.5)))),
         InstanceMaterialData(
             (1..=10)
                 .flat_map(|x| (1..=10).map(move |y| (x as f32 / 10.0, y as f32 / 10.0)))

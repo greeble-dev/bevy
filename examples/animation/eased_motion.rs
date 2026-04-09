@@ -32,7 +32,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // A cube together with the components needed to animate it
     let cube_entity = commands
         .spawn((
-            Mesh3d(asset_commands.spawn_asset(Cuboid::from_length(2.0).into())),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::from_length(2.0)))),
             MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::from(ORANGE)))),
             Transform::from_translation(vec3(-6., 2., 0.)),
             animation_target_name,
@@ -58,7 +58,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // Ground plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(50., 50.).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(50., 50.)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::from(SILVER)))),
     ));
 

@@ -37,7 +37,7 @@ fn main() {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Spawn a cube to scale.
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE))),
         Transform::from_rotation(Quat::from_rotation_y(PI / 4.0)),
         Scaling::new(),

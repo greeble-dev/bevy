@@ -59,7 +59,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // Action! (Our cubes that are going to move)
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(1., 1., 1.).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(1., 1., 1.)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6))),
         ),
@@ -72,7 +72,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     ));
 
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(0.5, 0.5, 0.5).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.5, 0.5, 0.5)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.6, 0.7, 0.8))),
         ),
@@ -86,7 +86,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // A plane to give a sense of place
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(20., 20.).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(20., 20.)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.1, 0.1, 0.1))),
         ),

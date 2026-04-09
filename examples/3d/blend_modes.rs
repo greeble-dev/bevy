@@ -121,7 +121,8 @@ fn setup(
     let black_material = asset_commands.spawn_asset(StandardMaterial::from(Color::BLACK));
     let white_material = asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE));
 
-    let plane_mesh = asset_commands.spawn_asset(Plane3d::default().mesh().size(2.0, 2.0).into());
+    let plane_mesh =
+        asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(2.0, 2.0)));
 
     for x in -3..4 {
         for z in -3..4 {

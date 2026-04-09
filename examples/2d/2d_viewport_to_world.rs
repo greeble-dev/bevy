@@ -158,13 +158,13 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands, window: Sing
 
     // Add mesh to make camera movement visible
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(40.0, 20.0).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(40.0, 20.0)))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from(Color::from(GREEN)))),
     ));
 
     // Add background to visualize viewport bounds
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(50000.0, 50000.0).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(50000.0, 50000.0)))),
         MeshMaterial2d(
             asset_commands.spawn_asset(ColorMaterial::from(Color::linear_rgb(0.01, 0.01, 0.01))),
         ),

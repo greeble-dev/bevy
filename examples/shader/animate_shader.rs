@@ -18,7 +18,7 @@ fn main() {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // cube
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(CustomMaterial {})),
         Transform::from_xyz(0.0, 0.5, 0.0),
     ));

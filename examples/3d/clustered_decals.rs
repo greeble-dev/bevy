@@ -180,7 +180,7 @@ fn spawn_cube(commands: &mut Commands, asset_commands: &mut AssetCommands) {
     transform.rotate_y(FRAC_PI_3);
 
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(3.0, 3.0, 3.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(3.0, 3.0, 3.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(ExtendedMaterial {
             base: StandardMaterial {
                 base_color: SILVER.into(),

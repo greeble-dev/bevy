@@ -213,7 +213,7 @@ fn spawn_light(commands: &mut Commands) {
 /// Spawns the circular ground plane object.
 fn spawn_ground_plane(commands: &mut Commands, asset_commands: &mut AssetCommands) {
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Circle::new(200.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Circle::new(200.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from_color(GREEN))),
         Transform::from_rotation(Quat::from_rotation_x(-FRAC_PI_2))
             .with_translation(vec3(-25.0, 0.0, 0.0)),
@@ -288,7 +288,7 @@ fn spawn_mirror(
         .with_translation(MIRROR_POSITION);
 
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(1.0, 1.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(1.0, 1.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(ExtendedMaterial {
             base: StandardMaterial {
                 base_color: Color::BLACK,

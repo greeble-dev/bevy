@@ -47,7 +47,7 @@ fn setup(
 ) {
     // ground plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(10.0, 10.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(10.0, 10.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: Color::WHITE,
             perceptual_roughness: 1.0,
@@ -59,7 +59,7 @@ fn setup(
     let mut transform = Transform::from_xyz(2.5, 2.5, 0.0);
     transform.rotate_z(PI / 2.);
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(5.0, 0.15, 5.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(5.0, 0.15, 5.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: INDIGO.into(),
             perceptual_roughness: 1.0,
@@ -71,7 +71,7 @@ fn setup(
     let mut transform = Transform::from_xyz(0.0, 2.5, -2.5);
     transform.rotate_x(PI / 2.);
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(5.0, 0.15, 5.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(5.0, 0.15, 5.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: INDIGO.into(),
             perceptual_roughness: 1.0,
@@ -84,7 +84,7 @@ fn setup(
     let mut transform = Transform::from_xyz(-2.2, 0.5, 1.0);
     transform.rotate_y(PI / 8.);
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Rectangle::new(2.0, 0.5).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(2.0, 0.5)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color_texture: Some(asset_server.load("branding/bevy_logo_light.png")),
             perceptual_roughness: 1.0,
@@ -98,7 +98,7 @@ fn setup(
 
     // cube
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: DEEP_PINK.into(),
             ..default()
@@ -156,7 +156,7 @@ fn setup(
         },
         Transform::from_xyz(-1.0, 2.0, 0.0).looking_at(Vec3::new(-1.0, 0.0, 0.0), Vec3::Z),
         children![(
-            Mesh3d(asset_commands.spawn_asset(Capsule3d::new(0.1, 0.125).into())),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Capsule3d::new(0.1, 0.125)))),
             MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
                 base_color: LIME.into(),
                 emissive: LinearRgba::new(0.0, 4.0, 0.0, 0.0),

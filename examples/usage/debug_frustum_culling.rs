@@ -181,12 +181,11 @@ fn setup(
     // Green Floor Plane
     commands.spawn((
         Mesh3d(
-            asset_commands.spawn_asset(
+            asset_commands.spawn_asset(Mesh::from(
                 Plane3d::default()
                     .mesh()
-                    .size(SHAPE_RING_RADIUS * 4., SHAPE_RING_RADIUS * 4.)
-                    .into(),
-            ),
+                    .size(SHAPE_RING_RADIUS * 4., SHAPE_RING_RADIUS * 4.),
+            )),
         ),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3))),
@@ -194,7 +193,7 @@ fn setup(
     ));
     // Blue Wall Plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(5., 5.).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(5., 5.)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.3, 0.5))),
         ),
@@ -216,36 +215,24 @@ fn setup(
     // Configure the shapes on the ring that will have their AABB's drawn and updated
     let white_matl = asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE));
     let shapes = [
-        asset_commands.spawn_asset(
-            Cuboid {
-                half_size: Vec3::new(2., 0.5, 1.),
-            }
-            .into(),
-        ),
-        asset_commands.spawn_asset(
-            Tetrahedron {
-                vertices: [
-                    Vec3::new(3., 4., 3.),
-                    Vec3::new(-0.5, 4., -0.5),
-                    Vec3::new(-0.5, -0.5, 3.),
-                    Vec3::new(3., -0.5, -0.5),
-                ],
-            }
-            .into(),
-        ),
-        asset_commands.spawn_asset(
-            Cylinder {
-                radius: 0.1,
-                half_height: 1.5,
-            }
-            .into(),
-        ),
-        asset_commands.spawn_asset(
-            Cuboid {
-                half_size: Vec3::new(1., 0.1, 2.),
-            }
-            .into(),
-        ),
+        asset_commands.spawn_asset(Mesh::from(Cuboid {
+            half_size: Vec3::new(2., 0.5, 1.),
+        })),
+        asset_commands.spawn_asset(Mesh::from(Tetrahedron {
+            vertices: [
+                Vec3::new(3., 4., 3.),
+                Vec3::new(-0.5, 4., -0.5),
+                Vec3::new(-0.5, -0.5, 3.),
+                Vec3::new(3., -0.5, -0.5),
+            ],
+        })),
+        asset_commands.spawn_asset(Mesh::from(Cylinder {
+            radius: 0.1,
+            half_height: 1.5,
+        })),
+        asset_commands.spawn_asset(Mesh::from(Cuboid {
+            half_size: Vec3::new(1., 0.1, 2.),
+        })),
         asset_commands.spawn_asset(Sphere::default().mesh().ico(5).unwrap()),
     ];
     let shapes_len = shapes.len() as f32;
@@ -264,7 +251,7 @@ fn setup(
     }
 
     // Configure the shape that peeks out of the wall plane
-    let wall_shape = asset_commands.spawn_asset(Torus::default().into());
+    let wall_shape = asset_commands.spawn_asset(Mesh::from(Torus::default()));
     commands.spawn((
         Mesh3d(wall_shape),
         MeshMaterial3d(white_matl.clone()),

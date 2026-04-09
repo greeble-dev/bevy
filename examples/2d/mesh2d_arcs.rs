@@ -65,7 +65,7 @@ fn setup(
                 angle: sector_angle,
             });
         commands.spawn((
-            Mesh2d(asset_commands.spawn_asset(sector_mesh.into())),
+            Mesh2d(asset_commands.spawn_asset(Mesh::from(sector_mesh))),
             MeshMaterial2d(material.clone()),
             Transform {
                 translation: Vec3::new(SPACING_X * i as f32 - OFFSET_X, 50.0, 0.0),
@@ -89,7 +89,7 @@ fn setup(
                 angle: -segment_angle,
             });
         commands.spawn((
-            Mesh2d(asset_commands.spawn_asset(segment_mesh.into())),
+            Mesh2d(asset_commands.spawn_asset(Mesh::from(segment_mesh))),
             MeshMaterial2d(material.clone()),
             Transform {
                 translation: Vec3::new(SPACING_X * i as f32 - OFFSET_X, -50.0, 0.0),

@@ -52,7 +52,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
         Transform::from_scale(Vec3::NEG_ONE),
     ));
 
-    let mesh = asset_commands.spawn_asset(Cuboid::default().into());
+    let mesh = asset_commands.spawn_asset(Mesh::from(Cuboid::default()));
     let material = asset_commands.spawn_asset(StandardMaterial {
         base_color: DEEP_PINK.into(),
         ..default()

@@ -57,7 +57,7 @@ fn setup(
     ));
 
     // Spawn some cubes using the array texture.
-    let mesh_handle = asset_commands.spawn_asset(Cuboid::default().into());
+    let mesh_handle = asset_commands.spawn_asset(Mesh::from(Cuboid::default()));
     let material_handle = asset_commands.spawn_asset(ArrayTextureMaterial { array_texture });
     for x in -5..=5 {
         commands.spawn((

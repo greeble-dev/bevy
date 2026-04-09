@@ -25,7 +25,7 @@ fn main() {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // blue cube
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(CustomMaterial {
             color: LinearRgba::BLUE,
             is_red: false,
@@ -35,7 +35,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // red cube (with green color overridden by the IS_RED "shader def")
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(CustomMaterial {
             color: LinearRgba::GREEN,
             is_red: true,

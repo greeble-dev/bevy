@@ -78,7 +78,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     commands
         .spawn((
             DropArea,
-            Mesh2d(asset_commands.spawn_asset(Rectangle::new(AREA_SIZE, AREA_SIZE).into())),
+            Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(AREA_SIZE, AREA_SIZE)))),
             MeshMaterial2d(
                 asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(0.1, 0.4, 0.1))),
             ),
@@ -109,7 +109,7 @@ fn on_drag_enter(
         };
         commands.spawn((
             GhostPreview,
-            Mesh2d(asset_commands.spawn_asset(Circle::new(ELEMENT_SIZE).into())),
+            Mesh2d(asset_commands.spawn_asset(Mesh::from(Circle::new(ELEMENT_SIZE)))),
             MeshMaterial2d(
                 asset_commands.spawn_asset(ColorMaterial::from(Color::srgba(1.0, 1.0, 0.6, 0.5))),
             ),
@@ -148,7 +148,7 @@ fn on_drag_drop(
         };
         commands.spawn((
             DroppedElement,
-            Mesh2d(asset_commands.spawn_asset(Circle::new(ELEMENT_SIZE).into())),
+            Mesh2d(asset_commands.spawn_asset(Mesh::from(Circle::new(ELEMENT_SIZE)))),
             MeshMaterial2d(
                 asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(1.0, 1.0, 0.6))),
             ),

@@ -97,7 +97,7 @@ const DEFAULT_RENDER_LAYER: usize = 0;
 const VIEW_MODEL_RENDER_LAYER: usize = 1;
 
 fn spawn_view_model(mut commands: Commands, mut asset_commands: AssetCommands) {
-    let arm = asset_commands.spawn_asset(Cuboid::new(0.1, 0.1, 0.5).into());
+    let arm = asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.1, 0.1, 0.5)));
     let arm_material =
         asset_commands.spawn_asset(StandardMaterial::from(Color::from(tailwind::TEAL_200)));
 
@@ -145,8 +145,8 @@ fn spawn_view_model(mut commands: Commands, mut asset_commands: AssetCommands) {
 }
 
 fn spawn_world_model(mut commands: Commands, mut asset_commands: AssetCommands) {
-    let floor = asset_commands.spawn_asset(Plane3d::new(Vec3::Y, Vec2::splat(10.0)).into());
-    let cube = asset_commands.spawn_asset(Cuboid::new(2.0, 0.5, 1.0).into());
+    let floor = asset_commands.spawn_asset(Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(10.0))));
+    let cube = asset_commands.spawn_asset(Mesh::from(Cuboid::new(2.0, 0.5, 1.0)));
     let material = asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE));
 
     // The world model camera will render the floor and the cubes spawned in this system.

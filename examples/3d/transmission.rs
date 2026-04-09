@@ -64,10 +64,11 @@ fn setup(
     asset_server: Res<AssetServer>,
 ) {
     let icosphere_mesh = asset_commands.spawn_asset(Sphere::new(0.9).mesh().ico(7).unwrap());
-    let cube_mesh = asset_commands.spawn_asset(Cuboid::new(0.7, 0.7, 0.7).into());
-    let plane_mesh = asset_commands.spawn_asset(Plane3d::default().mesh().size(2.0, 2.0).into());
+    let cube_mesh = asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.7, 0.7, 0.7)));
+    let plane_mesh =
+        asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(2.0, 2.0)));
     let cylinder_mesh =
-        asset_commands.spawn_asset(Cylinder::new(0.5, 2.0).mesh().resolution(50).into());
+        asset_commands.spawn_asset(Mesh::from(Cylinder::new(0.5, 2.0).mesh().resolution(50)));
 
     // Cube #1
     commands.spawn((

@@ -42,7 +42,7 @@ struct RandomSource(ChaCha8Rng);
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // A plane:
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(12.0, 12.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(12.0, 12.0)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.15, 0.3))),
         ),
@@ -51,7 +51,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // The target sphere:
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Sphere::new(0.3).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Sphere::new(0.3)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.15, 0.9))),
         ),
@@ -60,7 +60,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // The sphere that follows it:
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Sphere::new(0.3).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Sphere::new(0.3)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.9, 0.3, 0.3))),
         ),

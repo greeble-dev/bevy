@@ -22,7 +22,9 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(100.0, 100.0).into())),
+        Mesh3d(
+            asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(100.0, 100.0))),
+        ),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: Color::srgb(0.2, 0.2, 0.2),
             perceptual_roughness: 0.08,

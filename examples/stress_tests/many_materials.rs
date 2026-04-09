@@ -67,7 +67,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands, args: Res<Ar
     ));
 
     // Cubes
-    let mesh_handle = asset_commands.spawn_asset(Cuboid::from_size(Vec3::ONE).into());
+    let mesh_handle = asset_commands.spawn_asset(Mesh::from(Cuboid::from_size(Vec3::ONE)));
     for x in 0..n {
         for z in 0..n {
             commands.spawn((

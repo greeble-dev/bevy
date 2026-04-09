@@ -289,7 +289,7 @@ struct AppAssets {
 
 impl FromWorld for AppAssets {
     fn from_world(world: &mut World) -> Self {
-        let rectangle = world.spawn_asset(Rectangle::default().into());
+        let rectangle = world.spawn_asset(Mesh::from(Rectangle::default()));
 
         let asset_server = world.resource::<AssetServer>();
         let font = asset_server.load("fonts/FiraSans-Bold.ttf");

@@ -26,14 +26,14 @@ fn main() {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // circular base
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Circle::new(4.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Circle::new(4.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE))),
         Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
     ));
 
     // cube
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(1.0, 1.0, 1.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb_u8(124, 144, 255))),
         ),

@@ -128,7 +128,7 @@ fn spawn_spheres(commands: &mut Commands, asset_commands: &mut AssetCommands) {
 
     let offset = Vec3::new(0.0, 0.0, 0.0);
 
-    let sphere_handle = asset_commands.spawn_asset(Sphere::new(2.0).mesh().into());
+    let sphere_handle = asset_commands.spawn_asset(Mesh::from(Sphere::new(2.0).mesh()));
 
     let alpha = 0.25;
 
@@ -167,7 +167,7 @@ fn spawn_spheres(commands: &mut Commands, asset_commands: &mut AssetCommands) {
 }
 
 fn spawn_quads(commands: &mut Commands, asset_commands: &mut AssetCommands) {
-    let quad_handle = asset_commands.spawn_asset(Rectangle::new(3.0, 3.0).mesh().into());
+    let quad_handle = asset_commands.spawn_asset(Mesh::from(Rectangle::new(3.0, 3.0).mesh()));
     let render_layers = RenderLayers::layer(1);
     let xform = |x, y, z| {
         Transform::from_rotation(Quat::from_rotation_y(0.5))
@@ -229,8 +229,8 @@ fn spawn_quads(commands: &mut Commands, asset_commands: &mut AssetCommands) {
 /// This is useful to make sure transparent meshes drawn with OIT
 /// are properly occluded by opaque meshes.
 fn spawn_occlusion_test(commands: &mut Commands, asset_commands: &mut AssetCommands) {
-    let sphere_handle = asset_commands.spawn_asset(Sphere::new(1.0).mesh().into());
-    let cube_handle = asset_commands.spawn_asset(Cuboid::from_size(Vec3::ONE).mesh().into());
+    let sphere_handle = asset_commands.spawn_asset(Mesh::from(Sphere::new(1.0).mesh()));
+    let cube_handle = asset_commands.spawn_asset(Mesh::from(Cuboid::from_size(Vec3::ONE).mesh()));
     let cube_material =
         asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6)));
 
@@ -300,7 +300,7 @@ fn spawn_auto_instancing_test(
 ) {
     let render_layers = RenderLayers::layer(1);
 
-    let cube = asset_commands.spawn_asset(Cuboid::new(1.0, 1.0, 1.0).into());
+    let cube = asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)));
     let material_handle = asset_commands.spawn_asset(StandardMaterial {
         alpha_mode: AlphaMode::Blend,
         base_color_texture: Some(asset_server.load("textures/slice_square.png")),

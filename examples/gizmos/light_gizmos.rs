@@ -43,14 +43,14 @@ fn setup(
 ) {
     // Circular base.
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Circle::new(4.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Circle::new(4.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE))),
         Transform::from_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
     ));
 
     // Cubes.
     {
-        let mesh = asset_commands.spawn_asset(Cuboid::new(1.0, 1.0, 1.0).into());
+        let mesh = asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)));
         let material =
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb_u8(124, 144, 255)));
         for x in [-2.0, 0.0, 2.0] {

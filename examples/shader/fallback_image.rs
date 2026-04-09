@@ -24,7 +24,7 @@ fn main() {
 
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(FallbackTestMaterial {
             image_1d: None,
             image_2d: None,

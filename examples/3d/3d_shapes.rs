@@ -2,7 +2,7 @@
 //!
 //! "Shape primitives" here are just the mathematical definition of certain shapes, they're not meshes on their own! A sphere with radius `1.0` can be defined with [`Sphere::new(1.0)`][Sphere::new] but all this does is store the radius. So we need to turn these descriptions of shapes into meshes.
 //!
-//! While a shape is not a mesh, turning it into one in Bevy is easy. In this example we call [`asset_commands.spawn_asset(/* Shape here! */)`] and `.into()`. There's an implementation for [`From`] on shape primitives into [`Mesh`], and since we are spawning [`Mesh3d`] components, Rust knows to convert our shapes to [`Mesh`]es.
+//! While a shape is not a mesh, turning it into one in Bevy is easy. In this example we call [`asset_commands.spawn_asset(/* Shape here! */)`] and [`Mesh::from`].
 //!
 //! [`Extrusion`] lets us turn 2D shape primitives into versions of those shapes that have volume by extruding them. A 1x1 square that gets wrapped in this with an extrusion depth of 2 will give us a rectangular prism of size 1x1x2, but here we're just extruding these 2d shapes by depth 1.
 //!
@@ -62,61 +62,68 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     });
 
     let shapes = [
-        asset_commands.spawn_asset(Cuboid::default().into()),
-        asset_commands.spawn_asset(Tetrahedron::default().into()),
-        asset_commands.spawn_asset(Capsule3d::default().into()),
-        asset_commands.spawn_asset(Torus::default().into()),
-        asset_commands.spawn_asset(Cylinder::default().into()),
-        asset_commands.spawn_asset(Cone::default().into()),
-        asset_commands.spawn_asset(ConicalFrustum::default().into()),
+        asset_commands.spawn_asset(Mesh::from(Cuboid::default())),
+        asset_commands.spawn_asset(Mesh::from(Tetrahedron::default())),
+        asset_commands.spawn_asset(Mesh::from(Capsule3d::default())),
+        asset_commands.spawn_asset(Mesh::from(Torus::default())),
+        asset_commands.spawn_asset(Mesh::from(Cylinder::default())),
+        asset_commands.spawn_asset(Mesh::from(Cone::default())),
+        asset_commands.spawn_asset(Mesh::from(ConicalFrustum::default())),
         asset_commands.spawn_asset(Sphere::default().mesh().ico(5).unwrap()),
         asset_commands.spawn_asset(Sphere::default().mesh().uv(32, 18)),
-        asset_commands.spawn_asset(Segment3d::default().into()),
-        asset_commands.spawn_asset(
-            Polyline3d::new(vec![
-                Vec3::new(-0.5, 0.0, 0.0),
-                Vec3::new(0.5, 0.0, 0.0),
-                Vec3::new(0.0, 0.5, 0.0),
-            ])
-            .into(),
-        ),
+        asset_commands.spawn_asset(Mesh::from(Segment3d::default())),
+        asset_commands.spawn_asset(Mesh::from(Polyline3d::new(vec![
+            Vec3::new(-0.5, 0.0, 0.0),
+            Vec3::new(0.5, 0.0, 0.0),
+            Vec3::new(0.0, 0.5, 0.0),
+        ]))),
     ];
 
     let extrusions = [
-        asset_commands.spawn_asset(Extrusion::new(Rectangle::default(), 1.).into()),
-        asset_commands.spawn_asset(Extrusion::new(Capsule2d::default(), 1.).into()),
-        asset_commands.spawn_asset(Extrusion::new(Annulus::default(), 1.).into()),
-        asset_commands.spawn_asset(Extrusion::new(Circle::default(), 1.).into()),
-        asset_commands.spawn_asset(Extrusion::new(Ellipse::default(), 1.).into()),
-        asset_commands.spawn_asset(Extrusion::new(RegularPolygon::default(), 1.).into()),
-        asset_commands.spawn_asset(Extrusion::new(Triangle2d::default(), 1.).into()),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(Rectangle::default(), 1.))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(Capsule2d::default(), 1.))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(Annulus::default(), 1.))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(Circle::default(), 1.))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(Ellipse::default(), 1.))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(RegularPolygon::default(), 1.))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(Triangle2d::default(), 1.))),
     ];
 
     let ring_extrusions = [
-        asset_commands
-            .spawn_asset(Extrusion::new(Rectangle::default().to_ring(THICKNESS), 1.).into()),
-        asset_commands
-            .spawn_asset(Extrusion::new(Capsule2d::default().to_ring(THICKNESS), 1.).into()),
-        asset_commands
-            .spawn_asset(Extrusion::new(Ring::new(Circle::new(1.0), Circle::new(0.5)), 1.).into()),
-        asset_commands.spawn_asset(Extrusion::new(Circle::default().to_ring(THICKNESS), 1.).into()),
-        asset_commands.spawn_asset(
-            Extrusion::new(
-                {
-                    // This is an approximation; Ellipse does not implement Inset as concentric ellipses do not have parallel curves
-                    let outer = Ellipse::default();
-                    let mut inner = outer;
-                    inner.half_size -= Vec2::splat(THICKNESS);
-                    Ring::new(outer, inner)
-                },
-                1.,
-            )
-            .into(),
-        ),
-        asset_commands
-            .spawn_asset(Extrusion::new(RegularPolygon::default().to_ring(THICKNESS), 1.).into()),
-        asset_commands
-            .spawn_asset(Extrusion::new(Triangle2d::default().to_ring(THICKNESS), 1.).into()),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(
+            Rectangle::default().to_ring(THICKNESS),
+            1.,
+        ))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(
+            Capsule2d::default().to_ring(THICKNESS),
+            1.,
+        ))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(
+            Ring::new(Circle::new(1.0), Circle::new(0.5)),
+            1.,
+        ))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(
+            Circle::default().to_ring(THICKNESS),
+            1.,
+        ))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(
+            {
+                // This is an approximation; Ellipse does not implement Inset as concentric ellipses do not have parallel curves
+                let outer = Ellipse::default();
+                let mut inner = outer;
+                inner.half_size -= Vec2::splat(THICKNESS);
+                Ring::new(outer, inner)
+            },
+            1.,
+        ))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(
+            RegularPolygon::default().to_ring(THICKNESS),
+            1.,
+        ))),
+        asset_commands.spawn_asset(Mesh::from(Extrusion::new(
+            Triangle2d::default().to_ring(THICKNESS),
+            1.,
+        ))),
     ];
 
     let num_shapes = shapes.len();
@@ -185,15 +192,9 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // ground plane
     commands.spawn((
-        Mesh3d(
-            asset_commands.spawn_asset(
-                Plane3d::default()
-                    .mesh()
-                    .size(50.0, 50.0)
-                    .subdivisions(10)
-                    .into(),
-            ),
-        ),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(
+            Plane3d::default().mesh().size(50.0, 50.0).subdivisions(10),
+        ))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::from(SILVER)))),
     ));
 

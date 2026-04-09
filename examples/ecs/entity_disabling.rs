@@ -107,15 +107,15 @@ fn setup_scene(mut commands: Commands, mut asset_commands: AssetCommands) {
     let named_shapes = [
         (
             Name::new("Annulus"),
-            asset_commands.spawn_asset(Annulus::new(25.0, 50.0).into()),
+            asset_commands.spawn_asset(Mesh::from(Annulus::new(25.0, 50.0))),
         ),
         (
             Name::new("Bestagon"),
-            asset_commands.spawn_asset(RegularPolygon::new(50.0, 6).into()),
+            asset_commands.spawn_asset(Mesh::from(RegularPolygon::new(50.0, 6))),
         ),
         (
             Name::new("Rhombus"),
-            asset_commands.spawn_asset(Rhombus::new(75.0, 100.0).into()),
+            asset_commands.spawn_asset(Mesh::from(Rhombus::new(75.0, 100.0))),
         ),
     ];
     let num_shapes = named_shapes.len();

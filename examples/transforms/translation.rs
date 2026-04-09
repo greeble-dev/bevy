@@ -35,7 +35,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Add a cube to visualize translation.
     let entity_spawn = Vec3::ZERO;
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE))),
         Transform::from_translation(entity_spawn),
         Movable::new(entity_spawn),

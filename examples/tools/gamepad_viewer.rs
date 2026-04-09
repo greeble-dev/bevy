@@ -52,8 +52,12 @@ struct ButtonMaterials {
 impl FromWorld for ButtonMaterials {
     fn from_world(world: &mut World) -> Self {
         Self {
-            normal: world.spawn_asset(NORMAL_BUTTON_COLOR.into()).into(),
-            active: world.spawn_asset(ACTIVE_BUTTON_COLOR.into()).into(),
+            normal: world
+                .spawn_asset(ColorMaterial::from(NORMAL_BUTTON_COLOR))
+                .into(),
+            active: world
+                .spawn_asset(ColorMaterial::from(ACTIVE_BUTTON_COLOR))
+                .into(),
         }
     }
 }
@@ -68,15 +72,17 @@ struct ButtonMeshes {
 impl FromWorld for ButtonMeshes {
     fn from_world(world: &mut World) -> Self {
         Self {
-            circle: world.spawn_asset(Circle::new(BUTTON_RADIUS).into()).into(),
+            circle: world
+                .spawn_asset(Mesh::from(Circle::new(BUTTON_RADIUS)))
+                .into(),
             triangle: world
-                .spawn_asset(RegularPolygon::new(BUTTON_RADIUS, 3).into())
+                .spawn_asset(Mesh::from(RegularPolygon::new(BUTTON_RADIUS, 3)))
                 .into(),
             start_pause: world
-                .spawn_asset(Rectangle::from_size(START_SIZE).into())
+                .spawn_asset(Mesh::from(Rectangle::from_size(START_SIZE)))
                 .into(),
             trigger: world
-                .spawn_asset(Rectangle::from_size(TRIGGER_SIZE).into())
+                .spawn_asset(Mesh::from(Rectangle::from_size(TRIGGER_SIZE)))
                 .into(),
         }
     }

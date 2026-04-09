@@ -55,7 +55,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // Make a plane for establishing space.
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(12.0, 12.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(12.0, 12.0)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3))),
         ),
@@ -68,7 +68,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // The sampled shape shown transparently:
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(shape.into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(shape))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: Color::srgba(0.2, 0.1, 0.6, 0.3),
             alpha_mode: AlphaMode::Blend,
@@ -94,12 +94,11 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // Store the mesh and material for sample points in resources:
     commands.insert_resource(PointMesh(
-        asset_commands.spawn_asset(
+        asset_commands.spawn_asset(Mesh::from(
             Sphere::new(0.03)
                 .mesh()
-                .kind(SphereKind::Ico { subdivisions: 3 })
-                .into(),
-        ),
+                .kind(SphereKind::Ico { subdivisions: 3 }),
+        )),
     ));
     commands.insert_resource(PointMaterial(asset_commands.spawn_asset(
         StandardMaterial {

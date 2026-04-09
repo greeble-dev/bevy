@@ -39,17 +39,17 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
         ..default()
     });
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(material.clone()),
         Transform::from_xyz(0.0, 0.0, 1.0),
     ));
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(material.clone()),
         Transform::from_xyz(0.0, -1.0, 0.0),
     ));
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(material),
         Transform::from_xyz(1.0, 0.0, 0.0),
     ));

@@ -282,7 +282,7 @@ fn spawn_water(
     asset_server: &AssetServer,
 ) {
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::new(Vec3::Y, Vec2::splat(1.0)).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(1.0))))),
         MeshMaterial3d(asset_commands.spawn_asset(ExtendedMaterial {
             base: StandardMaterial {
                 base_color: BLACK.into(),

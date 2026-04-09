@@ -113,23 +113,20 @@ mod shapes {
         commands.spawn((Camera2d, DespawnOnExit(super::Scene::Shapes)));
 
         let shapes = [
-            asset_commands.spawn_asset(Circle::new(50.0).into()),
-            asset_commands.spawn_asset(CircularSector::new(50.0, 1.0).into()),
-            asset_commands.spawn_asset(CircularSegment::new(50.0, 1.25).into()),
-            asset_commands.spawn_asset(Ellipse::new(25.0, 50.0).into()),
-            asset_commands.spawn_asset(Annulus::new(25.0, 50.0).into()),
-            asset_commands.spawn_asset(Capsule2d::new(25.0, 50.0).into()),
-            asset_commands.spawn_asset(Rhombus::new(75.0, 100.0).into()),
-            asset_commands.spawn_asset(Rectangle::new(50.0, 100.0).into()),
-            asset_commands.spawn_asset(RegularPolygon::new(50.0, 6).into()),
-            asset_commands.spawn_asset(
-                Triangle2d::new(
-                    Vec2::Y * 50.0,
-                    Vec2::new(-50.0, -50.0),
-                    Vec2::new(50.0, -50.0),
-                )
-                .into(),
-            ),
+            asset_commands.spawn_asset(Mesh::from(Circle::new(50.0))),
+            asset_commands.spawn_asset(Mesh::from(CircularSector::new(50.0, 1.0))),
+            asset_commands.spawn_asset(Mesh::from(CircularSegment::new(50.0, 1.25))),
+            asset_commands.spawn_asset(Mesh::from(Ellipse::new(25.0, 50.0))),
+            asset_commands.spawn_asset(Mesh::from(Annulus::new(25.0, 50.0))),
+            asset_commands.spawn_asset(Mesh::from(Capsule2d::new(25.0, 50.0))),
+            asset_commands.spawn_asset(Mesh::from(Rhombus::new(75.0, 100.0))),
+            asset_commands.spawn_asset(Mesh::from(Rectangle::new(50.0, 100.0))),
+            asset_commands.spawn_asset(Mesh::from(RegularPolygon::new(50.0, 6))),
+            asset_commands.spawn_asset(Mesh::from(Triangle2d::new(
+                Vec2::Y * 50.0,
+                Vec2::new(-50.0, -50.0),
+                Vec2::new(50.0, -50.0),
+            ))),
         ];
         let num_shapes = shapes.len();
 
@@ -164,7 +161,7 @@ mod bloom {
         ));
 
         commands.spawn((
-            Mesh2d(asset_commands.spawn_asset(Circle::new(100.).into())),
+            Mesh2d(asset_commands.spawn_asset(Mesh::from(Circle::new(100.)))),
             MeshMaterial2d(
                 asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(7.5, 0.0, 7.5))),
             ),
@@ -173,7 +170,7 @@ mod bloom {
         ));
 
         commands.spawn((
-            Mesh2d(asset_commands.spawn_asset(RegularPolygon::new(100., 6).into())),
+            Mesh2d(asset_commands.spawn_asset(Mesh::from(RegularPolygon::new(100., 6)))),
             MeshMaterial2d(
                 asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(6.25, 9.4, 9.1))),
             ),

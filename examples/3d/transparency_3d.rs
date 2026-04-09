@@ -15,7 +15,7 @@ fn main() {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Opaque plane, uses `alpha_mode: Opaque` by default
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(6.0, 6.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(6.0, 6.0)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3))),
         ),
@@ -52,7 +52,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // Transparent cube, uses `alpha_mode: Blend`
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         // Notice how there is no need to set the `alpha_mode` explicitly here.
         // When converting a color to a material using `into()`, the alpha mode is
         // automatically set to `Blend` if the alpha channel is anything lower than 1.0.
@@ -64,7 +64,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // Transparent cube, uses `alpha_mode: AlphaToCoverage`
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: Color::srgba(0.5, 1.0, 0.5, 0.0),
             alpha_mode: AlphaMode::AlphaToCoverage,

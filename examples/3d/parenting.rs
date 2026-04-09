@@ -24,7 +24,7 @@ fn rotator_system(time: Res<Time>, mut query: Query<&mut Transform, With<Rotator
 
 /// set up a simple scene with a "parent" cube and a "child" cube
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
-    let cube_handle = asset_commands.spawn_asset(Cuboid::new(2.0, 2.0, 2.0).into());
+    let cube_handle = asset_commands.spawn_asset(Mesh::from(Cuboid::new(2.0, 2.0, 2.0)));
     let cube_material_handle = asset_commands.spawn_asset(StandardMaterial {
         base_color: Color::srgb(0.8, 0.7, 0.6),
         ..default()

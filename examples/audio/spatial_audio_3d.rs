@@ -41,7 +41,7 @@ fn setup(
         children![
             // left ear indicator
             (
-                Mesh3d(asset_commands.spawn_asset(Cuboid::new(0.2, 0.2, 0.2).into())),
+                Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.2, 0.2, 0.2)))),
                 MeshMaterial3d(
                     asset_commands.spawn_asset(StandardMaterial::from(Color::from(RED)))
                 ),
@@ -49,7 +49,7 @@ fn setup(
             ),
             // right ear indicator
             (
-                Mesh3d(asset_commands.spawn_asset(Cuboid::new(0.2, 0.2, 0.2).into())),
+                Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.2, 0.2, 0.2)))),
                 MeshMaterial3d(
                     asset_commands.spawn_asset(StandardMaterial::from(Color::from(LIME)))
                 ),

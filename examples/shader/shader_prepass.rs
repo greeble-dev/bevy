@@ -57,7 +57,7 @@ fn setup(
 
     // plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(5.0, 5.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(5.0, 5.0)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3))),
         ),
@@ -67,7 +67,7 @@ fn setup(
     // To make it easy, we just draw a big quad right in front of the camera.
     // For a real application, this isn't ideal.
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Rectangle::new(20.0, 20.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(20.0, 20.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(PrepassOutputMaterial {
             settings: ShowPrepassSettings::default(),
         })),
@@ -77,7 +77,7 @@ fn setup(
 
     // Opaque cube
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(CustomMaterial {
             color: LinearRgba::WHITE,
             color_texture: Some(asset_server.load("branding/icon.png")),
@@ -89,7 +89,7 @@ fn setup(
 
     // Cube with alpha mask
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             alpha_mode: AlphaMode::Mask(1.0),
             base_color_texture: Some(asset_server.load("branding/icon.png")),
@@ -101,7 +101,7 @@ fn setup(
     // Cube with alpha blending.
     // Transparent materials are ignored by the prepass
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(CustomMaterial {
             color: LinearRgba::WHITE,
             color_texture: Some(asset_server.load("branding/icon.png")),

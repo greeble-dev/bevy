@@ -38,7 +38,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
         perceptual_roughness: 1.0,
         ..default()
     });
-    let sphere_handle = asset_commands.spawn_asset(Sphere::new(sphere_radius).into());
+    let sphere_handle = asset_commands.spawn_asset(Mesh::from(Sphere::new(sphere_radius)));
 
     let light_transform = Transform::from_xyz(5.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y);
     commands.spawn((
@@ -87,14 +87,9 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // ground plane
     let plane_size = 2.0 * spawn_plane_depth;
     commands.spawn((
-        Mesh3d(
-            asset_commands.spawn_asset(
-                Plane3d::default()
-                    .mesh()
-                    .size(plane_size, plane_size)
-                    .into(),
-            ),
-        ),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(
+            Plane3d::default().mesh().size(plane_size, plane_size),
+        ))),
         MeshMaterial3d(white_handle),
     ));
 

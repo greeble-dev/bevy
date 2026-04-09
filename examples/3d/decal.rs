@@ -51,7 +51,7 @@ fn setup(
 
     commands.spawn((
         Name::new("Floor"),
-        Mesh3d(asset_commands.spawn_asset(Rectangle::from_length(10.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Rectangle::from_length(10.0)))),
         MeshMaterial3d(white_material.clone()),
         Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
     ));
@@ -75,7 +75,7 @@ fn setup(
             ));
 
             commands.spawn((
-                Mesh3d(asset_commands.spawn_asset(Cuboid::from_length(0.6).into())),
+                Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::from_length(0.6)))),
                 MeshMaterial3d(white_material.clone()),
                 transform,
             ));

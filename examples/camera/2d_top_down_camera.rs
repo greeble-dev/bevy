@@ -31,14 +31,14 @@ fn main() {
 fn setup_scene(mut commands: Commands, mut asset_commands: AssetCommands) {
     // World where we move the player
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(1000., 700.).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(1000., 700.)))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(0.2, 0.2, 0.3)))),
     ));
 
     // Player
     commands.spawn((
         Player,
-        Mesh2d(asset_commands.spawn_asset(Circle::new(25.).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Circle::new(25.)))),
         MeshMaterial2d(
             asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(6.25, 9.4, 9.1))),
         ), // RGB values exceed 1 to achieve a bright color for the bloom effect

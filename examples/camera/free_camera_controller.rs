@@ -227,10 +227,10 @@ fn spawn_lights(mut commands: Commands) {
 }
 
 fn spawn_world(mut commands: Commands, mut asset_commands: AssetCommands) {
-    let cube = asset_commands.spawn_asset(Cuboid::new(1.0, 1.0, 1.0).into());
-    let floor = asset_commands.spawn_asset(Plane3d::new(Vec3::Y, Vec2::splat(10.0)).into());
-    let sphere = asset_commands.spawn_asset(Sphere::new(0.5).into());
-    let wall = asset_commands.spawn_asset(Cuboid::new(0.2, 4.0, 3.0).into());
+    let cube = asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)));
+    let floor = asset_commands.spawn_asset(Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(10.0))));
+    let sphere = asset_commands.spawn_asset(Mesh::from(Sphere::new(0.5)));
+    let wall = asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.2, 4.0, 3.0)));
 
     let blue_material =
         asset_commands.spawn_asset(StandardMaterial::from(Color::from(tailwind::BLUE_700)));

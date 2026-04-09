@@ -188,7 +188,7 @@ fn setup(
 
 /// Spawns the main rotating cube.
 fn spawn_rotating_cube(commands: &mut Commands, asset_commands: &mut AssetCommands) {
-    let cube_handle = asset_commands.spawn_asset(Cuboid::new(3.0, 3.0, 3.0).into());
+    let cube_handle = asset_commands.spawn_asset(Mesh::from(Cuboid::new(3.0, 3.0, 3.0)));
     let rotating_cube_material_handle = asset_commands.spawn_asset(StandardMaterial {
         base_color: Color::WHITE,
         unlit: false,
@@ -208,7 +208,8 @@ fn spawn_plane(
     asset_commands: &mut AssetCommands,
     demo_depth_texture: &DemoDepthTexture,
 ) {
-    let plane_handle = asset_commands.spawn_asset(Plane3d::new(Vec3::Z, Vec2::splat(2.0)).into());
+    let plane_handle =
+        asset_commands.spawn_asset(Mesh::from(Plane3d::new(Vec3::Z, Vec2::splat(2.0))));
     let show_depth_texture_material = asset_commands.spawn_asset(ShowDepthTextureMaterial {
         depth_texture: Some(demo_depth_texture.0.clone()),
     });

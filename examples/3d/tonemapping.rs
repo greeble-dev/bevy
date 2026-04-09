@@ -143,7 +143,7 @@ fn setup_color_gradient_scene(
     transform.translation += *transform.forward();
 
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Rectangle::new(0.7, 0.7).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(0.7, 0.7)))),
         MeshMaterial3d(asset_commands.spawn_asset(ColorGradientMaterial {})),
         transform,
         Visibility::Hidden,
@@ -161,7 +161,7 @@ fn setup_image_viewer_scene(
 
     // exr/hdr viewer (exr requires enabling bevy feature)
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Rectangle::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Rectangle::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color_texture: None,
             unlit: true,

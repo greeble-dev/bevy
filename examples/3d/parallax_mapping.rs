@@ -237,13 +237,13 @@ fn setup(
 
     // Plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(10.0, 10.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(10.0, 10.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             // standard material derived from dark green, but
             // with roughness and reflectance set.
             perceptual_roughness: 0.45,
             reflectance: 0.18,
-            ..Color::srgb_u8(0, 80, 0).into()
+            ..StandardMaterial::from(Color::srgb_u8(0, 80, 0))
         })),
         Transform::from_xyz(0.0, -1.0, 0.0),
     ));

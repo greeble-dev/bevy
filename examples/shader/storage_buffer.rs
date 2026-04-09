@@ -30,7 +30,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     let colors = asset_commands.spawn_asset(ShaderBuffer::from(color_data));
 
-    let mesh_handle = asset_commands.spawn_asset(Cuboid::from_size(Vec3::splat(0.3)).into());
+    let mesh_handle = asset_commands.spawn_asset(Mesh::from(Cuboid::from_size(Vec3::splat(0.3))));
     // Create the custom material with the storage buffer
     let material_handle = asset_commands.spawn_asset(CustomMaterial {
         colors: colors.clone(),

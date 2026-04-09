@@ -125,7 +125,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
                 });
         });
 
-    let mesh_handle = asset_commands.spawn_asset(Cuboid::default().into());
+    let mesh_handle = asset_commands.spawn_asset(Mesh::from(Cuboid::default()));
 
     // This material has the texture that has been rendered.
     let material_handle = asset_commands.spawn_asset(StandardMaterial {

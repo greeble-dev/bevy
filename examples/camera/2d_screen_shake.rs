@@ -179,13 +179,13 @@ fn setup_camera(mut commands: Commands) {
 fn setup_scene(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Background tile
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(1000., 700.).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(1000., 700.)))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(0.2, 0.2, 0.3)))),
     ));
 
     // The shape in the middle could be our player character.
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(50.0, 100.0).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(50.0, 100.0)))),
         MeshMaterial2d(
             asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(0.25, 0.94, 0.91))),
         ),
@@ -194,7 +194,7 @@ fn setup_scene(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // These two shapes could be obstacles.
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(50.0, 50.0).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(50.0, 50.0)))),
         MeshMaterial2d(
             asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(0.85, 0.0, 0.2))),
         ),
@@ -202,7 +202,7 @@ fn setup_scene(mut commands: Commands, mut asset_commands: AssetCommands) {
     ));
 
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(70.0, 50.0).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(70.0, 50.0)))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from(Color::srgb(0.5, 0.8, 0.2)))),
         Transform::from_xyz(450.0, -150.0, 2.),
     ));

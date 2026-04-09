@@ -26,7 +26,7 @@ fn setup(
         },
     ));
 
-    let cube = asset_commands.spawn_asset(Cuboid::new(0.5, 0.5, 0.5).into());
+    let cube = asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.5, 0.5, 0.5)));
 
     const GOLDEN_ANGLE: f32 = 137.507_77;
 

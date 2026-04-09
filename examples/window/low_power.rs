@@ -170,7 +170,7 @@ pub(crate) mod test_setup {
         mut request_redraw_writer: MessageWriter<RequestRedraw>,
     ) {
         commands.spawn((
-            Mesh3d(asset_commands.spawn_asset(Cuboid::new(0.5, 0.5, 0.5).into())),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.5, 0.5, 0.5)))),
             MeshMaterial3d(
                 asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6))),
             ),

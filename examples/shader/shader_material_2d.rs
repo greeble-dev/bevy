@@ -32,7 +32,7 @@ fn setup(
 
     // quad
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::default().into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::default()))),
         MeshMaterial2d(asset_commands.spawn_asset(CustomMaterial {
             color: LinearRgba::BLUE,
             color_texture: Some(asset_server.load("branding/icon.png")),

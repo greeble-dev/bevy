@@ -81,17 +81,17 @@ fn setup(
         Transform::from_xyz(-4.0, 0.0, -3.0),
     ));
 
-    let mut forward_mat: StandardMaterial = Color::srgb(0.1, 0.2, 0.1).into();
+    let mut forward_mat = StandardMaterial::from(Color::srgb(0.1, 0.2, 0.1));
     forward_mat.opaque_render_method = OpaqueRendererMethod::Forward;
     let forward_mat_h = asset_commands.spawn_asset(forward_mat);
 
     // Plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(50.0, 50.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(50.0, 50.0)))),
         MeshMaterial3d(forward_mat_h.clone()),
     ));
 
-    let cube_h = asset_commands.spawn_asset(Cuboid::new(0.1, 0.1, 0.1).into());
+    let cube_h = asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.1, 0.1, 0.1)));
     let sphere_h = asset_commands.spawn_asset(Sphere::new(0.125).mesh().uv(32, 18));
 
     // Cubes
@@ -109,7 +109,7 @@ fn setup(
     let sphere_color = Color::srgb(10.0, 4.0, 1.0);
     let sphere_pos = Transform::from_xyz(0.4, 0.5, -0.8);
     // Emissive sphere
-    let mut unlit_mat: StandardMaterial = sphere_color.into();
+    let mut unlit_mat = StandardMaterial::from(sphere_color);
     unlit_mat.unlit = true;
     commands.spawn((
         Mesh3d(sphere_h.clone()),
@@ -168,7 +168,7 @@ fn setup(
 
     // sky
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(2.0, 1.0, 1.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(2.0, 1.0, 1.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: Srgba::hex("888888").unwrap().into(),
             unlit: true,

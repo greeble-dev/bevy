@@ -200,7 +200,8 @@ fn setup(
     let mut cube_resources = CubeResources {
         _textures: textures,
         materials,
-        cube_mesh: asset_commands.spawn_asset(Cuboid::from_size(Vec3::splat(CUBE_SCALE)).into()),
+        cube_mesh: asset_commands
+            .spawn_asset(Mesh::from(Cuboid::from_size(Vec3::splat(CUBE_SCALE)))),
         color_rng: ChaCha8Rng::seed_from_u64(42),
         material_rng: ChaCha8Rng::seed_from_u64(12),
         velocity_rng: ChaCha8Rng::seed_from_u64(97),

@@ -224,8 +224,9 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands, args: Res<Ar
             // Inside-out box around the meshes onto which shadows are cast (though you cannot see them...)
             commands.spawn((
                 Mesh3d(
-                    asset_commands
-                        .spawn_asset(Cuboid::from_size(Vec3::splat(radius as f32 * 2.2)).into()),
+                    asset_commands.spawn_asset(Mesh::from(Cuboid::from_size(Vec3::splat(
+                        radius as f32 * 2.2,
+                    )))),
                 ),
                 MeshMaterial3d::<StandardMaterial>(
                     asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE)),
@@ -306,7 +307,9 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands, args: Res<Ar
             commands.spawn((Camera3d::default(), Transform::from_translation(center)));
             // Inside-out box around the meshes onto which shadows are cast (though you cannot see them...)
             commands.spawn((
-                Mesh3d(asset_commands.spawn_asset(Cuboid::from_size(2.0 * 1.1 * center).into())),
+                Mesh3d(
+                    asset_commands.spawn_asset(Mesh::from(Cuboid::from_size(2.0 * 1.1 * center))),
+                ),
                 MeshMaterial3d::<StandardMaterial>(
                     asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE)),
                 ),
@@ -432,26 +435,20 @@ fn init_meshes(args: &Args, asset_commands: &mut AssetCommands) -> Vec<(Handle<M
         let radius = radius_rng.random_range(0.25f32..=0.75f32);
         let (handle, transform) = match variant % 15 {
             0 => (
-                asset_commands.spawn_asset(
-                    Cuboid {
-                        half_size: Vec3::splat(radius),
-                    }
-                    .into(),
-                ),
+                asset_commands.spawn_asset(Mesh::from(Cuboid {
+                    half_size: Vec3::splat(radius),
+                })),
                 Transform::IDENTITY,
             ),
             1 => (
-                asset_commands.spawn_asset(
-                    Capsule3d {
-                        radius,
-                        half_length: radius,
-                    }
-                    .into(),
-                ),
+                asset_commands.spawn_asset(Mesh::from(Capsule3d {
+                    radius,
+                    half_length: radius,
+                })),
                 Transform::IDENTITY,
             ),
             2 => (
-                asset_commands.spawn_asset(Circle { radius }.into()),
+                asset_commands.spawn_asset(Mesh::from(Circle { radius })),
                 Transform::IDENTITY.looking_at(Vec3::Z, Vec3::Y),
             ),
             3 => {
@@ -462,82 +459,63 @@ fn init_meshes(args: &Args, asset_commands: &mut AssetCommands) -> Vec<(Handle<M
                     *vertex = Vec2::new(c, s) * radius;
                 }
                 (
-                    asset_commands.spawn_asset(Triangle2d { vertices }.into()),
+                    asset_commands.spawn_asset(Mesh::from(Triangle2d { vertices })),
                     Transform::IDENTITY.looking_at(Vec3::Z, Vec3::Y),
                 )
             }
             4 => (
-                asset_commands.spawn_asset(
-                    Rectangle {
-                        half_size: Vec2::splat(radius),
-                    }
-                    .into(),
-                ),
+                asset_commands.spawn_asset(Mesh::from(Rectangle {
+                    half_size: Vec2::splat(radius),
+                })),
                 Transform::IDENTITY.looking_at(Vec3::Z, Vec3::Y),
             ),
             v if (5..=8).contains(&v) => (
-                asset_commands.spawn_asset(
-                    RegularPolygon {
-                        circumcircle: Circle { radius },
-                        sides: v,
-                    }
-                    .into(),
-                ),
+                asset_commands.spawn_asset(Mesh::from(RegularPolygon {
+                    circumcircle: Circle { radius },
+                    sides: v,
+                })),
                 Transform::IDENTITY.looking_at(Vec3::Z, Vec3::Y),
             ),
             9 => (
-                asset_commands.spawn_asset(
-                    Cylinder {
-                        radius,
-                        half_height: radius,
-                    }
-                    .into(),
-                ),
+                asset_commands.spawn_asset(Mesh::from(Cylinder {
+                    radius,
+                    half_height: radius,
+                })),
                 Transform::IDENTITY,
             ),
             10 => (
-                asset_commands.spawn_asset(
-                    Ellipse {
-                        half_size: Vec2::new(radius, 0.5 * radius),
-                    }
-                    .into(),
-                ),
+                asset_commands.spawn_asset(Mesh::from(Ellipse {
+                    half_size: Vec2::new(radius, 0.5 * radius),
+                })),
                 Transform::IDENTITY.looking_at(Vec3::Z, Vec3::Y),
             ),
             11 => (
-                asset_commands.spawn_asset(
+                asset_commands.spawn_asset(Mesh::from(
                     Plane3d {
                         normal: Dir3::NEG_Z,
                         half_size: Vec2::splat(0.5),
                     }
                     .mesh()
-                    .size(radius, radius)
-                    .into(),
-                ),
+                    .size(radius, radius),
+                )),
                 Transform::IDENTITY,
             ),
             12 => (
-                asset_commands.spawn_asset(Sphere { radius }.into()),
+                asset_commands.spawn_asset(Mesh::from(Sphere { radius })),
                 Transform::IDENTITY,
             ),
             13 => (
-                asset_commands.spawn_asset(
-                    Torus {
-                        minor_radius: 0.5 * radius,
-                        major_radius: radius,
-                    }
-                    .into(),
-                ),
+                asset_commands.spawn_asset(Mesh::from(Torus {
+                    minor_radius: 0.5 * radius,
+                    major_radius: radius,
+                })),
                 Transform::IDENTITY.looking_at(Vec3::Y, Vec3::Y),
             ),
             14 => (
-                asset_commands.spawn_asset(
-                    Capsule2d {
-                        radius,
-                        half_length: radius,
-                    }
-                    .into(),
-                ),
+                asset_commands.spawn_asset(Mesh::from(Capsule2d {
+                    radius,
+                    half_length: radius,
+                })),
                 Transform::IDENTITY.looking_at(Vec3::Z, Vec3::Y),
             ),
             _ => unreachable!(),

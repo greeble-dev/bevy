@@ -26,7 +26,7 @@ fn main() {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // sphere
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Sphere::new(1.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Sphere::new(1.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(ExtendedMaterial {
             base: StandardMaterial {
                 base_color: RED.into(),

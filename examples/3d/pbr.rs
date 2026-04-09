@@ -17,7 +17,7 @@ fn setup(
     mut asset_commands: AssetCommands,
     asset_server: Res<AssetServer>,
 ) {
-    let sphere_mesh = asset_commands.spawn_asset(Sphere::new(0.45).into());
+    let sphere_mesh = asset_commands.spawn_asset(Mesh::from(Sphere::new(0.45)));
     // add entities to the world
     for y in -2..=2 {
         for x in -5..=5 {

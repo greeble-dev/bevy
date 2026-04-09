@@ -4,7 +4,7 @@
 //!
 //! A "shape definition" is not a mesh on its own. A circle can be defined with a radius, i.e. [`Circle::new(50.0)`][Circle::new], but rendering tends to happen with meshes built out of triangles. So we need to turn shape descriptions into meshes.
 //!
-//! Thankfully, we can add shape primitives with `.into()` because [`Mesh`] implements [`From`] for shape primitives.
+//! Thankfully, we can add shape primitives with [`Mesh::from`].
 //!
 //! We apply a material to the shape by first making a [`Color`] then creating a [`ColorMaterial`] from it.
 //!
@@ -48,33 +48,29 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     commands.spawn(Camera2d);
 
     let shapes = [
-        asset_commands.spawn_asset(Circle::new(50.0).into()),
-        asset_commands.spawn_asset(CircularSector::new(50.0, 1.0).into()),
-        asset_commands.spawn_asset(CircularSegment::new(50.0, 1.25).into()),
-        asset_commands.spawn_asset(Ellipse::new(25.0, 50.0).into()),
-        asset_commands.spawn_asset(Annulus::new(25.0, 50.0).into()),
-        asset_commands.spawn_asset(Capsule2d::new(25.0, 50.0).into()),
-        asset_commands.spawn_asset(Rhombus::new(75.0, 100.0).into()),
-        asset_commands.spawn_asset(Rectangle::new(50.0, 100.0).into()),
-        asset_commands.spawn_asset(RegularPolygon::new(50.0, 6).into()),
-        asset_commands.spawn_asset(
-            Triangle2d::new(
-                Vec2::Y * 50.0,
-                Vec2::new(-50.0, -50.0),
-                Vec2::new(50.0, -50.0),
-            )
-            .into(),
-        ),
-        asset_commands
-            .spawn_asset(Segment2d::new(Vec2::new(-50.0, 50.0), Vec2::new(50.0, -50.0)).into()),
-        asset_commands.spawn_asset(
-            Polyline2d::new(vec![
-                Vec2::new(-50.0, 50.0),
-                Vec2::new(0.0, -50.0),
-                Vec2::new(50.0, 50.0),
-            ])
-            .into(),
-        ),
+        asset_commands.spawn_asset(Mesh::from(Circle::new(50.0))),
+        asset_commands.spawn_asset(Mesh::from(CircularSector::new(50.0, 1.0))),
+        asset_commands.spawn_asset(Mesh::from(CircularSegment::new(50.0, 1.25))),
+        asset_commands.spawn_asset(Mesh::from(Ellipse::new(25.0, 50.0))),
+        asset_commands.spawn_asset(Mesh::from(Annulus::new(25.0, 50.0))),
+        asset_commands.spawn_asset(Mesh::from(Capsule2d::new(25.0, 50.0))),
+        asset_commands.spawn_asset(Mesh::from(Rhombus::new(75.0, 100.0))),
+        asset_commands.spawn_asset(Mesh::from(Rectangle::new(50.0, 100.0))),
+        asset_commands.spawn_asset(Mesh::from(RegularPolygon::new(50.0, 6))),
+        asset_commands.spawn_asset(Mesh::from(Triangle2d::new(
+            Vec2::Y * 50.0,
+            Vec2::new(-50.0, -50.0),
+            Vec2::new(50.0, -50.0),
+        ))),
+        asset_commands.spawn_asset(Mesh::from(Segment2d::new(
+            Vec2::new(-50.0, 50.0),
+            Vec2::new(50.0, -50.0),
+        ))),
+        asset_commands.spawn_asset(Mesh::from(Polyline2d::new(vec![
+            Vec2::new(-50.0, 50.0),
+            Vec2::new(0.0, -50.0),
+            Vec2::new(50.0, 50.0),
+        ]))),
     ];
     let num_shapes = shapes.len();
 
@@ -95,38 +91,36 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     }
 
     let rings = [
-        asset_commands.spawn_asset(Circle::new(50.0).to_ring(THICKNESS).into()),
+        asset_commands.spawn_asset(Mesh::from(Circle::new(50.0).to_ring(THICKNESS))),
         // this visually produces an arc segment but this is not technically accurate
-        asset_commands.spawn_asset(
-            Ring::new(
-                CircularSector::new(50.0, 1.0),
-                CircularSector::new(45.0, 1.0),
-            )
-            .into(),
-        ),
-        asset_commands.spawn_asset(CircularSegment::new(50.0, 1.25).to_ring(THICKNESS).into()),
+        asset_commands.spawn_asset(Mesh::from(Ring::new(
+            CircularSector::new(50.0, 1.0),
+            CircularSector::new(45.0, 1.0),
+        ))),
+        asset_commands.spawn_asset(Mesh::from(
+            CircularSegment::new(50.0, 1.25).to_ring(THICKNESS),
+        )),
         asset_commands.spawn_asset({
             // This is an approximation; Ellipse does not implement Inset as concentric ellipses do not have parallel curves
             let outer = Ellipse::new(25.0, 50.0);
             let mut inner = outer;
             inner.half_size -= Vec2::splat(THICKNESS);
-            Ring::new(outer, inner).into()
+            Mesh::from(Ring::new(outer, inner))
         }),
         // this is equivalent to the Annulus::new(25.0, 50.0) above
-        asset_commands.spawn_asset(Ring::new(Circle::new(50.0), Circle::new(25.0)).into()),
-        asset_commands.spawn_asset(Capsule2d::new(25.0, 50.0).to_ring(THICKNESS).into()),
-        asset_commands.spawn_asset(Rhombus::new(75.0, 100.0).to_ring(THICKNESS).into()),
-        asset_commands.spawn_asset(Rectangle::new(50.0, 100.0).to_ring(THICKNESS).into()),
-        asset_commands.spawn_asset(RegularPolygon::new(50.0, 6).to_ring(THICKNESS).into()),
-        asset_commands.spawn_asset(
+        asset_commands.spawn_asset(Mesh::from(Ring::new(Circle::new(50.0), Circle::new(25.0)))),
+        asset_commands.spawn_asset(Mesh::from(Capsule2d::new(25.0, 50.0).to_ring(THICKNESS))),
+        asset_commands.spawn_asset(Mesh::from(Rhombus::new(75.0, 100.0).to_ring(THICKNESS))),
+        asset_commands.spawn_asset(Mesh::from(Rectangle::new(50.0, 100.0).to_ring(THICKNESS))),
+        asset_commands.spawn_asset(Mesh::from(RegularPolygon::new(50.0, 6).to_ring(THICKNESS))),
+        asset_commands.spawn_asset(Mesh::from(
             Triangle2d::new(
                 Vec2::Y * 50.0,
                 Vec2::new(-50.0, -50.0),
                 Vec2::new(50.0, -50.0),
             )
-            .to_ring(THICKNESS)
-            .into(),
-        ),
+            .to_ring(THICKNESS),
+        )),
     ];
     // Allow for 2 empty spaces
     let num_rings = rings.len() + 2;

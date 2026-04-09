@@ -22,17 +22,12 @@ fn main() {
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Spawn a list of lines with start and end points for each lines
     commands.spawn((
-        Mesh3d(
-            asset_commands.spawn_asset(
-                LineList {
-                    lines: vec![
-                        (Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0)),
-                        (Vec3::new(1.0, 1.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),
-                    ],
-                }
-                .into(),
-            ),
-        ),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(LineList {
+            lines: vec![
+                (Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0)),
+                (Vec3::new(1.0, 1.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),
+            ],
+        }))),
         MeshMaterial3d(asset_commands.spawn_asset(LineMaterial {
             color: LinearRgba::GREEN,
         })),
@@ -41,28 +36,16 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // Spawn a line strip that goes from point to point
     commands.spawn((
-        Mesh3d(
-            asset_commands.spawn_asset(
-                LineStrip {
-                    points: vec![
-                        Vec3::ZERO,
-                        Vec3::new(1.0, 1.0, 0.0),
-                        Vec3::new(2.0, 0.0, 0.0),
-                        Vec3::new(2.0, 1.0, 0.0),
-                        Vec3::new(3.0, 1.0, 0.0),
-                    ],
-                    indices: Indices::U16(vec![
-                        0,
-                        1,
-                        u16::MAX, /* primitive restart */
-                        2,
-                        3,
-                        4,
-                    ]),
-                }
-                .into(),
-            ),
-        ),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(LineStrip {
+            points: vec![
+                Vec3::ZERO,
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(2.0, 1.0, 0.0),
+                Vec3::new(3.0, 1.0, 0.0),
+            ],
+            indices: Indices::U16(vec![0, 1, u16::MAX /* primitive restart */, 2, 3, 4]),
+        }))),
         MeshMaterial3d(asset_commands.spawn_asset(LineMaterial {
             color: LinearRgba::BLUE,
         })),

@@ -242,7 +242,7 @@ fn setup_scene(
     // Ground
 
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Circle::new(7.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Circle::new(7.0)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3))),
         ),

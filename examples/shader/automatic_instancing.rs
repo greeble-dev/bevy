@@ -28,7 +28,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>, mut asset_commands: A
     let image = assets.load("branding/icon.png");
 
     // Our single mesh handle that will be instanced
-    let mesh_handle = asset_commands.spawn_asset(Cuboid::from_size(Vec3::splat(0.01)).into());
+    let mesh_handle = asset_commands.spawn_asset(Mesh::from(Cuboid::from_size(Vec3::splat(0.01))));
 
     // Create the custom material with a reference to our texture
     // Automatic instancing works with any Material, including the `StandardMaterial`.

@@ -137,7 +137,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // mesh_allocator offsets that would only work if we had
     // one mesh in the scene.
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Circle::new(4.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Circle::new(4.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE))),
         Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
     ));

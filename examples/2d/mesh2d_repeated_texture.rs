@@ -48,7 +48,9 @@ fn setup(
 
     // central rectangle with not repeated texture
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(RECTANGLE_SIDE, RECTANGLE_SIDE).into())),
+        Mesh2d(
+            asset_commands.spawn_asset(Mesh::from(Rectangle::new(RECTANGLE_SIDE, RECTANGLE_SIDE))),
+        ),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial {
             texture: Some(image_with_default_sampler.clone()),
             ..default()
@@ -62,7 +64,9 @@ fn setup(
 
     // left rectangle with repeated texture
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(RECTANGLE_SIDE, RECTANGLE_SIDE).into())),
+        Mesh2d(
+            asset_commands.spawn_asset(Mesh::from(Rectangle::new(RECTANGLE_SIDE, RECTANGLE_SIDE))),
+        ),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial {
             texture: Some(image_with_repeated_sampler),
             // uv_transform used here for proportions only, but it is full Affine2
@@ -79,7 +83,9 @@ fn setup(
 
     // right rectangle with scaled texture, but with default sampler.
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(RECTANGLE_SIDE, RECTANGLE_SIDE).into())),
+        Mesh2d(
+            asset_commands.spawn_asset(Mesh::from(Rectangle::new(RECTANGLE_SIDE, RECTANGLE_SIDE))),
+        ),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial {
             // there is no sampler set, that's why
             // by default you see only one small image in a row/column

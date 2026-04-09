@@ -69,7 +69,7 @@ fn setup_sprite(mut commands: Commands, asset_server: Res<AssetServer>) {
 /// Spawns a capsule mesh on the pixel-perfect layer.
 fn setup_mesh(mut commands: Commands, mut asset_commands: AssetCommands) {
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Capsule2d::default().into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Capsule2d::default()))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from_color(Color::BLACK))),
         Transform::from_xyz(25., 0., 2.).with_scale(Vec3::splat(32.)),
         Rotate,

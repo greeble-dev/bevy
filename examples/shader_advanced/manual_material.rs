@@ -217,7 +217,7 @@ fn setup(
 ) {
     // cube
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(2.0, 2.0, 2.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(2.0, 2.0, 2.0)))),
         ImageMaterial3d(asset_commands.spawn_asset(ImageMaterial {
             image: asset_server.load("branding/icon.png"),
         })),

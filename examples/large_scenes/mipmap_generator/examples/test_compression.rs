@@ -60,7 +60,8 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     let mut mat_rgba = StandardMaterial::from(asset_commands.spawn_asset(image_rgba));
     mat_rgba.unlit = true;
 
-    let plane_h = asset_commands.spawn_asset(Plane3d::default().mesh().size(20.0, 30.0).into());
+    let plane_h =
+        asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(20.0, 30.0)));
 
     // planes
     commands.spawn((

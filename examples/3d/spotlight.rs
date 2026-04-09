@@ -38,7 +38,9 @@ struct Movable;
 fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // ground plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(100.0, 100.0).into())),
+        Mesh3d(
+            asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(100.0, 100.0))),
+        ),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE))),
         Movable,
     ));
@@ -48,7 +50,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // We're seeding the PRNG here to make this example deterministic for testing purposes.
     // This isn't strictly required in practical use unless you need your app to be deterministic.
     let mut rng = ChaCha8Rng::seed_from_u64(19878367467713);
-    let cube_mesh = asset_commands.spawn_asset(Cuboid::new(0.5, 0.5, 0.5).into());
+    let cube_mesh = asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.5, 0.5, 0.5)));
     let blue = asset_commands.spawn_asset(StandardMaterial::from(Color::srgb_u8(124, 144, 255)));
 
     commands.spawn_batch(

@@ -94,7 +94,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(5.0, 5.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(5.0, 5.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::from(BLUE)))),
         // You can insert this component without the `Wireframe` component
         // to override the color of the global wireframe for this mesh

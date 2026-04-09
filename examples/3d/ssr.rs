@@ -250,7 +250,7 @@ fn spawn_cube(
 ) {
     commands
         .spawn((
-            Mesh3d(asset_commands.spawn_asset(Cuboid::new(1.0, 1.0, 1.0).into())),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)))),
             MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
                 base_color: Color::from(WHITE),
                 base_color_texture: Some(asset_server.load("branding/icon.png")),
@@ -276,7 +276,7 @@ fn spawn_flight_helmet(commands: &mut Commands, asset_server: &AssetServer) {
 
 // Spawns the row of capsules.
 fn spawn_capsules(commands: &mut Commands, asset_commands: &mut AssetCommands) {
-    let capsule_mesh = asset_commands.spawn_asset(Capsule3d::new(0.4, 0.5).into());
+    let capsule_mesh = asset_commands.spawn_asset(Mesh::from(Capsule3d::new(0.4, 0.5)));
     let parent = commands
         .spawn((
             Transform::from_xyz(0.0, 0.5, 0.0),
@@ -306,7 +306,7 @@ fn spawn_capsules(commands: &mut Commands, asset_commands: &mut AssetCommands) {
 // Spawns the metallic base.
 fn spawn_metallic_base(commands: &mut Commands, asset_commands: &mut AssetCommands) {
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::new(Vec3::Y, Vec2::splat(1.0)).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(1.0))))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: Color::from(bevy::color::palettes::css::DARK_GRAY),
             metallic: 1.0,
@@ -322,7 +322,7 @@ fn spawn_metallic_base(commands: &mut Commands, asset_commands: &mut AssetComman
 // Spawns the non-metallic base.
 fn spawn_non_metallic_base(commands: &mut Commands, asset_commands: &mut AssetCommands) {
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::new(Vec3::Y, Vec2::splat(1.0)).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(1.0))))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: Color::from(bevy::color::palettes::css::RED),
             metallic: 0.0,
@@ -342,7 +342,7 @@ fn spawn_water(
     asset_server: &AssetServer,
 ) {
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::new(Vec3::Y, Vec2::splat(1.0)).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(1.0))))),
         MeshMaterial3d(asset_commands.spawn_asset(ExtendedMaterial {
             base: StandardMaterial {
                 base_color: BLACK.into(),

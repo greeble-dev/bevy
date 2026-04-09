@@ -252,8 +252,11 @@ fn setup(
 /// Spawns the rotating sphere of small cubes.
 fn spawn_small_cubes(commands: &mut Commands, asset_commands: &mut AssetCommands) {
     // Add the cube mesh.
-    let small_cube = asset_commands
-        .spawn_asset(Cuboid::new(SMALL_CUBE_SIZE, SMALL_CUBE_SIZE, SMALL_CUBE_SIZE).into());
+    let small_cube = asset_commands.spawn_asset(Mesh::from(Cuboid::new(
+        SMALL_CUBE_SIZE,
+        SMALL_CUBE_SIZE,
+        SMALL_CUBE_SIZE,
+    )));
 
     // Add the cube material.
     let small_cube_material = asset_commands.spawn_asset(StandardMaterial {
@@ -303,9 +306,11 @@ fn spawn_large_cube(
     asset_server: &AssetServer,
 ) {
     commands
-        .spawn(Mesh3d(asset_commands.spawn_asset(
-            Cuboid::new(LARGE_CUBE_SIZE, LARGE_CUBE_SIZE, LARGE_CUBE_SIZE).into(),
-        )))
+        .spawn(Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(
+            LARGE_CUBE_SIZE,
+            LARGE_CUBE_SIZE,
+            LARGE_CUBE_SIZE,
+        )))))
         .insert(MeshMaterial3d(asset_commands.spawn_asset(
             StandardMaterial {
                 base_color: WHITE.into(),

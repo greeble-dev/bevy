@@ -76,7 +76,7 @@ fn spawn_fake_player(
     transform.translation.z = 1.;
 
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(8., 8.).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(8., 8.)))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from_color(RED_400))),
         transform,
         MovePlayer,
@@ -87,7 +87,7 @@ fn spawn_fake_player(
 
     // second "player" to visually test a non-zero position
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Rectangle::new(8., 8.).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Rectangle::new(8., 8.)))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from_color(RED_400))),
         transform,
     ));

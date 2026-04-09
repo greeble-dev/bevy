@@ -113,16 +113,13 @@ fn setup(
     // Create a gray sphere, modulated with a red-tinted checkerboard pattern.
     commands.spawn((
         Mesh3d(
-            asset_commands.spawn_asset(
-                SphereMeshBuilder::new(
-                    1.0,
-                    SphereKind::Uv {
-                        sectors: 20,
-                        stacks: 20,
-                    },
-                )
-                .into(),
-            ),
+            asset_commands.spawn_asset(Mesh::from(SphereMeshBuilder::new(
+                1.0,
+                SphereKind::Uv {
+                    sectors: 20,
+                    stacks: 20,
+                },
+            ))),
         ),
         MeshMaterial3d(asset_commands.spawn_asset(ExtendedMaterial {
             base: StandardMaterial {

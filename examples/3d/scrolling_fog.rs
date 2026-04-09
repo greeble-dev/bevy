@@ -65,7 +65,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands, assets: Res<
 
     // Spawn ground mesh.
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(64.0, 1.0, 64.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(64.0, 1.0, 64.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: Color::BLACK,
             perceptual_roughness: 1.0,
@@ -76,7 +76,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands, assets: Res<
 
     // Spawn pillar standing between the camera and the sun.
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(2.0, 9.0, 2.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(2.0, 9.0, 2.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::BLACK))),
         Transform::from_xyz(-10.0, 4.5, -11.0),
     ));

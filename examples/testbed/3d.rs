@@ -128,7 +128,9 @@ mod light {
 
     pub fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
         commands.spawn((
-            Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(10.0, 10.0).into())),
+            Mesh3d(
+                asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(10.0, 10.0))),
+            ),
             MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
                 base_color: Color::WHITE,
                 perceptual_roughness: 1.0,
@@ -138,7 +140,7 @@ mod light {
         ));
 
         commands.spawn((
-            Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
             MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
                 base_color: DEEP_PINK.into(),
                 ..default()

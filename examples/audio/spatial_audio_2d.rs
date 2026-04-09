@@ -33,7 +33,7 @@ fn setup(
 
     // sound emitter
     commands.spawn((
-        Mesh2d(asset_commands.spawn_asset(Circle::new(15.0).into())),
+        Mesh2d(asset_commands.spawn_asset(Mesh::from(Circle::new(15.0)))),
         MeshMaterial2d(asset_commands.spawn_asset(ColorMaterial::from(Color::from(BLUE)))),
         Transform::from_translation(Vec3::new(0.0, 50.0, 0.0)),
         Emitter::default(),

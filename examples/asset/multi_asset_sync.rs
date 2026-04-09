@@ -200,7 +200,10 @@ fn setup_scene(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // Plane
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(50000.0, 50000.0).into())),
+        Mesh3d(
+            asset_commands
+                .spawn_asset(Mesh::from(Plane3d::default().mesh().size(50000.0, 50000.0))),
+        ),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.7, 0.2, 0.2))),
         ),
@@ -225,7 +228,10 @@ fn wait_on_load(
 ) {
     // Change color of plane to green
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(50000.0, 50000.0).into())),
+        Mesh3d(
+            asset_commands
+                .spawn_asset(Mesh::from(Plane3d::default().mesh().size(50000.0, 50000.0))),
+        ),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3))),
         ),

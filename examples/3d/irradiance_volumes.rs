@@ -494,7 +494,7 @@ impl FromWorld for ExampleAssets {
         ExampleAssets {
             main_sphere: world.spawn_asset(Sphere::default().mesh().uv(32, 18)),
             fox: world.load_asset(GltfAssetLabel::Scene(0).from_asset("models/animated/Fox.glb")),
-            main_sphere_material: world.spawn_asset(Color::from(SILVER).into()),
+            main_sphere_material: world.spawn_asset(StandardMaterial::from(Color::from(SILVER))),
             main_scene: world.load_asset(
                 GltfAssetLabel::Scene(0)
                     .from_asset("models/IrradianceVolumeExample/IrradianceVolumeExample.glb"),
@@ -502,7 +502,7 @@ impl FromWorld for ExampleAssets {
             irradiance_volume: world.load_asset("irradiance_volumes/Example.vxgi.ktx2"),
             fox_animation_graph: world.spawn_asset(fox_animation_graph),
             fox_animation_node,
-            voxel_cube: world.spawn_asset(Cuboid::default().into()),
+            voxel_cube: world.spawn_asset(Mesh::from(Cuboid::default())),
             // Just use a specular map for the skybox since it's not too blurry.
             // In reality you wouldn't do this--you'd use a real skybox texture--but
             // reusing the textures like this saves space in the Bevy repository.

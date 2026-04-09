@@ -175,7 +175,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Spawn the 2D heart
     commands.spawn((
         // We can use the methods defined on the `MeshBuilder` to customize the mesh.
-        Mesh3d(asset_commands.spawn_asset(HEART.mesh().resolution(50).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(HEART.mesh().resolution(50)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             emissive: RED.into(),
             base_color: RED.into(),
@@ -190,9 +190,9 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Spawn the 2D heart ring
     commands.spawn((
         // We can use the methods defined on the `MeshBuilder` to customize the mesh.
-        Mesh3d(
-            asset_commands.spawn_asset(RING.mesh().with_inner(|heart| heart.resolution(50)).into()),
-        ),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(
+            RING.mesh().with_inner(|heart| heart.resolution(50)),
+        ))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             emissive: RED.into(),
             base_color: RED.into(),
@@ -207,7 +207,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // Spawn an extrusion of the heart
     commands.spawn((
         // We can set a custom resolution for the round parts of the extrusion as well.
-        Mesh3d(asset_commands.spawn_asset(EXTRUSION.mesh().resolution(50).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(EXTRUSION.mesh().resolution(50)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: RED.into(),
             ..Default::default()
@@ -222,12 +222,11 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     commands.spawn((
         // We can set a custom resolution for the round parts of the extrusion as well.
         Mesh3d(
-            asset_commands.spawn_asset(
+            asset_commands.spawn_asset(Mesh::from(
                 RING_EXTRUSION
                     .mesh()
-                    .with_inner(|ring| ring.with_inner(|heart| heart.resolution(50)))
-                    .into(),
-            ),
+                    .with_inner(|ring| ring.with_inner(|heart| heart.resolution(50))),
+            )),
         ),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: RED.into(),

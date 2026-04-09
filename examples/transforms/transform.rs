@@ -59,7 +59,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     let cube_spawn =
         Transform::from_translation(Vec3::Z * -10.0).with_rotation(Quat::from_rotation_y(PI / 2.));
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::WHITE))),
         cube_spawn,
         CubeState {

@@ -104,9 +104,9 @@ fn setup(
 
     // Plane
     commands.spawn((
-        Mesh3d(
-            asset_commands.spawn_asset(Plane3d::default().mesh().size(500000.0, 500000.0).into()),
-        ),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(
+            Plane3d::default().mesh().size(500000.0, 500000.0),
+        ))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3))),
         ),
@@ -229,7 +229,7 @@ struct ParticleAssets {
 impl FromWorld for ParticleAssets {
     fn from_world(world: &mut World) -> Self {
         Self {
-            mesh: world.spawn_asset(Sphere::new(10.0).into()),
+            mesh: world.spawn_asset(Mesh::from(Sphere::new(10.0))),
             material: world.spawn_asset(StandardMaterial {
                 base_color: WHITE.into(),
                 ..Default::default()

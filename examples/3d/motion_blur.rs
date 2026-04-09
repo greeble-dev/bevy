@@ -71,7 +71,7 @@ fn setup_scene(
     ));
     // Sky
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Sphere::default().into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Sphere::default()))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             unlit: true,
             base_color: Color::linear_rgb(0.1, 0.6, 1.0),
@@ -80,7 +80,7 @@ fn setup_scene(
         Transform::default().with_scale(Vec3::splat(-4000.0)),
     ));
     // Ground
-    let mut plane: Mesh = Plane3d::default().into();
+    let mut plane = Mesh::from(Plane3d::default());
     let uv_size = 4000.0;
     let uvs = vec![[uv_size, 0.0], [0.0, 0.0], [0.0, uv_size], [uv_size; 2]];
     plane.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -107,8 +107,8 @@ fn spawn_cars(
     asset_commands: &mut AssetCommands,
 ) {
     const N_CARS: usize = 20;
-    let box_mesh = asset_commands.spawn_asset(Cuboid::new(0.3, 0.15, 0.55).into());
-    let cylinder = asset_commands.spawn_asset(Cylinder::default().into());
+    let box_mesh = asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.3, 0.15, 0.55)));
+    let cylinder = asset_commands.spawn_asset(Mesh::from(Cylinder::default()));
     let logo = asset_server.load("branding/icon.png");
     let wheel_matl = asset_commands.spawn_asset(StandardMaterial {
         base_color: Color::WHITE,
@@ -171,7 +171,7 @@ fn spawn_cars(
 
 fn spawn_barriers(commands: &mut Commands, asset_commands: &mut AssetCommands) {
     const N_CONES: usize = 100;
-    let capsule = asset_commands.spawn_asset(Capsule3d::default().into());
+    let capsule = asset_commands.spawn_asset(Mesh::from(Capsule3d::default()));
     let matl = asset_commands.spawn_asset(StandardMaterial {
         base_color: Color::srgb_u8(255, 87, 51),
         reflectance: 1.0,
@@ -196,8 +196,8 @@ fn spawn_barriers(commands: &mut Commands, asset_commands: &mut AssetCommands) {
 
 fn spawn_trees(commands: &mut Commands, asset_commands: &mut AssetCommands) {
     const N_TREES: usize = 30;
-    let capsule = asset_commands.spawn_asset(Capsule3d::default().into());
-    let sphere = asset_commands.spawn_asset(Sphere::default().into());
+    let capsule = asset_commands.spawn_asset(Mesh::from(Capsule3d::default()));
+    let sphere = asset_commands.spawn_asset(Mesh::from(Sphere::default()));
     let leaves = asset_commands.spawn_asset(StandardMaterial::from_color(Color::linear_rgb(
         0.0, 1.0, 0.0,
     )));

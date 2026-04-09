@@ -172,7 +172,7 @@ fn spawn_cubes(commands: &mut Commands, asset_commands: &mut AssetCommands) {
     transform.rotate_y(FRAC_PI_3);
 
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(3.0, 3.0, 3.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(3.0, 3.0, 3.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: SILVER.into(),
             ..default()
@@ -182,7 +182,7 @@ fn spawn_cubes(commands: &mut Commands, asset_commands: &mut AssetCommands) {
     ));
 
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(-13.0, -13.0, -13.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(-13.0, -13.0, -13.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color: SILVER.into(),
             ..default()
@@ -251,7 +251,7 @@ fn spawn_light_textures(
                 asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/Faces/faces.glb")),
             ),
             (
-                Mesh3d(asset_commands.spawn_asset(Sphere::new(1.0).into())),
+                Mesh3d(asset_commands.spawn_asset(Mesh::from(Sphere::new(1.0)))),
                 MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
                     emissive: Color::srgb(0.0, 0.0, 300.0).to_linear(),
                     ..default()

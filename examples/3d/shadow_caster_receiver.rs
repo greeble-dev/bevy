@@ -33,7 +33,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
         perceptual_roughness: 1.0,
         ..default()
     });
-    let sphere_handle = asset_commands.spawn_asset(Sphere::new(sphere_radius).into());
+    let sphere_handle = asset_commands.spawn_asset(Mesh::from(Sphere::new(sphere_radius)));
 
     // sphere - initially a caster
     commands.spawn((
@@ -52,7 +52,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // floating plane - initially not a shadow receiver and not a caster
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(20.0, 20.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(20.0, 20.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial::from(Color::from(LIME)))),
         Transform::from_xyz(0.0, 1.0, -10.0),
         NotShadowCaster,
@@ -61,7 +61,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
 
     // lower ground plane - initially a shadow receiver
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(20.0, 20.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(20.0, 20.0)))),
         MeshMaterial3d(white_handle),
     ));
 

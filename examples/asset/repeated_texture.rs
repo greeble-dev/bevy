@@ -24,7 +24,7 @@ fn setup(
 
     // central cube with not repeated texture
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(1.0, 1.0, 1.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color_texture: Some(image_with_default_sampler.clone()),
             ..default()
@@ -34,7 +34,7 @@ fn setup(
 
     // left cube with repeated texture
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(1.0, 1.0, 1.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             base_color_texture: Some(asset_server.load_with_settings(
                 "textures/fantasy_ui_borders/panel-border-010-repeated.png",
@@ -61,7 +61,7 @@ fn setup(
 
     // right cube with scaled texture, because with default sampler
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Cuboid::new(1.0, 1.0, 1.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(1.0, 1.0, 1.0)))),
         MeshMaterial3d(asset_commands.spawn_asset(StandardMaterial {
             // there is no sampler set, that's why
             // by default you see only one small image in a row/column

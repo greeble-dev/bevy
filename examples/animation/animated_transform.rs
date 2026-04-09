@@ -137,7 +137,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
     // First entity is the planet
     let planet_entity = commands
         .spawn((
-            Mesh3d(asset_commands.spawn_asset(Sphere::default().into())),
+            Mesh3d(asset_commands.spawn_asset(Mesh::from(Sphere::default()))),
             MeshMaterial3d(
                 asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.8, 0.7, 0.6))),
             ),
@@ -157,7 +157,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) {
             orbit_controller_animation_target_id,
             AnimatedBy(planet_entity),
             children![(
-                Mesh3d(asset_commands.spawn_asset(Cuboid::new(0.5, 0.5, 0.5).into())),
+                Mesh3d(asset_commands.spawn_asset(Mesh::from(Cuboid::new(0.5, 0.5, 0.5)))),
                 MeshMaterial3d(
                     asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.9, 0.3)))
                 ),

@@ -62,7 +62,7 @@ fn setup(mut commands: Commands, mut asset_commands: AssetCommands) -> Result {
 
     // Make a plane for establishing space.
     commands.spawn((
-        Mesh3d(asset_commands.spawn_asset(Plane3d::default().mesh().size(12.0, 12.0).into())),
+        Mesh3d(asset_commands.spawn_asset(Mesh::from(Plane3d::default().mesh().size(12.0, 12.0)))),
         MeshMaterial3d(
             asset_commands.spawn_asset(StandardMaterial::from(Color::srgb(0.3, 0.5, 0.3))),
         ),

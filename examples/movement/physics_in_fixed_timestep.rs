@@ -188,7 +188,7 @@ fn spawn_player(mut commands: Commands) {
 fn spawn_environment(mut commands: Commands, mut asset_commands: AssetCommands) {
     let sphere_material =
         asset_commands.spawn_asset(StandardMaterial::from(Color::from(tailwind::SKY_200)));
-    let sphere_mesh = asset_commands.spawn_asset(Sphere::new(0.3).into());
+    let sphere_mesh = asset_commands.spawn_asset(Mesh::from(Sphere::new(0.3)));
     let spheres_in_x = 6;
     let spheres_in_y = 4;
     let spheres_in_z = 10;
