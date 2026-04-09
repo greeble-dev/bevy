@@ -110,6 +110,9 @@ impl AssetLoaders {
             self.extension_to_poly_loader
                 .insert(extension.into(), loader_index);
 
+            // XXX TODO: Are we correct to add to `extension_to_loaders` as well?
+            // This means `get_by_extension` and `get_by_path` will find poly
+            // loaders, but maybe that should be explicit in those functions.
             let list = self
                 .extension_to_loaders
                 .entry((*extension).into())

@@ -5,14 +5,11 @@
 // text editor without binary data getting in the way.
 
 use crate::{
-    basset::{
-        blob::{BlobReader, BlobWriter},
-        ApplyContext,
-    },
+    basset::blob::{BlobReader, BlobWriter},
     io::SliceReader,
     meta::{AssetActionMinimal, AssetMetaMinimal, Settings},
     saver::ErasedAssetSaver,
-    AssetPath, ErasedAssetLoader, ErasedLoadedAsset,
+    AssetPath, AssetServer, ErasedAssetLoader, ErasedLoadedAsset,
 };
 use alloc::{boxed::Box, vec::Vec};
 use bevy_ecs::error::BevyError;
@@ -24,7 +21,7 @@ const STANDALONE_VERSION: u16 = 1;
 
 pub async fn read_standalone_asset(
     blob: &[u8],
-    context: &ApplyContext<'_>,
+    asset_server: &AssetServer,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     let mut blob = BlobReader::new(blob);
 
@@ -50,8 +47,7 @@ pub async fn read_standalone_asset(
         _ => todo!("XXX TODO"),
     };
 
-    let loader = context
-        .asset_server
+    let loader = asset_server
         .get_asset_loader_with_type_name(loader_name)
         .await
         .expect("XXX TODO");
@@ -80,8 +76,7 @@ pub async fn read_standalone_asset(
     // XXX TODO: Ew? Need to decide if we try to support the original path.
     let fake_path = AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
 
-    context
-        .asset_server
+    asset_server
         .load_with_settings_loader_and_reader(
             &fake_path,
             meta.loader_settings().expect("meta is set to Load"),

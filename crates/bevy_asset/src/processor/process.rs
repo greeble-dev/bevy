@@ -11,7 +11,6 @@ use crate::{
     MissingAssetLoaderForExtensionError, MissingAssetLoaderForTypeNameError,
 };
 use alloc::{
-    borrow::ToOwned,
     boxed::Box,
     string::{String, ToString},
     vec::Vec,
@@ -355,14 +354,17 @@ impl<'a> ProcessContext<'a> {
                 true, // XXX TODO: Review.
             )
             .await?;
-        for (path, full_hash) in &loaded_asset.loader_dependencies {
+        for (_path, (full_hash, _)) in &loaded_asset.loader_dependencies {
             self.new_processed_info
                 .process_dependencies
                 .push(ProcessDependencyInfo {
                     full_hash: *full_hash,
-                    // XXX TODO: Don't unwrap. Decide if processing should support refs.
-                    path: path.path().unwrap().to_owned(),
+                    // XXX TODO: This used to just copy `path`. Now needs a
+                    // decision on how to handle `LoaderDependency`. Do we want
+                    // to try and keep regular processing working?
+                    path: AssetPath::parse("XXX TODO"),
                 });
+            todo!("XXX TODO: See above");
         }
         Ok(loaded_asset)
     }

@@ -11,7 +11,7 @@ use crate::{
         AssetReader, AssetReaderError, AssetSourceBuilder, AssetSourceId, PathStream, Reader,
         SliceReader,
     },
-    AssetPath, AssetRef, AssetServer,
+    AssetPath, AssetRef, AssetServer, LoaderDependency,
 };
 use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 // XXX TODO: Try and replace `async_fs` with `AssetSource`.
@@ -30,9 +30,27 @@ use std::{
 };
 use tracing::error;
 
-#[derive(Debug)]
+// XXX TODO: Document. Currently duplicates `LoaderDependency` - should pick one?
+// XXX TODO: Decide if we use `RootAssetRef` or `AssetRef`. The labels don't matter
+// for publishing, but it might be convenient for the user or help debugging?
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum PublishDependency {
+    Load(RootAssetRef<'static>),
+    File(RootAssetPath<'static>),
+}
+
+impl From<LoaderDependency> for PublishDependency {
+    fn from(value: LoaderDependency) -> Self {
+        match value {
+            LoaderDependency::Load(path) => PublishDependency::Load(path),
+            LoaderDependency::File(path) => PublishDependency::File(path),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PublishInput {
-    pub paths: Vec<AssetRef<'static>>,
+    pub paths: Vec<PublishDependency>,
 }
 
 pub(crate) struct StagedAsset {

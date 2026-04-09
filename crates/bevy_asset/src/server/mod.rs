@@ -17,8 +17,8 @@ use crate::{
     path::AssetPath,
     Asset, AssetAction2, AssetEvent, AssetHandleProvider, AssetId, AssetIndex,
     AssetLoadFailedEvent, AssetMetaCheck, AssetRef, Assets, DeserializeMetaError, ErasedAssetIndex,
-    ErasedLoadedAsset, Handle, LoadedUntypedAsset, PolyAssetLoader, UnapprovedPathMode,
-    UntypedAssetId, UntypedAssetLoadFailedEvent, UntypedHandle,
+    ErasedLoadedAsset, Handle, LoadedUntypedAsset, LoaderDependency, PolyAssetLoader,
+    UnapprovedPathMode, UntypedAssetId, UntypedAssetLoadFailedEvent, UntypedHandle,
 };
 use alloc::{borrow::ToOwned, boxed::Box, vec, vec::Vec};
 use alloc::{
@@ -848,7 +848,7 @@ impl AssetServer {
                 &base_path,
                 meta.loader_settings().expect("meta is set to Load"),
                 &*loader,
-                &mut *reader,
+                &mut reader,
                 true,
                 false,
                 true, // XXX TODO: Review.
@@ -1704,10 +1704,33 @@ impl AssetServer {
         populate_hashes: bool,
         update_dependency_cache: bool,
     ) -> Result<ErasedLoadedAsset, AssetLoadError> {
+        // XXX TODO: Race condition. `dependency_key` will be reloading the asset,
+        // and we don't know if it matches `reader`. Need to think through how
+        // we can do this efficiently, particularly for the non-development case
+        // where the dependency key isn't needed and we don't want to touch the
+        // reader at all.
+        // XXX TODO: Settings parameter?
+        let dependency_key = if update_dependency_cache
+            && let Some(future) = self.basset_action_source().dependency_key(
+                &LoaderDependency::Load(
+                    RootAssetPath::without_label(asset_path.clone_owned()).into(),
+                ),
+                None,
+            ) {
+            future.await
+        } else {
+            None
+        };
+
         // TODO: experiment with this
         let asset_path = asset_path.clone_owned();
-        let load_context =
-            LoadContext::new(self, asset_path.clone(), load_dependencies, populate_hashes);
+        let load_context = LoadContext::new(
+            self,
+            asset_path.clone(),
+            load_dependencies,
+            populate_hashes,
+            dependency_key,
+        );
         let load = AssertUnwindSafe(loader.load(reader, settings, load_context)).catch_unwind();
         #[cfg(feature = "trace")]
         let load = {

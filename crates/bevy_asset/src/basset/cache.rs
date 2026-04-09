@@ -3,7 +3,7 @@
 use crate::{
     basset::{RootAssetPath, RootAssetRef},
     io::AssetSources,
-    AsyncWriteExt,
+    AsyncWriteExt, LoaderDependency,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 // XXX TODO: Try and replace `async_fs` with `AssetSource`.
@@ -417,11 +417,11 @@ impl CacheKey for DependencyCacheKey {
 
 #[derive(Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DependencyCacheValue {
-    // XXX TODO: Could store some debug info on the input?
-    loader_dependees: Vec<(RootAssetRef<'static>, DependencyCacheKey)>,
+    loader_dependees: Vec<CacheLoaderDependency>,
     // XXX TODO: Reconsider name? These are any `Handle` or `AssetRef` dependencies
     // stored in the asset value.
     external_dependees: Vec<RootAssetRef<'static>>,
+    // XXX TODO: Consider storing more info for debugging. Loader name for one.
 }
 
 fn collect_sort_dedup<T: Ord + PartialEq>(iter: impl Iterator<Item = T>) -> Vec<T> {
@@ -433,9 +433,33 @@ fn collect_sort_dedup<T: Ord + PartialEq>(iter: impl Iterator<Item = T>) -> Vec<
     value
 }
 
+// XXX TODO: Review. This is the same as `LoaderDependency` but with a dependency
+// key. Check if we can avoid duplication or restructure to be nicer. Note that
+// we shouldn't - in theory - ever have a mix of None and Some dependency keys.
+// We should be consistently keying everything or nothing. Check if that's ever true
+// and maybe the dependency key yes/no decision can be moved higher up.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct CacheLoaderDependency(pub LoaderDependency, pub DependencyCacheKey);
+
+impl CacheLoaderDependency {
+    pub(crate) fn new(
+        loader_dependency: LoaderDependency,
+        dependency_key: DependencyCacheKey,
+    ) -> Self {
+        Self(loader_dependency, dependency_key)
+    }
+
+    pub(crate) fn optional(
+        loader_dependency: LoaderDependency,
+        dependency_key: Option<DependencyCacheKey>,
+    ) -> Option<Self> {
+        dependency_key.map(|k| Self::new(loader_dependency, k))
+    }
+}
+
 impl DependencyCacheValue {
     pub(crate) fn new(
-        loader_dependees: impl Iterator<Item = (RootAssetRef<'static>, DependencyCacheKey)>,
+        loader_dependees: impl Iterator<Item = CacheLoaderDependency>,
         external_dependees: impl Iterator<Item = RootAssetRef<'static>>,
     ) -> Self {
         Self {
@@ -444,6 +468,7 @@ impl DependencyCacheValue {
         }
     }
 
+    #[expect(unused, reason = "XXX TODO?")]
     pub(crate) fn empty() -> Self {
         Self {
             loader_dependees: Default::default(),
@@ -451,9 +476,7 @@ impl DependencyCacheValue {
         }
     }
 
-    pub(crate) fn loader_dependees<'a>(
-        &'a self,
-    ) -> &'a [(RootAssetRef<'static>, DependencyCacheKey)] {
+    pub(crate) fn loader_dependees<'a>(&'a self) -> &'a [CacheLoaderDependency] {
         &self.loader_dependees
     }
 
@@ -466,7 +489,10 @@ impl DependencyCacheValue {
 impl FileCacheValue for Arc<DependencyCacheValue> {
     async fn write(&self, file: &mut File) -> Result<(), BevyError> {
         // XXX TODO: Should have a serialized struct that includes a version number and an opaque value.
-        let string = ron::ser::to_string(self.as_ref()).map_err(BevyError::from)?;
+        // XXX TODO: Consider non-pretty serialization. Will be annoying for debugging,
+        // but files will be a bit smaller and might\ be faster to save?
+        let string = ron::ser::to_string_pretty(self.as_ref(), Default::default())
+            .map_err(BevyError::from)?;
 
         file.write_all(string.as_bytes())
             .await

@@ -3,19 +3,19 @@
 use crate::{
     basset::{
         cache::{
-            ActionCacheKey, BassetHash, ContentCache, DependencyCacheKey, DependencyCacheValue,
-            MemoryAndFileCache,
+            ActionCacheKey, BassetHash, CacheLoaderDependency, ContentCache, DependencyCacheKey,
+            DependencyCacheValue, MemoryAndFileCache,
         },
         dependency_graph::DependencyGraph,
         publisher::{
-            write_pack_file, ManifestPath, PublishInput, ReadablePackFile, StagedAsset,
-            WritablePackFile,
+            write_pack_file, ManifestPath, PublishDependency, PublishInput, ReadablePackFile,
+            StagedAsset, WritablePackFile,
         },
         standalone::{read_standalone_asset, write_standalone_asset},
     },
     io::{AssetReaderError, AssetSourceId, AssetSources},
     meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
-    Asset, AssetApp, AssetDependency, AssetPath, AssetServer, PolyAssetLoader,
+    Asset, AssetApp, AssetDependency, AssetPath, AssetServer, LoaderDependency, PolyAssetLoader,
 };
 use alloc::{borrow::ToOwned, boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use atomicow::CowArc;
@@ -46,7 +46,7 @@ use std::{
 use tracing::{debug, info, warn};
 
 mod blob;
-mod cache;
+pub mod cache;
 mod dependency_graph;
 pub mod publisher;
 mod standalone;
@@ -268,15 +268,18 @@ impl<'a> From<RootAssetPath<'a>> for RootAssetRef<'a> {
 /// if they can be combined.
 pub struct ApplyContext<'a> {
     asset_server: &'a AssetServer,
+    dependency_key: Option<DependencyCacheKey>,
 
-    // Equivalent to `ErasedLoadedAsset::loader_dependencies.
-    loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
+    // Equivalent to `ErasedLoadedAsset::loader_dependencies`.
+    // XXX TODO: Dependency cache key shouldn't be optional for us?
+    loader_dependencies: HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
 }
 
 impl<'a> ApplyContext<'a> {
-    pub fn new(asset_server: &'a AssetServer) -> Self {
+    pub fn new(asset_server: &'a AssetServer, dependency_key: Option<DependencyCacheKey>) -> Self {
         Self {
             asset_server,
+            dependency_key,
             loader_dependencies: Default::default(),
         }
     }
@@ -303,7 +306,10 @@ impl ApplyContext<'_> {
         // for asset processing, so maybe can ignore for now.
         let hash = [0u8; 32];
 
-        self.loader_dependencies.insert(path.clone().into(), hash);
+        self.loader_dependencies.insert(
+            LoaderDependency::Load(RootAssetPath::without_label(path.clone()).into()),
+            (hash, asset.dependency_key),
+        );
 
         asset
             .take_labeled(path.label_cow())
@@ -325,7 +331,10 @@ impl ApplyContext<'_> {
         // for asset processing, so maybe can ignore for now.
         let hash = [0u8; 32];
 
-        self.loader_dependencies.insert(path.clone(), hash);
+        self.loader_dependencies.insert(
+            LoaderDependency::Load(RootAssetRef::without_label(path.clone())),
+            (hash, asset.dependency_key),
+        );
 
         asset
             .take_labeled(path.label_cow())
@@ -350,6 +359,7 @@ impl ApplyContext<'_> {
         let mut loaded_asset = LoadedAsset::new_with_dependencies(asset);
 
         loaded_asset.loader_dependencies = self.loader_dependencies;
+        loaded_asset.dependency_key = self.dependency_key;
 
         loaded_asset.into()
     }
@@ -551,35 +561,40 @@ impl DevelopmentActionSource {
             .map(move |s| (&*s.0, &*s.1))
     }
 
-    pub(crate) async fn dependency_key(
+    // XXX TODO: If we know the path is an action then we don't need async? Is that
+    // worth optimizing for?
+    async fn dependency_key_internal(
         &self,
-        path: &RootAssetRef<'static>,
+        path: &LoaderDependency,
         _settings: Option<&dyn Settings>,
     ) -> DependencyCacheKey {
+        // XXX TODO: Seed hash?
         let mut hasher = blake3::Hasher::new();
-        // XXX TODO: Double check that we're using the correct hash for actions.
-        hasher.update(path.to_string().as_bytes());
 
-        // XXX TODO: We should be including the settings in the dependency key. But
-        // it requires some extra plumbing - `ErasedLoadedAsset` needs to keep
-        // track of the settings of each item in `ErasedLoadedAsset::loader_dependencies`.
-        /*
-        if let Some(meta) = meta {
-            hasher.update(&meta.serialize());
+        // XXX TODO: Should we be including settings in the dependency key? Unclear
+        // if needed now with that we have the `LoadPath` action.
+        //
+        // if let Some(meta) = meta {
+        //     hasher.update(&meta.serialize());
+        // }
+
+        // XXX TODO: Should we also mix in something here to make sure that the two
+        // `LoaderDependency` variants are separate?
+
+        match path {
+            LoaderDependency::Load(RootAssetRef::Path(path)) | LoaderDependency::File(path) => {
+                hasher.update(path.to_string().as_bytes());
+                let content_hash = self.content_cache.get(path).await.expect("XXX TODO");
+
+                hasher.update(&content_hash.as_bytes());
+            }
+            LoaderDependency::Load(RootAssetRef::Action(action)) => {
+                // XXX TODO: Double check this is appropriate for actions.
+                hasher.update(action.to_string().as_bytes());
+            }
         }
-        */
 
-        if let Some(really_a_path) = path.path() {
-            let content_hash = self
-                .content_cache
-                .get(really_a_path)
-                .await
-                .expect("XXX TODO");
-
-            hasher.update(&content_hash.as_bytes());
-        }
-
-        // XXX TODO: Should include loader versions.
+        // XXX TODO: if `LoaderDependency::Load` then we should include the loader versions.
 
         DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
     }
@@ -596,8 +611,6 @@ impl ActionSource for DevelopmentActionSource {
             // an `AssetRef` but maybe could be specialized for an action.
             let path = RootAssetRef::from(action.clone());
 
-            let apply_context = ApplyContext::new(asset_server);
-
             if let Some(action_cache) = &self.action_cache
                 && let Some(dependency_graph) = &self.dependency_graph
             {
@@ -607,13 +620,24 @@ impl ActionSource for DevelopmentActionSource {
 
                 let action_key = dependency_graph.action_key(&path, self).await;
 
+                std::dbg!(&path, &action_key);
+
                 if let Some(action_key) = action_key
                     && let Some(cached_standalone_asset) =
                         action_cache.get(&action_key, &path).await
                 {
-                    return read_standalone_asset(&cached_standalone_asset, &apply_context).await;
+                    return read_standalone_asset(&cached_standalone_asset, asset_server).await;
                 }
             }
+
+            // XXX TODO: Avoid clone?
+            // XXX TODO: Could have a fast path here since we know the dependency key
+            // is for an action?
+            let dependency_key = self
+                .dependency_key_internal(&LoaderDependency::Load(path.clone()), None)
+                .await;
+
+            let apply_context = ApplyContext::new(asset_server, Some(dependency_key));
 
             let asset = self
                 .action(action.name())
@@ -679,6 +703,16 @@ impl ActionSource for DevelopmentActionSource {
         })
     }
 
+    fn dependency_key<'a>(
+        &'a self,
+        path: &'a LoaderDependency,
+        settings: Option<&'a dyn Settings>,
+    ) -> Option<BoxedFuture<'a, Option<DependencyCacheKey>>> {
+        Some(Box::pin(async move {
+            Some(self.dependency_key_internal(path, settings).await)
+        }))
+    }
+
     // XXX TODO: Settings?
     fn register_dependencies<'a>(
         &'a self,
@@ -688,37 +722,22 @@ impl ActionSource for DevelopmentActionSource {
         asset: &'a ErasedLoadedAsset,
     ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
         Some(Box::pin(async move {
-            if let Some(dependency_graph) = &self.dependency_graph {
-                // XXX TODO: Recalculating the dependency key is a race condition since
-                // the content cache will be looking at the file as it is now, not what was loaded.
-                // Do we need to put the dependency key into `ErasedLoadedAsset`?
-                let dependency_key = self.dependency_key(path, None).await;
-
-                let mut unresolved_loader_dependees = asset
+            // XXX TODO: Can move branch outside of `Box::pin`?
+            if let Some(dependency_key) = asset.dependency_key
+                && let Some(dependency_graph) = &self.dependency_graph
+            {
+                let Some(loader_dependencies) = asset
                     .loader_dependencies
-                    .clone()
-                    .into_iter()
-                    .map(|(path, _)| RootAssetRef::without_label(path))
-                    .collect::<Vec<_>>();
-
-                // XXX TODO: We're duplicating logic in `DependencyCacheValue::new`.
-                // But maybe this goes away if something external gives us the
-                // dependency keys, so this function just takes a `DependencyCacheValue`.
-                unresolved_loader_dependees.sort();
-                unresolved_loader_dependees.dedup();
-
-                // XXX TODO Duplicated in `load_action`.
-                let mut loader_dependees =
-                    Vec::<(RootAssetRef<'static>, DependencyCacheKey)>::new();
-
-                for dependee_path in unresolved_loader_dependees {
-                    // XXX TODO: Recalculating the dependency key is a race condition since
-                    // the content cache will be looking at the file as it is now, not what was loaded.
-                    // Do we need to put the dependency key into `ErasedLoadedAsset`?
-                    let dependee_key = self.dependency_key(&dependee_path, None).await;
-                    // XXX TODO: Review passing `None` for meta parameter.
-                    loader_dependees.push((dependee_path, dependee_key));
-                }
+                    .iter()
+                    .map(|(path, (_, dependency_key))| {
+                        CacheLoaderDependency::optional(path.clone(), *dependency_key)
+                    })
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    // XXX TODO: Double check we're correct to bail here. Should be a warning
+                    // since the development source always gives dependency keys?
+                    return None;
+                };
 
                 let mut external_dependees = HashSet::<RootAssetRef>::new();
 
@@ -737,11 +756,11 @@ impl ActionSource for DevelopmentActionSource {
                 // XXX TODO: Are we accounting for sub-asset dependencies?
 
                 let dependency_value = DependencyCacheValue::new(
-                    loader_dependees.into_iter(),
+                    loader_dependencies.into_iter(),
                     external_dependees.into_iter(),
                 );
 
-                dependency_graph.register_dependencies(path, dependency_key, dependency_value)
+                dependency_graph.register_dependencies_load(path, dependency_key, dependency_value)
             } else {
                 None
             }
@@ -750,18 +769,15 @@ impl ActionSource for DevelopmentActionSource {
 
     fn register_bytes_dependency<'a>(
         &'a self,
-        path: &'a RootAssetRef<'static>,
+        path: &'a RootAssetPath<'static>,
+        dependency_key: Option<DependencyCacheKey>,
     ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
         Some(Box::pin(async move {
-            if let Some(dependency_graph) = &self.dependency_graph {
-                // XXX TODO: Recalculating the dependency key is a race condition since
-                // the content cache will be looking at the file as it is now, not what was loaded.
-                // Do we need to put the dependency key into `ErasedLoadedAsset`?
-                let dependency_key = self.dependency_key(path, None).await;
-
-                let dependency_value = DependencyCacheValue::empty();
-
-                dependency_graph.register_dependencies(path, dependency_key, dependency_value)
+            // XXX TODO: Can move branch outside of `Box::pin`?
+            if let Some(dependency_key) = dependency_key
+                && let Some(dependency_graph) = &self.dependency_graph
+            {
+                dependency_graph.register_dependencies_file(path, dependency_key)
             } else {
                 None
             }
@@ -792,13 +808,10 @@ impl ActionSource for DevelopmentActionSource {
             //
             // XXX TODO: Consider removing this and checking `pack` directly?
             // Kinda depends on multithread approaches.
-            let mut done = HashSet::<RootAssetRef>::new();
+            let mut done = HashSet::<PublishDependency>::new();
 
-            let mut input_stack = input
-                .paths
-                .iter()
-                .map(|p| RootAssetRef::without_label(p.clone()))
-                .collect::<Vec<_>>();
+            // XXXX TODO: Consume rather than clone?
+            let mut input_stack = input.paths.clone();
 
             while let Some(input_asset) = input_stack.pop() {
                 // XXX TODO: Clone is annoying, but not sure it's possible to avoid
@@ -812,10 +825,11 @@ impl ActionSource for DevelopmentActionSource {
                 }
 
                 match &input_asset {
-                    RootAssetRef::Path(path) => {
-                        // XXX TODO: Consider how we can avoid this load - it's only
-                        // needed for discovering dependencies and getting the meta.
-                        // Can we try and reuse the dependency graph?
+                    PublishDependency::Load(RootAssetRef::Path(path)) => {
+                        // XXX TODO: Try using dependency key to avoid this load - it's
+                        // only needed for discovering dependencies and getting the meta.
+                        // Can we try and reuse the dependency graph? Implies that
+                        // dependency graph should store the loader name?
 
                         // XXX TODO: Settings parameter?
                         let (loaded, loader) = load_path(asset_server, path, &None)
@@ -829,7 +843,10 @@ impl ActionSource for DevelopmentActionSource {
                                 AssetDependency::Handle(handle) => handle.path().cloned(),
                                 AssetDependency::Path(path) => Some(path.clone()),
                             } {
-                                input_stack.push(RootAssetRef::without_label(path));
+                                // XXX TODO: Oh, this is awkward. We shouldn't assume
+                                // `PublishDependency::Load` here. Does `VisitAssetDependencies`
+                                // need to make a distinction? That will be ugly.
+                                input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
                             };
                         });
 
@@ -838,7 +855,7 @@ impl ActionSource for DevelopmentActionSource {
                                 .loader_dependencies
                                 .keys()
                                 .cloned()
-                                .map(RootAssetRef::without_label),
+                                .map(PublishDependency::from),
                         );
 
                         let asset_bytes = {
@@ -867,7 +884,7 @@ impl ActionSource for DevelopmentActionSource {
                             },
                         );
                     }
-                    RootAssetRef::Action(action) => {
+                    PublishDependency::Load(RootAssetRef::Action(action)) => {
                         // XXX TODO: Can this handle actions that can't be saved?
 
                         // XXX TODO: Can this read directly out of the action cache? We're
@@ -919,7 +936,8 @@ impl ActionSource for DevelopmentActionSource {
                                 AssetDependency::Handle(handle) => handle.path().cloned(),
                                 AssetDependency::Path(path) => Some(path.clone()),
                             } {
-                                input_stack.push(RootAssetRef::without_label(path));
+                                // XXX TODO: Similar to case above - shouldn't assume PublishDependency::Load.
+                                input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
                             };
                         });
 
@@ -927,9 +945,15 @@ impl ActionSource for DevelopmentActionSource {
                         // loader dependencies. Not sure if we can work them out unless
                         // we do a fake load?
                     }
+                    PublishDependency::File(_path) => {
+                        // Should we check done so that we're not publishing the same
+                        // bytes as `PublishDependency::Load` and `PublishDependency::File`?
+                        todo!();
+                    }
                 }
 
-                info!(%input_asset, "Publishing");
+                // XXX TODO: Prettier output, don't use `Debug`.
+                info!(?input_asset, "Publishing");
             }
 
             info!("Writing pack file {pack_path:?}");
@@ -985,7 +1009,10 @@ impl PolyAssetLoader for BassetLoader {
 
                 // XXX TODO: Justify this dependency replacement.
                 asset.loader_dependencies.clear();
-                asset.loader_dependencies.insert(basset.root.clone(), hash);
+                asset.loader_dependencies.insert(
+                    LoaderDependency::Load(RootAssetRef::without_label(basset.root.clone())),
+                    (hash, asset.dependency_key),
+                );
 
                 asset
             })?;
@@ -1045,7 +1072,7 @@ pub(crate) async fn load_path(
             &AssetPath::from(path.clone()),
             meta.loader_settings().expect("meta is set to Load"),
             &*loader,
-            &mut *reader,
+            &mut reader,
             load_dependencies,
             populate_hashes,
             update_dependency_cache,
@@ -1069,6 +1096,14 @@ pub trait ActionSource: Send + Sync + 'static {
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 
+    fn dependency_key<'a>(
+        &'a self,
+        _path: &'a LoaderDependency,
+        _settings: Option<&'a dyn Settings>,
+    ) -> Option<BoxedFuture<'a, Option<DependencyCacheKey>>> {
+        None
+    }
+
     // XXX TODO: Try and avoid exposing this. It's currently only for development
     // mode to fill out the dependency graph from `AssetServer::load_with_settings_loader_and_reader`.
     //
@@ -1091,9 +1126,12 @@ pub trait ActionSource: Send + Sync + 'static {
     //
     // XXX TODO: Review return type. Returning an option is a faff, but avoids
     // redundantly created a boxed future it's a noop.
+    //
+    // XXX TODO: Review name. Compare to `LoaderDependency::File`.
     fn register_bytes_dependency<'a>(
         &'a self,
-        _path: &'a RootAssetRef<'static>,
+        _path: &'a RootAssetPath<'static>,
+        _dependency_key: Option<DependencyCacheKey>,
     ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
         None
     }
@@ -1123,11 +1161,27 @@ pub trait ActionSourceBuilder: Send + Sync + 'static {
 async fn fallback_action_handler(
     action: &RootAssetAction2,
     asset_server: &AssetServer,
+    action_source: &dyn ActionSource,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     if &*action.name == type_name::<action::LoadPath>() {
+        // XXX TODO: Is there ever a situation where the dependency key will be found
+        // here? `fallback_action_handler` is currently only used by minimal and
+        // published action sources, which don't support dependency keys.
+        // XXX TODO: Avoid clone?
+        // XXX TODO: Could have a fast path here since we know the dependency
+        // key is for an action?
+        let dependency_key = if let Some(future) = action_source.dependency_key(
+            &LoaderDependency::Load(RootAssetRef::from(action.clone())),
+            None,
+        ) {
+            future.await
+        } else {
+            None
+        };
+
         ErasedBassetAction::apply(
             &action::LoadPath,
-            ApplyContext::new(asset_server),
+            ApplyContext::new(asset_server, dependency_key),
             &action.params,
         )
         .await
@@ -1159,7 +1213,7 @@ impl ActionSource for MinimalActionSource {
         // entire asset server.
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
-        Box::pin(async move { fallback_action_handler(action, asset_server).await })
+        Box::pin(async move { fallback_action_handler(action, asset_server, self).await })
     }
 }
 
@@ -1200,7 +1254,7 @@ impl ActionSource for PublishedActionSource {
             // Refactor?
 
             let Ok(mut readers) = self.pack_file.action(&action_string) else {
-                return fallback_action_handler(action, asset_server).await;
+                return fallback_action_handler(action, asset_server, self).await;
             };
 
             let mut meta_bytes = Vec::<u8>::new();
@@ -1231,7 +1285,7 @@ impl ActionSource for PublishedActionSource {
             let update_dependency_cache = false;
 
             // XXX TODO: Ew? Need to decide if we try to support the original path.
-            let fake_path = AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
+            let fake_path = AssetPath::parse("ERROR - published assets shouldn't use their path");
 
             Ok(asset_server
                 .load_with_settings_loader_and_reader(
@@ -1262,7 +1316,9 @@ pub mod action {
         pub path: String,
         #[serde(default)]
         pub loader_settings: Option<Box<ron::value::RawValue>>,
-        // XXX TODO?
+        // XXX TODO: Consider this? Might be useful to explicitly choose a loader
+        // rather than relying on extension/type. But have to be careful around
+        // how dependency/action keys are calculated.
         //loader_name: Option<String>,
     }
 
@@ -1285,6 +1341,10 @@ pub mod action {
 
             let settings = params.loader_settings.clone();
 
+            // XXX TODO: What if `loader_settings` is not set? That could lead to duplicate
+            // assets, since this action has a different handle compared to loading the
+            // path directly. Same issue if the settings are left at default.
+
             // XXX TODO: Need to think through dependencies - I don't think this is
             // right.
             //
@@ -1300,7 +1360,7 @@ pub mod action {
             //
             // Suspect that we need to distinguish between bytes-only dependencies and
             // those that go through a loader. So technically the path we're loading
-            // here is a bytes-only dependency, and any dependencies is has when actually
+            // here is a bytes-only dependency, and any dependencies it has when actually
             // loaded become this action's loader dependencies.
             context.erased_load_dependee_path(&path, &settings).await
 

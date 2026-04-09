@@ -1,5 +1,5 @@
 use crate::{
-    basset::{RootAssetPath, RootAssetRef},
+    basset::{cache::DependencyCacheKey, RootAssetPath, RootAssetRef},
     io::{AssetReaderError, MissingAssetSourceError, MissingProcessedAssetReaderError, Reader},
     loader_builders::{Deferred, NestedLoader, StaticTyped},
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfo, ProcessedInfoMinimal, Settings},
@@ -256,7 +256,8 @@ pub(crate) struct LabeledAsset {
 pub struct LoadedAsset<A: Asset> {
     pub(crate) value: A,
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
-    pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
+    pub(crate) loader_dependencies:
+        HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
     /// The subassets of this asset.
     pub(crate) labeled_assets: Vec<LabeledAsset>,
     /// The mapping from subasset labels to their index in [`Self::labeled_assets`].
@@ -266,6 +267,8 @@ pub struct LoadedAsset<A: Asset> {
     /// This is entirely redundant with [`Self::labeled_assets`], but it allows looking up the
     /// labeled asset by its asset ID.
     pub(crate) asset_id_to_asset_index: HashMap<UntypedAssetId, usize>,
+    /// XXX TODO: Document.
+    pub(crate) dependency_key: Option<DependencyCacheKey>,
 }
 
 impl<A: Asset> LoadedAsset<A> {
@@ -288,6 +291,9 @@ impl<A: Asset> LoadedAsset<A> {
             labeled_assets: Default::default(),
             label_to_asset_index: Default::default(),
             asset_id_to_asset_index: Default::default(),
+            // XXX TODO: Review used cases of `new_with_dependencies`. Do any
+            // want to pass the dependency key?
+            dependency_key: None,
         }
     }
 
@@ -331,11 +337,21 @@ impl<A: Asset> From<A> for LoadedAsset<A> {
     }
 }
 
+/// How an asset loader depends on paths and actions. XXX TODO: Clarify?
+#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum LoaderDependency {
+    /// The loader will load this path or action through a normal load call. XXX TODO: Clarify?
+    Load(RootAssetRef<'static>),
+    /// The loader will use the bytes of the file at this path. XXX TODO: Reconsider name? Bit vague.
+    File(RootAssetPath<'static>),
+}
+
 /// A "type erased / boxed" counterpart to [`LoadedAsset`]. This is used in places where the loaded type is not statically known.
 pub struct ErasedLoadedAsset {
     pub(crate) value: Box<dyn AssetContainer>,
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
-    pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
+    pub(crate) loader_dependencies:
+        HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
     /// The subassets of this asset.
     pub(crate) labeled_assets: Vec<LabeledAsset>,
     /// The mapping from subasset labels to their index in [`Self::labeled_assets`].
@@ -345,6 +361,8 @@ pub struct ErasedLoadedAsset {
     /// This is entirely redundant with [`Self::labeled_assets`], but it allows looking up the
     /// labeled asset by its asset ID.
     pub(crate) asset_id_to_asset_index: HashMap<UntypedAssetId, usize>,
+    /// XXX TODO: Document.
+    pub(crate) dependency_key: Option<DependencyCacheKey>,
 }
 
 impl<A: Asset> From<LoadedAsset<A>> for ErasedLoadedAsset {
@@ -356,6 +374,7 @@ impl<A: Asset> From<LoadedAsset<A>> for ErasedLoadedAsset {
             labeled_assets: asset.labeled_assets,
             label_to_asset_index: asset.label_to_asset_index,
             asset_id_to_asset_index: asset.asset_id_to_asset_index,
+            dependency_key: asset.dependency_key,
         }
     }
 }
@@ -439,6 +458,7 @@ impl ErasedLoadedAsset {
                 labeled_assets: self.labeled_assets,
                 label_to_asset_index: self.label_to_asset_index,
                 asset_id_to_asset_index: self.asset_id_to_asset_index,
+                dependency_key: self.dependency_key,
             }),
             Err(value) => {
                 self.value = value;
@@ -522,7 +542,8 @@ pub struct LoadContext<'a> {
     asset_path: AssetPath<'static>,
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
     /// Direct dependencies used by this loader.
-    pub(crate) loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
+    pub(crate) loader_dependencies:
+        HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
     /// Stores the subassets added to this context.
     pub(crate) labeled_assets: Vec<LabeledAsset>,
     /// Maps the label of a subasset to the index into [`Self::labeled_assets`].
@@ -532,6 +553,7 @@ pub struct LoadContext<'a> {
     /// This is entirely redundant with [`Self::labeled_assets`], but it allows looking up the
     /// labeled asset by its asset ID.
     pub(crate) asset_id_to_asset_index: HashMap<UntypedAssetId, usize>,
+    dependency_key: Option<DependencyCacheKey>,
 }
 
 impl<'a> LoadContext<'a> {
@@ -541,6 +563,7 @@ impl<'a> LoadContext<'a> {
         asset_path: AssetPath<'static>,
         should_load_dependencies: bool,
         populate_hashes: bool,
+        dependency_key: Option<DependencyCacheKey>,
     ) -> Self {
         Self {
             asset_server,
@@ -552,6 +575,7 @@ impl<'a> LoadContext<'a> {
             labeled_assets: Default::default(),
             label_to_asset_index: Default::default(),
             asset_id_to_asset_index: Default::default(),
+            dependency_key,
         }
     }
 
@@ -590,6 +614,7 @@ impl<'a> LoadContext<'a> {
             self.asset_path.clone(),
             self.should_load_dependencies,
             self.populate_hashes,
+            None, // XXX TODO: Review? Seems correct that sub-assets don't have a dependency key.
         )
     }
 
@@ -701,6 +726,7 @@ impl<'a> LoadContext<'a> {
             labeled_assets: self.labeled_assets,
             label_to_asset_index: self.label_to_asset_index,
             asset_id_to_asset_index: self.asset_id_to_asset_index,
+            dependency_key: self.dependency_key,
         }
     }
 
@@ -743,15 +769,33 @@ impl<'a> LoadContext<'a> {
                 path: path.path().to_path_buf(),
                 source,
             })?;
-        self.loader_dependencies
-            .insert(path.clone_owned().into(), hash);
+
+        // XXX TODO: Race condition. See notes on same race condition in
+        // `AssetServer::load_with_settings_loader_and_reader`.
+        // XXX TODO: Settings parameter?
+        let dependency_key = if let Some(future) =
+            self.asset_server.basset_action_source().dependency_key(
+                &LoaderDependency::File(RootAssetPath::without_label(path.clone_owned())),
+                None,
+            ) {
+            future.await
+        } else {
+            None
+        };
+
+        self.loader_dependencies.insert(
+            LoaderDependency::File(RootAssetPath::without_label(path.clone_owned())),
+            (hash, dependency_key),
+        );
+
         // XXX TODO: Document.
         if let Some(future) = self
             .asset_server
             .basset_action_source()
-            .register_bytes_dependency(&RootAssetRef::from(RootAssetPath::without_label(
-                path.clone_owned(),
-            )))
+            .register_bytes_dependency(
+                &RootAssetPath::without_label(path.clone_owned()),
+                dependency_key,
+            )
         {
             future.await;
         }
@@ -817,7 +861,10 @@ impl<'a> LoadContext<'a> {
                 error,
             })?;
         let hash = processed_info.map(|i| i.full_hash).unwrap_or_default();
-        self.loader_dependencies.insert(path.clone().into(), hash);
+        self.loader_dependencies.insert(
+            LoaderDependency::Load(RootAssetPath::without_label(path.clone()).into()),
+            (hash, loaded_asset.dependency_key),
+        );
         Ok(loaded_asset)
     }
 

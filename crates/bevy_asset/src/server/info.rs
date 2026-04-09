@@ -1,7 +1,8 @@
 use crate::{
+    basset::cache::DependencyCacheKey,
     meta::{AssetHash, MetaTransform},
     Asset, AssetHandleProvider, AssetIndex, AssetLoadError, AssetRef, DependencyLoadState,
-    ErasedAssetIndex, ErasedLoadedAsset, Handle, InternalAssetEvent, LoadState,
+    ErasedAssetIndex, ErasedLoadedAsset, Handle, InternalAssetEvent, LoadState, LoaderDependency,
     RecursiveDependencyLoadState, StrongHandle, UntypedHandle,
 };
 use alloc::{
@@ -39,7 +40,9 @@ pub(crate) struct AssetInfo {
     /// save memory.
     ///
     /// [`LoadedAsset`]: crate::loader::LoadedAsset
-    loader_dependencies: HashMap<AssetRef<'static>, AssetHash>,
+    // XXX TODO: Do we need the dependency key? Added it to match `ErasedLoadedAsset::loader_dependencies`,
+    // but could be dropped?
+    loader_dependencies: HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
     /// The number of handle drops to skip for this asset.
     /// See usage (and comments) in `get_or_create_path_handle` for context.
     handle_drops_to_skip: usize,
@@ -84,6 +87,8 @@ pub(crate) struct AssetInfos {
     pub(crate) watching_for_changes: bool,
     /// Tracks assets that depend on the "key" asset path inside their asset loaders ("loader dependencies")
     /// This should only be set when watching for changes to avoid unnecessary work.
+    // XXX TODO: Should the key be RootAssetRef to match how we're treating loader dependencies
+    // elsewhere?
     pub(crate) loader_dependents: HashMap<AssetRef<'static>, HashSet<AssetRef<'static>>>,
     /// Tracks living labeled assets for a given source asset.
     /// This should only be set when watching for changes to avoid unnecessary work.
@@ -513,11 +518,15 @@ impl AssetInfos {
                     .expect("Asset info should always exist at this point");
                 if let Some(asset_path) = info.path.as_ref() {
                     for loader_dependency in loaded_asset.loader_dependencies.keys() {
-                        let dependents = self
-                            .loader_dependents
-                            .entry(loader_dependency.clone())
-                            .or_default();
-                        dependents.insert(asset_path.clone());
+                        // XXX TODO: Review if we're correct to ignore `LoaderDependency::File`.
+                        // Might be correct depending on reload semantics.
+                        if let LoaderDependency::Load(path) = loader_dependency {
+                            let dependents = self
+                                .loader_dependents
+                                .entry(AssetRef::from(path.clone()))
+                                .or_default();
+                            dependents.insert(asset_path.clone());
+                        }
                     }
                 }
             }
@@ -689,7 +698,12 @@ impl AssetInfos {
         living_labeled_assets: &mut HashMap<AssetRef<'static>, HashSet<Box<str>>>,
     ) {
         for loader_dependency in info.loader_dependencies.keys() {
-            if let Some(dependents) = loader_dependents.get_mut(loader_dependency) {
+            // XXX TODO: Review if we're correct to ignore `LoaderDependency::File`.
+            // See similar comment in `process_asset_load`.
+            if let LoaderDependency::Load(loader_dependency) = loader_dependency
+                && let Some(dependents) =
+                    loader_dependents.get_mut(&AssetRef::from(loader_dependency.clone()))
+            {
                 dependents.remove(path);
             }
         }

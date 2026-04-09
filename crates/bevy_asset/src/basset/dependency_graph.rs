@@ -1,8 +1,14 @@
-use crate::basset::{
-    cache::{ActionCacheKey, DependencyCacheKey, DependencyCacheValue, MemoryAndFileCache},
-    DevelopmentActionSource, RootAssetRef,
+use crate::{
+    basset::{
+        cache::{
+            ActionCacheKey, CacheLoaderDependency, DependencyCacheKey, DependencyCacheValue,
+            MemoryAndFileCache,
+        },
+        DevelopmentActionSource, RootAssetPath, RootAssetRef,
+    },
+    LoaderDependency,
 };
-use alloc::{sync::Arc, vec, vec::Vec};
+use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
 use bevy_platform::collections::HashMap;
 use core::fmt::{Debug, Display, Write};
 use indexmap::IndexMap;
@@ -25,22 +31,27 @@ enum InternalGraphNode {
 #[derive(Default)]
 struct InternalGraph {
     graph: Acyclic<StableDiGraph<InternalGraphNode, ()>>,
-
-    // XXX TODO: Support settings. We can't use the path alone. Or we must
-    // commit to settings in the path.
-    path_to_node: HashMap<RootAssetRef<'static>, NodeIndex>,
+    // XXX TODO: Nodes that are `LoaderDependency::file` should not have dependee links.
+    // Should we verify this?
+    path_to_node: HashMap<LoaderDependency, NodeIndex>,
 }
 
 impl InternalGraph {
-    fn set(
+    // XXX TODO: Document and reconsider name. Corresponds to `LoaderDependency::Load`.
+    fn set_load(
         &mut self,
-        path: &RootAssetRef<'static>,
+        path: RootAssetRef<'static>,
         dependency_key: DependencyCacheKey,
         dependency_value: &DependencyCacheValue,
     ) -> Option<ActionCacheKey> {
         // XXX TODO: Validate the existing entry? Or is it an error to set twice?
         // XXX TODO: Try to optimize this by reusing the entry?
-        if let Some(existing_node_id) = self.path_to_node.get(path).copied() {
+        // XXX TODO: Avoid clone?
+        if let Some(existing_node_id) = self
+            .path_to_node
+            .get(&LoaderDependency::Load(path.clone()))
+            .copied()
+        {
             return match self
                 .graph
                 .node_weight(existing_node_id)
@@ -60,11 +71,16 @@ impl InternalGraph {
 
         // Gather the node id and action key of each dependee, returning `None`
         // if any are absent or unknown.
+        //
+        // XXX TODO: Check that the ordering of the output is reliable, since the
+        // ordering affects the action key.
+        //
+        // XXX TODO: More efficient if we could do `into_iter?`
         let resolved = dependency_value
             .loader_dependees()
             .iter()
-            .map(|(dependee_path, dependee_key)| {
-                if let Some(dependee_node_id) = self.path_to_node.get(dependee_path)
+            .map(|CacheLoaderDependency(dependee, dependee_key)| {
+                if let Some(dependee_node_id) = self.path_to_node.get(dependee)
                     .copied() {
                         let dependee_node = self
                             .graph
@@ -81,7 +97,7 @@ impl InternalGraph {
                         }
                     }
                  else {
-                    warn!(%dependee_path, %dependee_key, "Failed to find graph node - were dependencies not registered for this asset?");
+                    warn!(?dependee, %dependee_key, "Failed to find graph node - were dependencies not registered for this asset?");
                     None
                  }
             })
@@ -107,12 +123,58 @@ impl InternalGraph {
             (node_id, None)
         };
 
-        self.path_to_node.insert(path.clone(), node_id);
+        // XXX TODO: Duplicates earlier clone?
+        self.path_to_node
+            .insert(LoaderDependency::Load(path), node_id);
 
         action_key
     }
 
-    fn get(&self, path: &RootAssetRef<'static>) -> Option<ActionCacheKey> {
+    // XXX TODO: Document and reconsider name. Corresponds to `LoaderDependency::File`.
+    // XXX TODO: Duplicates a lot of `set_load`. Try refactor?
+    fn set_file(
+        &mut self,
+        path: RootAssetPath<'static>,
+        dependency_key: DependencyCacheKey,
+    ) -> Option<ActionCacheKey> {
+        // XXX TODO: Validate the existing entry? Or is it an error to set twice?
+        // XXX TODO: Try to optimize this by reusing the entry?
+        // XXX TODO: Avoid clone?
+        if let Some(existing_node_id) = self
+            .path_to_node
+            .get(&LoaderDependency::File(path.clone()))
+            .copied()
+        {
+            return match self
+                .graph
+                .node_weight(existing_node_id)
+                .expect("Graph node should always exist XXX TODO: Document?")
+            {
+                InternalGraphNode::Valid(existing_action_key, existing_dependency_key) => {
+                    // XXX TODO: This can happen if we fail to invalidate on file
+                    // changes. Do we need to make that robust or handle it gracefully
+                    // here?
+                    assert_eq!(*existing_dependency_key, dependency_key);
+
+                    Some(*existing_action_key)
+                }
+                InternalGraphNode::Unknown => None,
+            };
+        }
+
+        let action_key = ActionCacheKey::new(dependency_key, core::iter::empty());
+
+        let node_id = self
+            .graph
+            .add_node(InternalGraphNode::Valid(action_key, dependency_key));
+
+        self.path_to_node
+            .insert(LoaderDependency::File(path), node_id);
+
+        Some(action_key)
+    }
+
+    fn get(&self, path: &LoaderDependency) -> Option<ActionCacheKey> {
         self.path_to_node.get(path).and_then(|&node_id| {
             match self.graph.node_weight(node_id).expect("XXX TODO") {
                 InternalGraphNode::Valid(action_key, _) => Some(*action_key),
@@ -121,11 +183,11 @@ impl InternalGraph {
         })
     }
 
-    fn contains(&self, path: &RootAssetRef<'static>) -> bool {
+    fn contains(&self, path: &LoaderDependency) -> bool {
         self.path_to_node.contains_key(path)
     }
 
-    fn invalidate(&mut self, path: &RootAssetRef<'static>) {
+    fn invalidate(&mut self, path: &LoaderDependency) {
         if let Some(initial_node_index) = self.path_to_node.get(path).copied() {
             let mut stack = vec![initial_node_index];
 
@@ -143,7 +205,7 @@ impl InternalGraph {
 
 impl Debug for InternalGraph {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let node_to_path: HashMap<NodeIndex, &RootAssetRef<'static>> =
+        let node_to_path: HashMap<NodeIndex, &LoaderDependency> =
             HashMap::from_iter(self.path_to_node.iter().map(|(path, node)| (*node, path)));
 
         // XXX TODO: Maybe petgraph has this built-in somewhere?
@@ -167,9 +229,8 @@ impl Debug for InternalGraph {
             let root_node_id = self.path_to_node[&root_node_path];
 
             // Skip spammy embedded assets. XXX TODO: Rethink at some point.
-            if root_node_path
-                .path()
-                .is_some_and(|p| p.source().as_str() == Some("embedded"))
+            if let LoaderDependency::Load(path) = root_node_path
+                && path.to_string().starts_with("embedded://")
             {
                 continue;
             }
@@ -192,7 +253,7 @@ impl Debug for InternalGraph {
                     f.write_str("unknown/unknown ")?;
                 }
 
-                Display::fmt(node_to_path[&node_id], f)?;
+                Debug::fmt(node_to_path[&node_id], f)?;
 
                 // XXX TODO: Platform specific newline?
                 f.write_char('\n')?;
@@ -208,10 +269,10 @@ impl Debug for InternalGraph {
 }
 
 pub(crate) struct DependencyGraph {
-    // XXX TODO: Would have preferred `RwLock`, but `petgraph::Acyclic` is not
-    // `Sync` due to using `RefCell`.
+    // XXX TODO: Would have preferred `RwLock`, but we can't because `petgraph::Acyclic`
+    // is not `Sync` due to using `RefCell`.
     graph: Mutex<InternalGraph>,
-    // XXX TODO?
+    // XXX TODO: Loader versions.
     //versions: ?
     cache: Option<MemoryAndFileCache<DependencyCacheKey, Arc<DependencyCacheValue>>>,
 }
@@ -241,78 +302,129 @@ impl DependencyGraph {
         // the dependency graph and the content cache.
         action_source: &DevelopmentActionSource,
     ) -> Option<ActionCacheKey> {
-        let mut stack = Vec::<(RootAssetRef<'static>, Option<DependencyCacheKey>)>::new();
-        let mut pending = IndexMap::<
-            RootAssetRef<'static>,
-            Option<(DependencyCacheKey, Arc<DependencyCacheValue>)>,
-        >::new();
+        if let Some(cache) = &self.cache {
+            let mut stack = Vec::<(LoaderDependency, Option<DependencyCacheKey>)>::new();
 
-        stack.push((path.clone(), None));
+            // XXX TODO: Document that `IndexMap` is for consistent ordering.
+            let mut pending_loads = IndexMap::<
+                RootAssetRef<'static>,
+                Option<(DependencyCacheKey, Arc<DependencyCacheValue>)>,
+            >::new();
 
-        while let Some((path, tentative_dependency_key)) = stack.pop() {
-            // Early out if we already have a graph node for this path.
-            if self
-                .graph
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .contains(&path)
-            {
-                continue;
-            };
+            let mut pending_files =
+                IndexMap::<RootAssetPath<'static>, Option<DependencyCacheKey>>::new();
 
-            // XXX TODO: Settings parameter?
-            let current_dependency_key = action_source.dependency_key(&path, None).await;
+            // XXX TODO: Check that we're correct to assume `LoaderDependency::Load`.
+            stack.push((LoaderDependency::Load(path.clone()), None));
 
-            // The tentative dependency key came from the dependency cache. Check
-            // if it matches the current file state. If not then invalidate the
-            // node.
-            if tentative_dependency_key.is_some_and(|e| e != current_dependency_key) {
-                pending.insert(path.clone(), None);
-                continue;
-            }
-
-            if let Some(cache) = &self.cache
-                && let Some(dependency_value) = cache.get(&current_dependency_key, &path).await
-            {
-                for (dependee_path, dependee_key) in dependency_value.loader_dependees() {
-                    if !pending.contains_key(dependee_path) {
-                        stack.push((dependee_path.clone(), Some(*dependee_key)));
-                    }
+            while let Some((path, tentative_dependency_key)) = stack.pop() {
+                // Early out if we've already hit this path.
+                if match &path {
+                    LoaderDependency::Load(path) => pending_loads.contains_key(path),
+                    LoaderDependency::File(path) => pending_files.contains_key(path),
+                } {
+                    continue;
                 }
 
-                assert!(!pending.contains_key(&path));
-                pending.insert(
-                    path.clone(),
-                    Some((current_dependency_key, dependency_value)),
-                );
-            } else {
-                assert!(!pending.contains_key(&path));
-                pending.insert(path.clone(), None);
-            }
-        }
-
-        if !pending.is_empty() {
-            let mut graph = self.graph.lock().unwrap_or_else(PoisonError::into_inner);
-
-            for (path, potential) in pending.iter().rev() {
-                match potential {
-                    Some((dependency_key, dependency_value)) => {
-                        graph.set(path, *dependency_key, dependency_value);
-                    }
-                    None => {
-                        graph.invalidate(path);
-                    }
+                // Early out if we already have a graph node for this path.
+                if self
+                    .graph
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .contains(&path)
+                {
+                    continue;
                 };
+
+                // XXX TODO: Settings parameter?
+                let current_dependency_key =
+                    action_source.dependency_key_internal(&path, None).await;
+
+                // The tentative dependency key came from the dependency cache. Check
+                // if it matches the current file state. If not then invalidate the
+                // node.
+                if tentative_dependency_key.is_some_and(|e| e != current_dependency_key) {
+                    match path {
+                        LoaderDependency::Load(path) => {
+                            pending_loads.insert(path.clone(), None);
+                        }
+                        LoaderDependency::File(path) => {
+                            pending_files.insert(path.clone(), None);
+                        }
+                    }
+
+                    continue;
+                }
+
+                match path {
+                    LoaderDependency::Load(path) => {
+                        // XXX TODO: Keep?
+                        assert!(!pending_loads.contains_key(&path));
+
+                        if let Some(dependency_value) =
+                            cache.get(&current_dependency_key, &path).await
+                        {
+                            for CacheLoaderDependency(dependee_path, dependee_key) in
+                                dependency_value.loader_dependees()
+                            {
+                                stack.push((dependee_path.clone(), Some(*dependee_key)));
+                            }
+
+                            pending_loads.insert(
+                                path.clone(),
+                                Some((current_dependency_key, dependency_value)),
+                            );
+                        } else {
+                            pending_loads.insert(path.clone(), None);
+                        }
+                    }
+                    LoaderDependency::File(path) => {
+                        // XX TODO: Keep?
+                        assert!(!pending_files.contains_key(&path));
+
+                        pending_files.insert(path.clone(), Some(current_dependency_key));
+                    }
+                }
+            }
+
+            if !pending_loads.is_empty() || !pending_files.is_empty() {
+                let mut graph = self.graph.lock().unwrap_or_else(PoisonError::into_inner);
+
+                // XXX TODO: Document reverse order reasoning.
+                for (path, potential) in pending_files.into_iter().rev() {
+                    match potential {
+                        Some(dependency_key) => {
+                            graph.set_file(path, dependency_key);
+                        }
+                        None => {
+                            graph.invalidate(&LoaderDependency::File(path));
+                        }
+                    };
+                }
+
+                // XXX TODO: Document reverse order reasoning.
+                for (path, potential) in pending_loads.into_iter().rev() {
+                    match potential {
+                        Some((dependency_key, dependency_value)) => {
+                            graph.set_load(path, dependency_key, &dependency_value);
+                        }
+                        None => {
+                            graph.invalidate(&LoaderDependency::Load(path));
+                        }
+                    };
+                }
             }
         }
 
+        // XXX TODO: Check that we're correct to assume `LoaderDependency::Load`.
+        // XXX TODO: Avoid clone?
         self.graph
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .get(path)
+            .get(&LoaderDependency::Load(path.clone()))
     }
 
-    pub(crate) fn register_dependencies(
+    pub(crate) fn register_dependencies_load(
         &self,
         path: &RootAssetRef<'static>,
         dependency_key: DependencyCacheKey,
@@ -322,7 +434,7 @@ impl DependencyGraph {
             .graph
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .set(path, dependency_key, &dependency_value);
+            .set_load(path.clone(), dependency_key, &dependency_value);
 
         if let Some(cache) = &self.cache {
             cache.put(dependency_key, Arc::new(dependency_value), path);
@@ -331,12 +443,15 @@ impl DependencyGraph {
         action_key
     }
 
-    #[expect(unused, reason = "XXX TODO")]
-    pub(crate) fn invalidate(&self, path: &RootAssetRef<'static>) {
+    pub(crate) fn register_dependencies_file(
+        &self,
+        path: &RootAssetPath<'static>,
+        dependency_key: DependencyCacheKey,
+    ) -> Option<ActionCacheKey> {
         self.graph
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .invalidate(path);
+            .set_file(path.clone(), dependency_key)
     }
 }
 

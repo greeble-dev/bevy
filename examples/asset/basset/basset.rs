@@ -24,7 +24,7 @@ use bevy::{
     time::common_conditions::on_timer,
 };
 use bevy_asset::{
-    basset::publisher::{published_asset_source, read_pack_file, PublishInput},
+    basset::publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
     io::{AssetSourceId, Writer},
     saver::SavedAsset,
     AssetPath, AsyncWriteExt,
@@ -957,7 +957,7 @@ fn main() {
 
     app.add_plugins((
         DefaultPlugins.set(asset_plugin).set(LogPlugin {
-            filter: bevy::log::DEFAULT_FILTER.to_string() + "bevy_asset::basset=info",
+            filter: bevy::log::DEFAULT_FILTER.to_string() + "bevy_asset::basset=debug",
             ..Default::default()
         }),
         BassetPlugin,
@@ -997,6 +997,7 @@ fn main() {
                     .iter()
                     .map(|(_, path)| path.clone())
                     .chain(asset_paths.scenes.iter().map(|(path, _)| path.clone()))
+                    .map(|path| PublishDependency::Load(RootAssetRef::without_label(path)))
                     .collect(),
             };
 
