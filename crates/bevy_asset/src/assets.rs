@@ -5,7 +5,7 @@ use crate::{
 };
 use alloc::sync::Arc;
 use bevy_ecs::{
-    change_detection::DetectChanges,
+    change_detection::{DetectChanges, DetectChangesMut},
     component::Component,
     entity::Entity,
     lifecycle::HookContext,
@@ -15,7 +15,11 @@ use bevy_ecs::{
     world::{DeferredWorld, Mut, Ref, World},
 };
 use bevy_reflect::TypePath;
-use core::{any::TypeId, marker::PhantomData, ops::Deref};
+use core::{
+    any::TypeId,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 use derive_more::{Deref, DerefMut};
 use thiserror::Error;
 
@@ -215,7 +219,6 @@ impl<'s, A: Asset> AssetsMut<'_, 's, A> {
 /// This mirrors the [`Mut`] type (providing mutable access to the asset component, as well as
 /// change detection info), but hides the [`AssetData`] wrapper (the component actually storing the
 /// asset data).
-#[derive(Deref, DerefMut)]
 pub struct AssetMut<'w, A: Asset>(pub(crate) Mut<'w, AssetData<A>>);
 
 impl<'w, A: Asset> AssetMut<'w, A> {
@@ -223,6 +226,74 @@ impl<'w, A: Asset> AssetMut<'w, A> {
     /// as "changed".
     pub fn into_inner(self) -> &'w mut A {
         self.0.into_inner()
+    }
+}
+
+impl<'w, A: Asset> Deref for AssetMut<'w, A> {
+    type Target = A;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
+    }
+}
+
+impl<'w, A: Asset> DerefMut for AssetMut<'w, A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0.deref_mut().0
+    }
+}
+
+impl<'w, A: Asset> DetectChanges for AssetMut<'w, A> {
+    fn is_added(&self) -> bool {
+        self.0.is_added()
+    }
+
+    fn is_added_after(&self, other: bevy_ecs::change_detection::Tick) -> bool {
+        self.0.is_added_after(other)
+    }
+
+    fn is_changed(&self) -> bool {
+        self.0.is_changed()
+    }
+
+    fn is_changed_after(&self, other: bevy_ecs::change_detection::Tick) -> bool {
+        self.0.is_changed_after(other)
+    }
+
+    fn last_changed(&self) -> bevy_ecs::change_detection::Tick {
+        self.0.last_changed()
+    }
+
+    fn added(&self) -> bevy_ecs::change_detection::Tick {
+        self.0.added()
+    }
+
+    fn changed_by(&self) -> bevy_ecs::change_detection::MaybeLocation {
+        self.0.changed_by()
+    }
+}
+
+impl<'w, A: Asset> DetectChangesMut for AssetMut<'w, A> {
+    type Inner = A;
+
+    fn set_changed(&mut self) {
+        self.0.set_changed();
+    }
+
+    fn set_added(&mut self) {
+        self.0.set_added();
+    }
+
+    fn set_last_changed(&mut self, last_changed: bevy_ecs::change_detection::Tick) {
+        self.0.set_last_changed(last_changed);
+    }
+
+    fn set_last_added(&mut self, last_added: bevy_ecs::change_detection::Tick) {
+        self.0.set_last_added(last_added);
+    }
+
+    fn bypass_change_detection(&mut self) -> &mut Self::Inner {
+        &mut self.0.bypass_change_detection().0
     }
 }
 
