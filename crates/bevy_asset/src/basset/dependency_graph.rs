@@ -230,37 +230,37 @@ impl Debug for InternalGraph {
 
             // Skip spammy embedded assets. XXX TODO: Rethink at some point.
             if let LoaderDependency::Load(path) = root_node_path
-                && path.to_string().starts_with("embedded://")
+                && path.to_string().contains("embedded://")
             {
                 continue;
             }
 
             stack.push((root_node_id, 0));
+        }
 
-            while let Some((node_id, depth)) = stack.pop() {
-                for _ in 0..(depth + 1) {
-                    f.write_str("    ")?;
-                }
+        while let Some((node_id, depth)) = stack.pop() {
+            for _ in 0..(depth + 1) {
+                f.write_str("    ")?;
+            }
 
-                f.write_str("+-- ")?;
+            f.write_str("+-- ")?;
 
-                if let InternalGraphNode::Valid(action_key, dependency_key) = self.graph[node_id] {
-                    Display::fmt(&action_key, f)?;
-                    f.write_char('/')?;
-                    Display::fmt(&dependency_key, f)?;
-                    f.write_char(' ')?;
-                } else {
-                    f.write_str("unknown/unknown ")?;
-                }
+            if let InternalGraphNode::Valid(action_key, dependency_key) = self.graph[node_id] {
+                Display::fmt(&action_key, f)?;
+                f.write_char('/')?;
+                Display::fmt(&dependency_key, f)?;
+                f.write_char(' ')?;
+            } else {
+                f.write_str("unknown/unknown ")?;
+            }
 
-                Debug::fmt(node_to_path[&node_id], f)?;
+            Debug::fmt(node_to_path[&node_id], f)?;
 
-                // XXX TODO: Platform specific newline?
-                f.write_char('\n')?;
+            // XXX TODO: Platform specific newline?
+            f.write_char('\n')?;
 
-                for child in self.graph.neighbors_directed(node_id, Direction::Outgoing) {
-                    stack.push((child, depth + 1));
-                }
+            for child in self.graph.neighbors_directed(node_id, Direction::Outgoing) {
+                stack.push((child, depth + 1));
             }
         }
 

@@ -5,7 +5,7 @@ use crate::{
     io::AssetSources,
     AsyncWriteExt, LoaderDependency,
 };
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, string::ToString, sync::Arc, vec::Vec};
 // XXX TODO: Try and replace `async_fs` with `AssetSource`.
 use async_fs::File;
 use bevy_ecs::error::BevyError;
@@ -78,13 +78,8 @@ struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
 // XXX TODO: Where should this go?
 pub(crate) fn should_log(path: &RootAssetRef<'static>) -> bool {
     // Skip embedded sources for now as they're too spammy.
-    if let Some(path) = path.path()
-        && path.source().as_str() == Some("embedded")
-    {
-        false
-    } else {
-        true
-    }
+    // XXX TODO: Need more robust way of ignoring these.
+    !path.to_string().contains("embedded://")
 }
 
 fn log(name: &'static str, path: &RootAssetRef<'static>, key: BassetHash, string: &'static str) {

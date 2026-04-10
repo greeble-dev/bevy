@@ -37,6 +37,7 @@ use core::{
     result::Result,
 };
 use downcast_rs::{impl_downcast, Downcast};
+use futures_lite::FutureExt;
 use serde::{Deserialize, Serialize};
 use std::{
     format,
@@ -283,39 +284,15 @@ impl<'a> ApplyContext<'a> {
             loader_dependencies: Default::default(),
         }
     }
+
+    // XXX TODO: Don't expose this. Might only be used by `LoadPath`, so we should
+    // probably move some of that logic into ApplyContext.
+    pub(crate) fn asset_server(&'a self) -> &'a AssetServer {
+        self.asset_server
+    }
 }
 
 impl ApplyContext<'_> {
-    pub async fn erased_load_dependee_path(
-        &mut self,
-        path: &AssetPath<'static>,
-        settings: &Option<Box<ron::value::RawValue>>,
-    ) -> Result<ErasedLoadedAsset, BevyError> {
-        // XXX TODO: Avoid clone?
-
-        let (asset, _) = load_path(
-            self.asset_server,
-            &RootAssetPath::without_label(path.clone()),
-            settings,
-        )
-        .await?;
-
-        // XXX TODO: Remainder duplicates `erased_load_dependee`. Refactor?
-
-        // XXX TODO: Decide what to do here. The hash only appears to be used
-        // for asset processing, so maybe can ignore for now.
-        let hash = [0u8; 32];
-
-        self.loader_dependencies.insert(
-            LoaderDependency::Load(RootAssetPath::without_label(path.clone()).into()),
-            (hash, asset.dependency_key),
-        );
-
-        asset
-            .take_labeled(path.label_cow())
-            .map_err(|_| format!("Couldn't find labeled asset \"{path:?}\".").into())
-    }
-
     pub async fn erased_load_dependee(
         &mut self,
         path: &AssetRef<'static>,
@@ -394,6 +371,11 @@ pub trait BassetAction: Send + Sync + 'static {
         context: ApplyContext<'_>,
         params: &Self::Params,
     ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, Self::Error>>;
+
+    /// XXX TODO: Consider name. It implies publishable as well?
+    fn cacheable(&self) -> bool {
+        true
+    }
 }
 
 pub trait ErasedBassetAction: Send + Sync + 'static {
@@ -402,6 +384,8 @@ pub trait ErasedBassetAction: Send + Sync + 'static {
         context: ApplyContext<'a>,
         params: &'a ron::value::RawValue,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
+
+    fn cacheable(&self) -> bool;
 }
 
 impl<T> ErasedBassetAction for T
@@ -418,6 +402,10 @@ where
 
             T::apply(self, context, &params).await.map_err(Into::into)
         })
+    }
+
+    fn cacheable(&self) -> bool {
+        BassetAction::cacheable(self)
     }
 }
 
@@ -611,7 +599,12 @@ impl ActionSource for DevelopmentActionSource {
             // an `AssetRef` but maybe could be specialized for an action.
             let path = RootAssetRef::from(action.clone());
 
-            if let Some(action_cache) = &self.action_cache
+            let action_function = self.action(action.name()).ok_or_else(|| {
+                BevyError::from(format!("Couldn't find action \"{}\")", action.name()))
+            })?;
+
+            if action_function.cacheable()
+                && let Some(action_cache) = &self.action_cache
                 && let Some(dependency_graph) = &self.dependency_graph
             {
                 // XXX TODO: Maybe early out here if there's no saver? Depends if we end
@@ -619,8 +612,6 @@ impl ActionSource for DevelopmentActionSource {
                 // want to read from the cache.
 
                 let action_key = dependency_graph.action_key(&path, self).await;
-
-                std::dbg!(&path, &action_key);
 
                 if let Some(action_key) = action_key
                     && let Some(cached_standalone_asset) =
@@ -639,11 +630,7 @@ impl ActionSource for DevelopmentActionSource {
 
             let apply_context = ApplyContext::new(asset_server, Some(dependency_key));
 
-            let asset = self
-                .action(action.name())
-                .ok_or_else(|| {
-                    BevyError::from(format!("Couldn't find action \"{}\")", action.name()))
-                })?
+            let asset = action_function
                 .apply(apply_context, action.params())
                 .await?;
 
@@ -677,7 +664,9 @@ impl ActionSource for DevelopmentActionSource {
             };
 
             if let Some(action_key) = action_key {
-                if let Some(action_cache) = &self.action_cache {
+                if action_function.cacheable()
+                    && let Some(action_cache) = &self.action_cache
+                {
                     if let Some((saver, settings)) = self.saver(asset.asset_type_name()) {
                         // XXX TODO: Verify loader matches saver? Need a way to get
                         // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
@@ -1303,6 +1292,10 @@ impl ActionSource for PublishedActionSource {
 }
 
 pub mod action {
+    use core::panic::AssertUnwindSafe;
+
+    use crate::{AssetLoadError, AssetLoaderError};
+
     use super::*;
     use alloc::string::String;
 
@@ -1328,7 +1321,7 @@ pub mod action {
 
         async fn apply(
             &self,
-            mut context: ApplyContext<'_>,
+            context: ApplyContext<'_>,
             params: &Self::Params,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             // XXX TODO: Try to avoid clones? But will mean changing lifetimes
@@ -1339,33 +1332,105 @@ pub mod action {
             // not here. How do we make this more robust?
             assert!(path.label().is_none());
 
-            let settings = params.loader_settings.clone();
+            let asset_server = context.asset_server();
 
-            // XXX TODO: What if `loader_settings` is not set? That could lead to duplicate
-            // assets, since this action has a different handle compared to loading the
-            // path directly. Same issue if the settings are left at default.
+            let (mut meta, loader, mut reader) = asset_server
+                .get_meta_loader_and_reader(&path, None)
+                .await
+                .map_err(Into::<BevyError>::into)?;
 
-            // XXX TODO: Need to think through dependencies - I don't think this is
-            // right.
-            //
-            // First, inside `erased_load_dependee_path` there's a call to `load_path`,
-            // which will call `load_with_settings_loader_and_reader`, which will register
-            // the file in the dependency tree _without_ settings. Should it even do this?
-            //
-            // Second, `erased_load_dependee_path` then registers the file (again without settings)
-            // as a loader dependency in `ApplyContext`, but we don't call `ApplyContext::finish`,
-            // so it's never used. This means the file the action is loading is not actually
-            // registered as a loader dependency of this action. That seems wrong - it means
-            // this action has no dependencies in the loader dependency graph.
-            //
-            // Suspect that we need to distinguish between bytes-only dependencies and
-            // those that go through a loader. So technically the path we're loading
-            // here is a bytes-only dependency, and any dependencies it has when actually
-            // loaded become this action's loader dependencies.
-            context.erased_load_dependee_path(&path, &settings).await
+            if let Some(settings) = &params.loader_settings {
+                meta = loader.meta_from_settings(settings.get_ron().as_bytes())?;
+            }
 
-            // XXX TODO: Note that we're not calling `context.finish()`. Probably
-            // correct but double check.
+            let settings = meta
+                .loader_settings()
+                .expect("XXX TODO: We should only support load metas");
+
+            let file_dependency_path = RootAssetPath::without_label(path.clone());
+
+            // XXX TODO: Avoid clone?
+            let file_dependency = LoaderDependency::File(file_dependency_path.clone());
+
+            let file_dependency_key = if let Some(future) = asset_server
+                .basset_action_source()
+                .dependency_key(&file_dependency, None)
+            {
+                future.await
+            } else {
+                None
+            };
+
+            if let Some(future) = asset_server
+                .basset_action_source()
+                .register_bytes_dependency(&file_dependency_path, file_dependency_key)
+            {
+                future.await;
+            };
+
+            // XXX TODO: This is mostly a copy and paste of `load_with_settings_loader_and_reader`,
+            // minus dependency registration. Investigate refactoring.
+
+            // XXX TODO: Not loading dependencies can be wrong? Should be context
+            // dependent - if we're a loader dependency of another action then we
+            // shouldn't be loading dependencies. But if we're a regular load
+            // then we should?
+            let load_dependencies = true;
+
+            let populate_hashes = false;
+
+            let load_context = LoadContext::new(
+                asset_server,
+                path.clone(),
+                load_dependencies,
+                populate_hashes,
+                context.dependency_key,
+            );
+            let load =
+                AssertUnwindSafe(loader.load(&mut reader, settings, load_context)).catch_unwind();
+            #[cfg(feature = "trace")]
+            let load = {
+                use tracing::Instrument;
+
+                let span = tracing::info_span!(
+                    "asset loading",
+                    loader = loader.type_path(),
+                    asset = path.to_string()
+                );
+                load.instrument(span)
+            };
+            let mut asset = load
+                .await
+                .map_err(|_| AssetLoadError::AssetLoaderPanic {
+                    path: path.clone_owned().into(),
+                    loader_name: loader.type_path(),
+                })?
+                .map_err(|e| {
+                    AssetLoadError::AssetLoaderError(AssetLoaderError {
+                        path: path.clone_owned().into(),
+                        loader_name: loader.type_path(),
+                        error: e.into(),
+                    })
+                })
+                .map_err(Into::<BevyError>::into)?;
+
+            // XXX TODO: Decide what to do here. The hash only appears to be used
+            // for asset processing, so maybe can ignore for now.
+            let hash = [0u8; 32];
+
+            asset
+                .loader_dependencies
+                .insert(file_dependency, (hash, file_dependency_key));
+
+            // XXX TODO: Should we be resolving the label here? See also comment
+            // on `LoadPath` - we should probably rely on the `AssetRef` to handle that.
+            asset
+                .take_labeled(path.label_cow())
+                .map_err(|_| format!("Couldn't find labeled asset \"{path:?}\".").into())
+        }
+
+        fn cacheable(&self) -> bool {
+            false
         }
     }
 }

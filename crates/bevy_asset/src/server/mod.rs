@@ -734,6 +734,7 @@ impl AssetServer {
 
         if let Some(meta_transform) = input_handle.as_ref().and_then(|h| h.meta_transform()) {
             (*meta_transform)(&mut *meta);
+            todo!("Decide whether we can drop meta transforms entirely since `load_with_settings` now uses `LoadPath` instead");
         }
 
         let asset_id: Option<ErasedAssetIndex>; // The asset ID of the asset we are trying to load.
@@ -2315,9 +2316,10 @@ pub enum AssetLoadError {
 pub struct AssetLoaderError {
     // XXX TODO: Should this be `AssetRef` or `AssetPath`? Loaders can't load refs.
     // See also `AssetLoadError::AssetLoaderPanic`.
-    path: AssetRef<'static>,
-    loader_name: &'static str,
-    error: Arc<BevyError>,
+    // XXX TODO: Made these `pub(crate)` for use in `LoadPath::apply`. Review?
+    pub(crate) path: AssetRef<'static>,
+    pub(crate) loader_name: &'static str,
+    pub(crate) error: Arc<BevyError>,
 }
 
 impl AssetLoaderError {
