@@ -18,13 +18,7 @@ use crate::{
     meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
     Asset, AssetApp, AssetDependency, AssetPath, AssetServer, LoaderDependency, PolyAssetLoader,
 };
-use alloc::{
-    borrow::ToOwned,
-    boxed::Box,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use atomicow::CowArc;
 use bevy_app::{App, Plugin};
 use bevy_asset::{
@@ -34,18 +28,22 @@ use bevy_asset::{
     AssetRef, ErasedLoadedAsset, LoadContext, LoadedAsset,
 };
 use bevy_ecs::error::BevyError;
-use bevy_platform::collections::{HashMap, HashSet};
-use bevy_reflect::TypePath;
+use bevy_platform::{
+    collections::{HashMap, HashSet},
+    hash::FixedHasher,
+};
+use bevy_reflect::{Reflect, TypePath};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
     any::type_name,
     fmt::{Debug, Display},
+    hash::{BuildHasher, Hash, Hasher},
     ops::Deref,
     result::Result,
 };
 use downcast_rs::{impl_downcast, Downcast};
 use futures_lite::FutureExt;
-use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{
     format,
     path::{Path, PathBuf},
@@ -145,24 +143,26 @@ impl<'a> TryFrom<AssetPath<'a>> for RootAssetPath<'a> {
 }
 
 /// An `AssetRef` without a label.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Reflect)]
+#[reflect(opaque)]
 pub struct RootAssetRef<'a> {
     name: CowArc<'a, str>,
-    params: Box<ron::value::RawValue>,
+    params: ErasedBassetActionParams,
 }
 
 impl<'a> RootAssetRef<'a> {
-    pub fn new<A: BassetAction>(params: &<A as BassetAction>::Params) -> Self {
+    pub fn new<A: BassetAction>(params: <A as BassetAction>::Params) -> Self {
         Self {
+            // XXX TODO Double check this uses `CowArc::Static`.
             name: type_name::<A>().into(),
-            params: ron::value::RawValue::from_rust(params).expect("TODO"),
+            params: ErasedBassetActionParams::new(Arc::new(params)),
         }
     }
 
     pub fn without_label(value: AssetRef<'a>) -> Self {
         Self {
             name: value.name_cow(),
-            params: value.params().to_owned(),
+            params: value.params().clone(),
         }
     }
 
@@ -170,7 +170,7 @@ impl<'a> RootAssetRef<'a> {
         &self.name
     }
 
-    fn params(&self) -> &ron::value::RawValue {
+    fn params(&self) -> &ErasedBassetActionParams {
         &self.params
     }
 
@@ -188,98 +188,7 @@ impl<'a> RootAssetRef<'a> {
 
 impl Display for RootAssetRef<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "(name: {}, params: {})", self.name, self.params)
-    }
-}
-
-impl<'a> Serialize for RootAssetRef<'a> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut s = serializer.serialize_struct("RootAssetRef", 3)?;
-
-        s.serialize_field("name", &self.name.to_string())?;
-        s.serialize_field("params", &self.params)?;
-
-        s.end()
-    }
-}
-
-impl<'a, 'de> Deserialize<'de> for RootAssetRef<'a> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_struct("RootAssetRef", &["name", "params"], RootAssetRefVisitor)
-    }
-}
-
-struct RootAssetRefVisitor;
-
-impl<'de> Visitor<'de> for RootAssetRefVisitor {
-    // XXX TODO: Is static lifetime correct?
-    type Value = RootAssetRef<'static>;
-
-    fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
-        formatter.write_str("struct RootAssetRef")
-    }
-
-    fn visit_seq<V>(self, mut seq: V) -> Result<RootAssetRef<'static>, V::Error>
-    where
-        V: serde::de::SeqAccess<'de>,
-    {
-        let name = seq
-            .next_element::<String>()?
-            .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-        let params = seq
-            .next_element::<Box<ron::value::RawValue>>()?
-            .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-
-        Ok(RootAssetRef {
-            name: name.into(),
-            params,
-        })
-    }
-
-    fn visit_map<V>(self, mut map: V) -> Result<RootAssetRef<'static>, V::Error>
-    where
-        V: serde::de::MapAccess<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(field_identifier, rename_all = "lowercase")]
-        enum Field {
-            Name,
-            Params,
-        }
-
-        let mut name = None;
-        let mut params = None;
-
-        while let Some(key) = map.next_key()? {
-            match key {
-                Field::Name => {
-                    if name.is_some() {
-                        return Err(serde::de::Error::duplicate_field("name"));
-                    }
-                    name = Some(map.next_value::<String>()?);
-                }
-                Field::Params => {
-                    if params.is_some() {
-                        return Err(serde::de::Error::duplicate_field("params"));
-                    }
-                    params = Some(map.next_value::<Box<ron::value::RawValue>>()?);
-                }
-            }
-        }
-
-        let name = name.ok_or_else(|| serde::de::Error::missing_field("name"))?;
-        let params = params.ok_or_else(|| serde::de::Error::missing_field("params"))?;
-
-        Ok(RootAssetRef {
-            name: name.into(),
-            params,
-        })
+        write!(f, "(name: {}, params: {:?})", self.name, self.params)
     }
 }
 
@@ -307,7 +216,7 @@ impl<'a> TryFrom<AssetRef<'a>> for RootAssetRef<'a> {
 
 impl<'a> From<RootAssetPath<'a>> for RootAssetRef<'a> {
     fn from(value: RootAssetPath) -> Self {
-        RootAssetRef::new::<LoadPath>(&LoadPathParams {
+        RootAssetRef::new::<LoadPath>(LoadPathParams {
             path: value.to_string(),
             ..Default::default()
         })
@@ -394,14 +303,76 @@ impl ApplyContext<'_> {
     }
 }
 
-/// XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
-pub trait BassetActionParams: Downcast + Send + Sync + 'static {}
+// XXX TODO: Review `Debug` bound.
+pub trait BassetActionParams: Downcast + Send + Sync + 'static + Debug {
+    fn hash(&self) -> u64;
+    fn eq(&self, other: &dyn BassetActionParams) -> bool;
+}
 
 // XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
 impl_downcast!(BassetActionParams);
 
-// XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
-impl<T: 'static> BassetActionParams for T where T: Send + Sync {}
+impl<T> BassetActionParams for T
+where
+    T: Send + Sync + 'static + Hash + PartialEq + Debug,
+{
+    fn hash(&self) -> u64 {
+        // XXX TODO: Should we include the type name of `T` as well?
+        FixedHasher.hash_one(self)
+    }
+
+    fn eq(&self, other: &dyn BassetActionParams) -> bool {
+        if let Some(downcast) = other.downcast_ref::<T>() {
+            self == downcast
+        } else {
+            false
+        }
+    }
+}
+
+// XXX TODO: Decide if member should be pub?
+#[derive(Clone)]
+pub struct ErasedBassetActionParams(pub Arc<dyn BassetActionParams>);
+
+impl ErasedBassetActionParams {
+    pub fn new(params: Arc<dyn BassetActionParams>) -> Self {
+        Self(params)
+    }
+}
+
+impl Hash for ErasedBassetActionParams {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.0.hash())
+    }
+}
+
+impl PartialEq for ErasedBassetActionParams {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&*other.0)
+    }
+}
+
+impl Eq for ErasedBassetActionParams {}
+
+impl PartialOrd for ErasedBassetActionParams {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        // XXX TODO: Decide if this is good enough or if we need a proper Ord.
+        self.0.hash().partial_cmp(&other.0.hash())
+    }
+}
+
+impl Ord for ErasedBassetActionParams {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        // XXX TODO: Decide if this is good enough or if we need a proper Ord.
+        self.0.hash().cmp(&other.0.hash())
+    }
+}
+
+impl Debug for ErasedBassetActionParams {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// XXX TODO: Document.
 ///
@@ -434,7 +405,9 @@ pub trait ErasedBassetAction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
         context: ApplyContext<'a>,
-        params: &'a ron::value::RawValue,
+        // XXX TODO: Could consider taking `&' dyn BassetActionParams`? More general,
+        // but also more risk if we need something from `ErasedBassetActionParams` like a debug type name.
+        params: &'a ErasedBassetActionParams,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 
     fn cacheable(&self) -> bool;
@@ -447,12 +420,12 @@ where
     fn apply<'a>(
         &'a self,
         context: ApplyContext<'a>,
-        params: &'a ron::value::RawValue,
+        params: &'a ErasedBassetActionParams,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         Box::pin(async move {
-            let params = params.into_rust::<T::Params>().expect("TODO");
+            let params = params.0.downcast_ref::<T::Params>().expect("XXX TODO");
 
-            T::apply(self, context, &params).await.map_err(Into::into)
+            T::apply(self, context, params).await.map_err(Into::into)
         })
     }
 
@@ -1304,7 +1277,7 @@ pub mod action {
     // member non-optional? Not sure if we have any use case outside of `load_with_settings.`
     pub struct LoadPath;
 
-    #[derive(Serialize, Deserialize, Default)]
+    #[derive(Serialize, Deserialize, Default, Hash, PartialEq, Debug)]
     pub struct LoadPathParams {
         // XXX TODO: Should be RootAssetPath? Avoiding for now to simplify lifetimes and defaults.
         pub path: String,
