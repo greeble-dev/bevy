@@ -767,8 +767,11 @@ fn pipeline_error_context(cached_pipeline: &CachedPipeline) -> String {
         shader_defs: &[ShaderDefVal],
     ) -> String {
         let source = match shader.path() {
-            // XXX TODO: Added unwrap as a temporary workaround for this expecting an `AssetPath`.
-            Some(path) => path.path().unwrap().path().to_string_lossy().to_string(),
+            Some(path) => path
+                .temporary_path_workaround()
+                .path()
+                .to_string_lossy()
+                .to_string(),
             None => String::new(),
         };
         let entry = match entry {

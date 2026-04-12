@@ -318,7 +318,7 @@ impl NestedLoader<'_, '_, UnknownTyped, Deferred> {
         let handle = if self.load_context.should_load_dependencies {
             self.load_context
                 .asset_server
-                .load_unknown_type_with_meta_transform(path.clone(), None)
+                .load_unknown_type_with_meta_transform(path.temporary_path_workaround(), None)
         } else {
             self.load_context
                 .asset_server
@@ -348,7 +348,7 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
         asset_type_id: Option<TypeId>,
     ) -> Result<(Arc<dyn ErasedAssetLoader>, ErasedLoadedAsset), LoadDirectError> {
         // XXX TODO: Support `AssetRef`.
-        let path = &path.path().expect("XXX TODO").clone_owned();
+        let path = &path.temporary_path_workaround();
 
         if path.label().is_some() {
             return Err(LoadDirectError::RequestedSubasset(path.clone()));

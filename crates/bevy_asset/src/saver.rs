@@ -624,8 +624,17 @@ pub(crate) mod tests {
                 dependencies: asset
                     .dependencies
                     .iter()
-                    .map(|handle| handle.path().unwrap().path().unwrap().path()) // XXX TODO: Review unwraps.
-                    .map(|path| path.to_str().unwrap().to_string())
+                    .map(|handle| {
+                        // XXX TODO: Review these unwraps and `temporary_path_workaround`.
+                        handle
+                            .path()
+                            .unwrap()
+                            .temporary_path_workaround()
+                            .path()
+                            .to_str()
+                            .unwrap()
+                            .to_string()
+                    })
                     .collect(),
                 embedded_dependencies: vec![],
             };

@@ -1,5 +1,8 @@
 use crate::{
-    basset::action::{LoadPath, LoadPathParams},
+    basset::{
+        action::{LoadPath, LoadPathParams},
+        BassetAction,
+    },
     io::AssetSourceId,
     meta::Settings,
 };
@@ -15,7 +18,7 @@ use core::{
     hash::Hash,
     ops::Deref,
 };
-use serde::{de::Visitor, Deserialize, Serialize};
+use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -595,7 +598,7 @@ impl<'a> AssetPath<'a> {
     pub fn with_settings<S: Settings + Serialize + Default>(
         self,
         settings: impl Fn(&mut S) + Send + Sync + 'static,
-    ) -> AssetAction2<'static> {
+    ) -> AssetRef<'a> {
         let mut settings_value = S::default();
         settings(&mut settings_value);
 
@@ -611,16 +614,11 @@ impl<'a> AssetPath<'a> {
         .expect("XXX TODO");
 
         let params_value = LoadPathParams {
-            path: self.to_string(),
+            path: self.without_label().to_string(),
             loader_settings: Some(settings_ron),
         };
 
-        let params_ron = ron::value::RawValue::from_boxed_ron(
-            ron::ser::to_string(&params_value).expect("XXX TODO").into(),
-        )
-        .expect("XXX TODO");
-
-        AssetAction2::new(core::any::type_name::<LoadPath>().into(), params_ron, None)
+        AssetRef::new::<LoadPath>(&params_value, self.label)
     }
 }
 
@@ -756,70 +754,47 @@ pub(crate) fn normalize_path(path: &Path) -> PathBuf {
     result_path
 }
 
-// XXX TODO: Review. We're trying to avoid doing a custom serialize for the
-// whole of `AssetAction`, since the only member that needs a custom serialize
-// is the label. But is it all a bit too weird?
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub(crate) struct SerializableLabel<'a>(CowArc<'a, str>);
-
-impl<'a> Serialize for SerializableLabel<'a> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.0.deref().serialize(serializer)
-    }
-}
-
-// XXX TODO: Review lifetime changes. `<'static>` was changed to `<'a>`, which
-// allows `AssetRef` to derive Deserialize without lifetime complaints.
-impl<'a, 'de> Deserialize<'de> for SerializableLabel<'a> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(SerializableLabel(String::deserialize(deserializer)?.into()))
-    }
-}
-
-/// XXX TODO: Awkwardly called `AssetAction2` since `AssetAction` is taken.
-/// Need to decide on an alternative name or another way of structuring this.
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub struct AssetAction2<'a> {
+// XXX TODO: Reconsider `pub(crate)` on members. Convenient for `impl From<AssetRef> for RootAssetRef`,
+// but feels like sitting on the fence - should we expose the members or give
+// clients another constructor?
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+pub struct AssetRef<'a> {
     // XXX TODO: Review if these should be Arc/CowArc, similar to AssetPath.
-    name: Box<str>,
+    pub(crate) name: CowArc<'a, str>,
     // XXX TODO: Consider changing this to `Arc<dyn BassetActionParams>`
     // (or CowArc). Pros: better equality (handles defaults, not sure if RON is
     // canonicalized), cheaper to initialize in code, usually smaller.
     // Cons: Complicates serialization (can't serialize through dyn, so need to
     // look up action by name and ask it to serialize).
-    params: Box<ron::value::RawValue>,
+    pub(crate) params: Box<ron::value::RawValue>,
     // XXX TODO: Review if this is justified.
-    label: Option<SerializableLabel<'a>>,
+    pub(crate) label: Option<CowArc<'a, str>>,
 }
 
-impl<'a> AssetAction2<'a> {
-    pub fn new(
-        name: Box<str>,
-        params: Box<ron::value::RawValue>,
+impl<'a> AssetRef<'a> {
+    // XXX TODO: The common case is for label to be none. Should consider refactoring
+    // to make that simpler? Maybe have a separate `from_params`?
+    pub fn new<A: BassetAction>(
+        params: &<A as BassetAction>::Params,
+        // XXX TODO: Reconsider. Decide if we're CowArc'ing.
         label: Option<CowArc<'a, str>>,
-    ) -> Self {
-        Self {
-            name,
-            params,
-            label: label.map(SerializableLabel),
+    ) -> AssetRef<'a> {
+        AssetRef {
+            name: core::any::type_name::<A>().into(),
+            params: ron::value::RawValue::from_rust(params).expect("TODO"),
+            label,
         }
     }
 
-    pub fn into_owned(self) -> AssetAction2<'static> {
-        AssetAction2 {
-            name: self.name.clone(),
+    pub fn into_owned(self) -> AssetRef<'static> {
+        AssetRef {
+            name: self.name.into_owned(),
             params: self.params.clone(),
-            label: self.label.map(|l| SerializableLabel(l.0.into_owned())),
+            label: self.label.map(CowArc::into_owned),
         }
     }
 
-    pub fn clone_owned(&self) -> AssetAction2<'static> {
+    pub fn clone_owned(&self) -> AssetRef<'static> {
         self.clone().into_owned()
     }
 
@@ -827,19 +802,23 @@ impl<'a> AssetAction2<'a> {
         &self.name
     }
 
+    pub fn name_cow(&self) -> CowArc<'a, str> {
+        self.name.clone()
+    }
+
     pub fn params(&self) -> &ron::value::RawValue {
         &self.params
     }
 
     pub fn label(&self) -> Option<&str> {
-        self.label.as_ref().map(|l| l.0.as_ref())
+        self.label.as_ref().map(AsRef::as_ref)
     }
 
     pub fn label_cow(&self) -> Option<CowArc<'a, str>> {
-        self.label.as_ref().map(|l| l.0.clone())
+        self.label.clone()
     }
 
-    pub fn without_label(&self) -> AssetAction2<'a> {
+    pub fn without_label(&self) -> AssetRef<'a> {
         Self {
             name: self.name.clone(),
             params: self.params.clone(),
@@ -852,31 +831,61 @@ impl<'a> AssetAction2<'a> {
     }
 
     pub fn take_label(&mut self) -> Option<CowArc<'a, str>> {
-        self.label.take().map(|s| s.0)
+        self.label.take()
     }
 
-    pub fn with_label(self, label: impl Into<CowArc<'a, str>>) -> AssetAction2<'a> {
+    pub fn with_label(self, label: impl Into<CowArc<'a, str>>) -> AssetRef<'a> {
         Self {
             name: self.name,
             params: self.params,
-            label: Some(SerializableLabel(label.into())),
+            label: Some(label.into()),
+        }
+    }
+
+    pub fn is_unapproved(&self) -> bool {
+        // XXX TODO: Implement properly, which might be awkward? Review if we
+        // need to support. Also consider that approval might move into asset sources.
+        false
+    }
+
+    // XXX TODO: Converts the action back to an `AssetPath` if possible,
+    // panicking if not. This is for temporary backwards compatibility. Need to
+    // work through where it's used and consider alternatives.
+    pub fn temporary_path_workaround(&self) -> AssetPath<'static> {
+        if *self.name == *core::any::type_name::<LoadPath>() {
+            let params =
+                ron::value::RawValue::into_rust::<LoadPathParams>(&self.params).expect("XXX TODO");
+
+            // XXX TODO: Should fail if `params.settings` is set?
+
+            let path = AssetPath::parse(&params.path).clone_owned();
+
+            if let Some(label) = &self.label {
+                path.with_label(label.clone_owned())
+            } else {
+                path
+            }
+        } else {
+            todo!("This is a temporary workaround")
         }
     }
 }
 
-impl Debug for AssetAction2<'_> {
+impl Debug for AssetRef<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         Display::fmt(self, f)
     }
 }
 
-impl Display for AssetAction2<'_> {
+impl Display for AssetRef<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // XXX TODO: Specialize for `LoadPath` case?
+
         if let Some(label) = &self.label {
             write!(
                 f,
                 "(name: {}, label: {:?}, params: {})",
-                self.name, label.0, self.params
+                self.name, label, self.params
             )
         } else {
             write!(f, "(name: {}, params: {})", self.name, self.params)
@@ -884,138 +893,139 @@ impl Display for AssetAction2<'_> {
     }
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Serialize, Deserialize)]
-pub enum AssetRef<'a> {
-    Path(AssetPath<'a>),
-    Action(AssetAction2<'a>),
-}
-
 // XXX TODO: I don't like implementing default, but it keeps us compatible with `AssetPath`.
+// Review to see if there's still room to avoid default. If not, consider a null
+// action or something that reliably gives an error.
 impl Default for AssetRef<'_> {
     fn default() -> Self {
-        AssetRef::Path("".into())
+        "".into()
     }
 }
 
-impl Display for AssetRef<'_> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // XXX TODO: Should the string distinguish paths and actions?
-        match self {
-            Self::Path(path) => Display::fmt(path, f),
-            Self::Action(action) => Display::fmt(action, f),
-        }
+impl<'a> Serialize for AssetRef<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut s = serializer.serialize_struct("AssetRef", 3)?;
+
+        s.serialize_field("name", &self.name.to_string())?;
+        s.serialize_field("params", &self.params)?;
+        s.serialize_field("label", &self.label.as_ref().map(ToString::to_string))?;
+
+        s.end()
     }
 }
 
-impl<'a> AssetRef<'a> {
-    pub fn into_owned(self) -> AssetRef<'static> {
-        match self {
-            Self::Path(path) => path.into_owned().into(),
-            Self::Action(action) => action.into_owned().into(),
+// XXX TODO: Review lifetime changes. `<'static>` was changed to `<'a>`, which
+// allows `AssetRef` to derive Deserialize without lifetime complaints.
+impl<'a, 'de> Deserialize<'de> for AssetRef<'a> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_struct("AssetRef", &["name", "params", "label"], AssetRefVisitor)
+    }
+}
+
+struct AssetRefVisitor;
+
+impl<'de> Visitor<'de> for AssetRefVisitor {
+    // XXX TODO: Is static lifetime correct?
+    type Value = AssetRef<'static>;
+
+    fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+        formatter.write_str("struct AssetRef")
+    }
+
+    fn visit_seq<V>(self, mut seq: V) -> Result<AssetRef<'static>, V::Error>
+    where
+        V: serde::de::SeqAccess<'de>,
+    {
+        let name = seq
+            .next_element::<String>()?
+            .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+        let params = seq
+            .next_element::<Box<ron::value::RawValue>>()?
+            .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+        let label = seq
+            .next_element::<Option<String>>()?
+            .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+
+        Ok(AssetRef {
+            name: name.into(),
+            params,
+            label: label.map(CowArc::from),
+        })
+    }
+
+    fn visit_map<V>(self, mut map: V) -> Result<AssetRef<'static>, V::Error>
+    where
+        V: serde::de::MapAccess<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            Name,
+            Params,
+            Label,
         }
-    }
 
-    pub fn clone_owned(&self) -> AssetRef<'static> {
-        self.clone().into_owned()
-    }
+        let mut name = None;
+        let mut params = None;
+        let mut label = None;
 
-    // XXX TODO: This is a bit of a gotcha for upgrades. Previously, many things
-    // would be given an `AssetPath` and call `path()` to get a `Path`. But those
-    // things are now getting an `AssetRef`, so `path()` returns an `AssetPath`.
-    // Maybe acceptable but should be thought through.
-    pub fn path(&self) -> Option<&AssetPath<'a>> {
-        if let Self::Path(path) = self {
-            Some(path)
-        } else {
-            None
+        while let Some(key) = map.next_key()? {
+            match key {
+                Field::Name => {
+                    if name.is_some() {
+                        return Err(serde::de::Error::duplicate_field("name"));
+                    }
+                    name = Some(map.next_value::<String>()?);
+                }
+                Field::Params => {
+                    if params.is_some() {
+                        return Err(serde::de::Error::duplicate_field("params"));
+                    }
+                    params = Some(map.next_value::<Box<ron::value::RawValue>>()?);
+                }
+                Field::Label => {
+                    if label.is_some() {
+                        return Err(serde::de::Error::duplicate_field("label"));
+                    }
+                    label = Some(map.next_value::<Option<String>>()?);
+                }
+            }
         }
-    }
 
-    pub fn action(&self) -> Option<&AssetAction2<'a>> {
-        if let Self::Action(action) = self {
-            Some(action)
-        } else {
-            None
-        }
-    }
+        let name = name.ok_or_else(|| serde::de::Error::missing_field("name"))?;
+        let params = params.ok_or_else(|| serde::de::Error::missing_field("params"))?;
+        let label = label.flatten();
 
-    pub fn is_path(&self) -> bool {
-        matches!(self, AssetRef::Path(_))
-    }
-
-    pub fn is_action(&self) -> bool {
-        matches!(self, AssetRef::Action(_))
-    }
-
-    pub fn label(&self) -> Option<&str> {
-        match self {
-            Self::Path(path) => path.label(),
-            Self::Action(action) => action.label(),
-        }
-    }
-
-    pub fn label_cow(&self) -> Option<CowArc<'a, str>> {
-        match self {
-            Self::Path(path) => path.label_cow(),
-            Self::Action(action) => action.label_cow(),
-        }
-    }
-
-    pub fn without_label(&self) -> AssetRef<'a> {
-        match self {
-            // XXX TODO: Review lifetime correctness. Suspect the original
-            // `without_label` could be wrong and should return an `AssetRef<'a>`?
-            Self::Path(path) => AssetRef::<'a>::Path(path.without_label()),
-            Self::Action(action) => AssetRef::<'a>::Action(action.without_label()),
-        }
-    }
-
-    pub fn remove_label(&mut self) {
-        match self {
-            Self::Path(path) => path.remove_label(),
-            Self::Action(action) => action.remove_label(),
-        }
-    }
-
-    pub fn take_label(&mut self) -> Option<CowArc<'a, str>> {
-        match self {
-            Self::Path(path) => path.take_label(),
-            Self::Action(action) => action.take_label(),
-        }
-    }
-
-    pub fn with_label(self, label: impl Into<CowArc<'a, str>>) -> AssetRef<'a> {
-        match self {
-            Self::Path(path) => Self::Path(path.with_label(label)),
-            Self::Action(action) => Self::Action(action.with_label(label)),
-        }
-    }
-
-    pub fn is_unapproved(&self) -> bool {
-        match self {
-            Self::Path(path) => path.is_unapproved(),
-            _ => false,
-        }
+        Ok(AssetRef {
+            name: name.into(),
+            params,
+            label: label.map(CowArc::from),
+        })
     }
 }
 
 impl<'a> From<AssetPath<'a>> for AssetRef<'a> {
     fn from(value: AssetPath<'a>) -> Self {
-        Self::Path(value)
+        Self::new::<LoadPath>(
+            &LoadPathParams {
+                path: value.without_label().to_string(),
+                ..Default::default()
+            },
+            value.label,
+        )
     }
 }
 
 // XXX TODO: Review if necessary. Added to help with `AssetServer::load` when passed an `&AssetPath`.
 impl<'a> From<&AssetPath<'a>> for AssetRef<'a> {
     fn from(value: &AssetPath<'a>) -> Self {
-        Self::Path(value.clone())
-    }
-}
-
-// XXX TODO: Review lifetime correctness.
-impl<'a> From<AssetAction2<'a>> for AssetRef<'a> {
-    fn from(value: AssetAction2<'a>) -> AssetRef<'a> {
-        AssetRef::<'a>::Action(value)
+        Self::from(value.clone())
     }
 }
 

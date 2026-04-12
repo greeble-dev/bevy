@@ -1,1 +1,1 @@
-(root: Action((name: "basset::action::AcmeSceneFromGltf", params: (gltf: Path("BoxTextured/BoxTextured.gltf")))))
+(root: (name: "basset::action::AcmeSceneFromGltf", params: (gltf: (name: "bevy_asset::basset::action::LoadPath", params: (path: "BoxTextured/BoxTextured.gltf")))))

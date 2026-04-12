@@ -3,9 +3,8 @@
 use crate::{
     basset::{
         blob::{BlobReader, BlobWriter},
-        load_path,
         standalone::write_standalone_asset,
-        RootAssetAction2, RootAssetPath, RootAssetRef,
+        RootAssetPath, RootAssetRef,
     },
     io::{
         AssetReader, AssetReaderError, AssetSourceBuilder, AssetSourceId, PathStream, Reader,

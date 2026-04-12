@@ -1687,7 +1687,10 @@ impl ProcessorAssetInfos {
                         process_dependencies: vec![],
                     });
                     // XXX TODO: Avoid unwrap.
-                    self.add_dependent(dependency.path().path().unwrap(), asset_path.to_owned());
+                    self.add_dependent(
+                        &dependency.path().temporary_path_workaround(),
+                        asset_path.to_owned(),
+                    );
                 }
 
                 let info = self.get_mut(&asset_path).expect("info should exist");

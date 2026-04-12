@@ -2,14 +2,15 @@
 
 use crate::{
     basset::{
+        action::{LoadPath, LoadPathParams},
         cache::{
             ActionCacheKey, BassetHash, CacheLoaderDependency, ContentCache, DependencyCacheKey,
             DependencyCacheValue, MemoryAndFileCache,
         },
         dependency_graph::DependencyGraph,
         publisher::{
-            write_pack_file, ManifestPath, PublishDependency, PublishInput, ReadablePackFile,
-            StagedAsset, WritablePackFile,
+            write_pack_file, PublishDependency, PublishInput, ReadablePackFile, StagedAsset,
+            WritablePackFile,
         },
         standalone::{read_standalone_asset, write_standalone_asset},
     },
@@ -17,14 +18,20 @@ use crate::{
     meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
     Asset, AssetApp, AssetDependency, AssetPath, AssetServer, LoaderDependency, PolyAssetLoader,
 };
-use alloc::{borrow::ToOwned, boxed::Box, string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    borrow::ToOwned,
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use atomicow::CowArc;
 use bevy_app::{App, Plugin};
 use bevy_asset::{
     io::Reader,
     meta::Settings,
     saver::{AssetSaver, ErasedAssetSaver},
-    AssetAction2, AssetRef, ErasedAssetLoader, ErasedLoadedAsset, LoadContext, LoadedAsset,
+    AssetRef, ErasedLoadedAsset, LoadContext, LoadedAsset,
 };
 use bevy_ecs::error::BevyError;
 use bevy_platform::collections::{HashMap, HashSet};
@@ -38,7 +45,7 @@ use core::{
 };
 use downcast_rs::{impl_downcast, Downcast};
 use futures_lite::FutureExt;
-use serde::{Deserialize, Serialize};
+use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Serialize};
 use std::{
     format,
     path::{Path, PathBuf},
@@ -117,37 +124,44 @@ impl<'a, 'de> Deserialize<'de> for RootAssetPath<'a> {
     }
 }
 
-impl From<RootAssetPath<'_>> for AssetPath<'static> {
+impl<'a> From<RootAssetPath<'a>> for AssetPath<'a> {
     fn from(value: RootAssetPath) -> Self {
-        // XXX TODO: Odd, no way to pass the path as a CowArc?
+        // XXX TODO: Odd, no way to create an `AssetPath` from a CowArc?
         Self::from_path_buf(PathBuf::from(&*value.path.into_owned()))
             .with_source(value.source.clone_owned())
     }
 }
 
-impl TryFrom<AssetPath<'_>> for RootAssetPath<'static> {
+impl<'a> TryFrom<AssetPath<'a>> for RootAssetPath<'a> {
     type Error = (); // XXX TODO?
 
-    fn try_from(value: AssetPath<'_>) -> Result<Self, Self::Error> {
+    fn try_from(value: AssetPath<'a>) -> Result<Self, Self::Error> {
         if value.label().is_some() {
             Err(())
         } else {
-            Ok(Self::without_label(value.clone_owned())) // XXX TODO: Avoid clone?
+            Ok(Self::without_label(value))
         }
     }
 }
 
-/// An `AssetAction2` without a label.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Serialize, Deserialize)]
-pub struct RootAssetAction2 {
-    name: Box<str>,
+/// An `AssetRef` without a label.
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug)]
+pub struct RootAssetRef<'a> {
+    name: CowArc<'a, str>,
     params: Box<ron::value::RawValue>,
 }
 
-impl RootAssetAction2 {
-    pub fn without_label(value: AssetAction2<'_>) -> RootAssetAction2 {
+impl<'a> RootAssetRef<'a> {
+    pub fn new<A: BassetAction>(params: &<A as BassetAction>::Params) -> Self {
         Self {
-            name: value.name().into(),
+            name: type_name::<A>().into(),
+            params: ron::value::RawValue::from_rust(params).expect("TODO"),
+        }
+    }
+
+    pub fn without_label(value: AssetRef<'a>) -> Self {
+        Self {
+            name: value.name_cow(),
             params: value.params().to_owned(),
         }
     }
@@ -159,24 +173,130 @@ impl RootAssetAction2 {
     fn params(&self) -> &ron::value::RawValue {
         &self.params
     }
+
+    pub fn into_owned(self) -> RootAssetRef<'static> {
+        RootAssetRef {
+            name: self.name.into_owned(),
+            params: self.params.clone(),
+        }
+    }
+
+    pub fn clone_owned(&self) -> RootAssetRef<'static> {
+        self.clone().into_owned()
+    }
 }
 
-impl Display for RootAssetAction2 {
+impl Display for RootAssetRef<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "(name: {}, params: {})", self.name, self.params)
     }
 }
 
-impl From<RootAssetAction2> for AssetAction2<'static> {
-    fn from(value: RootAssetAction2) -> Self {
-        Self::new(value.name, value.params, None)
+impl<'a> Serialize for RootAssetRef<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut s = serializer.serialize_struct("RootAssetRef", 3)?;
+
+        s.serialize_field("name", &self.name.to_string())?;
+        s.serialize_field("params", &self.params)?;
+
+        s.end()
     }
 }
 
-impl TryFrom<AssetAction2<'_>> for RootAssetAction2 {
+impl<'a, 'de> Deserialize<'de> for RootAssetRef<'a> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_struct("RootAssetRef", &["name", "params"], RootAssetRefVisitor)
+    }
+}
+
+struct RootAssetRefVisitor;
+
+impl<'de> Visitor<'de> for RootAssetRefVisitor {
+    // XXX TODO: Is static lifetime correct?
+    type Value = RootAssetRef<'static>;
+
+    fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+        formatter.write_str("struct RootAssetRef")
+    }
+
+    fn visit_seq<V>(self, mut seq: V) -> Result<RootAssetRef<'static>, V::Error>
+    where
+        V: serde::de::SeqAccess<'de>,
+    {
+        let name = seq
+            .next_element::<String>()?
+            .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+        let params = seq
+            .next_element::<Box<ron::value::RawValue>>()?
+            .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+
+        Ok(RootAssetRef {
+            name: name.into(),
+            params,
+        })
+    }
+
+    fn visit_map<V>(self, mut map: V) -> Result<RootAssetRef<'static>, V::Error>
+    where
+        V: serde::de::MapAccess<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            Name,
+            Params,
+        }
+
+        let mut name = None;
+        let mut params = None;
+
+        while let Some(key) = map.next_key()? {
+            match key {
+                Field::Name => {
+                    if name.is_some() {
+                        return Err(serde::de::Error::duplicate_field("name"));
+                    }
+                    name = Some(map.next_value::<String>()?);
+                }
+                Field::Params => {
+                    if params.is_some() {
+                        return Err(serde::de::Error::duplicate_field("params"));
+                    }
+                    params = Some(map.next_value::<Box<ron::value::RawValue>>()?);
+                }
+            }
+        }
+
+        let name = name.ok_or_else(|| serde::de::Error::missing_field("name"))?;
+        let params = params.ok_or_else(|| serde::de::Error::missing_field("params"))?;
+
+        Ok(RootAssetRef {
+            name: name.into(),
+            params,
+        })
+    }
+}
+
+impl<'a> From<RootAssetRef<'a>> for AssetRef<'a> {
+    fn from(value: RootAssetRef<'a>) -> Self {
+        Self {
+            name: value.name,
+            params: value.params,
+            label: None,
+        }
+    }
+}
+
+impl<'a> TryFrom<AssetRef<'a>> for RootAssetRef<'a> {
     type Error = (); // XXX TODO?
 
-    fn try_from(value: AssetAction2<'_>) -> Result<Self, Self::Error> {
+    fn try_from(value: AssetRef<'a>) -> Result<Self, Self::Error> {
         if value.label().is_some() {
             Err(())
         } else {
@@ -185,83 +305,12 @@ impl TryFrom<AssetAction2<'_>> for RootAssetAction2 {
     }
 }
 
-/// An `AssetRef` without a label.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Serialize, Deserialize)]
-pub enum RootAssetRef<'a> {
-    Path(RootAssetPath<'a>),
-    Action(RootAssetAction2),
-}
-
-impl<'a> RootAssetRef<'a> {
-    // XXX TODO: Consider a clone_without_label version - would avoid redundantly
-    // cloning the label for the common case of `RootAssetRef::without_label(path.clone())`.
-    pub fn without_label(value: AssetRef<'a>) -> RootAssetRef<'a> {
-        match value {
-            AssetRef::Path(path) => Self::Path(RootAssetPath::without_label(path)),
-            AssetRef::Action(action) => Self::Action(RootAssetAction2::without_label(action)),
-        }
-    }
-
-    pub fn path(&self) -> Option<&RootAssetPath<'a>> {
-        if let Self::Path(path) = self {
-            Some(path)
-        } else {
-            None
-        }
-    }
-
-    pub fn action(&self) -> Option<&RootAssetAction2> {
-        if let Self::Action(action) = self {
-            Some(action)
-        } else {
-            None
-        }
-    }
-}
-
-impl Display for RootAssetRef<'_> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // XXX TODO: Should the string distinguish paths and actions?
-        match self {
-            Self::Path(path) => Display::fmt(path, f),
-            Self::Action(action) => Display::fmt(action, f),
-        }
-    }
-}
-
-impl From<RootAssetRef<'_>> for AssetRef<'static> {
-    fn from(value: RootAssetRef) -> Self {
-        match value {
-            RootAssetRef::Path(path) => Self::Path(path.into()),
-            RootAssetRef::Action(action) => Self::Action(action.into()),
-        }
-    }
-}
-
-impl TryFrom<AssetRef<'_>> for RootAssetRef<'static> {
-    type Error = (); // XXX TODO?
-
-    fn try_from(value: AssetRef<'_>) -> Result<Self, Self::Error> {
-        if value.label().is_some() {
-            Err(())
-        } else {
-            match value {
-                AssetRef::Path(path) => Ok(Self::from(RootAssetPath::try_from(path)?)),
-                AssetRef::Action(action) => Ok(Self::from(RootAssetAction2::try_from(action)?)),
-            }
-        }
-    }
-}
-
-impl From<RootAssetAction2> for RootAssetRef<'static> {
-    fn from(value: RootAssetAction2) -> Self {
-        Self::Action(value)
-    }
-}
-
 impl<'a> From<RootAssetPath<'a>> for RootAssetRef<'a> {
-    fn from(value: RootAssetPath<'a>) -> Self {
-        Self::Path(value)
+    fn from(value: RootAssetPath) -> Self {
+        RootAssetRef::new::<LoadPath>(&LoadPathParams {
+            path: value.to_string(),
+            ..Default::default()
+        })
     }
 }
 
@@ -298,11 +347,14 @@ impl ApplyContext<'_> {
         path: &AssetRef<'static>,
     ) -> Result<ErasedLoadedAsset, BevyError> {
         // XXX TODO: Avoid clone?
-        let asset = load_ref(
-            self.asset_server,
-            &RootAssetRef::without_label(path.clone()),
-        )
-        .await?;
+        let asset = self
+            .asset_server
+            .basset_action_source()
+            .apply(
+                &RootAssetRef::without_label(path.clone()),
+                self.asset_server,
+            )
+            .await?;
 
         // XXX TODO: Decide what to do here. The hash only appears to be used
         // for asset processing, so maybe can ignore for now.
@@ -425,8 +477,7 @@ impl Default for DevelopmentActionSourceSettings {
         // XXX TODO: Review if we should be doing this. Maybe should be added
         // afterwards so it's not exposed to the user. Maybe shouldn't even go
         // in here since it could be special cases?
-        action_type_name_to_action
-            .insert(type_name::<action::LoadPath>(), Box::new(action::LoadPath));
+        action_type_name_to_action.insert(type_name::<LoadPath>(), Box::new(LoadPath));
 
         Self {
             file_cache_path: Default::default(),
@@ -570,15 +621,15 @@ impl DevelopmentActionSource {
         // `LoaderDependency` variants are separate?
 
         match path {
-            LoaderDependency::Load(RootAssetRef::Path(path)) | LoaderDependency::File(path) => {
+            LoaderDependency::Load(action) => {
+                // XXX TODO: Double check this is appropriate for actions.
+                hasher.update(action.to_string().as_bytes());
+            }
+            LoaderDependency::File(path) => {
                 hasher.update(path.to_string().as_bytes());
                 let content_hash = self.content_cache.get(path).await.expect("XXX TODO");
 
                 hasher.update(&content_hash.as_bytes());
-            }
-            LoaderDependency::Load(RootAssetRef::Action(action)) => {
-                // XXX TODO: Double check this is appropriate for actions.
-                hasher.update(action.to_string().as_bytes());
             }
         }
 
@@ -591,14 +642,10 @@ impl DevelopmentActionSource {
 impl ActionSource for DevelopmentActionSource {
     fn apply<'a>(
         &'a self,
-        action: &'a RootAssetAction2,
+        action: &'a RootAssetRef<'static>,
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         Box::pin(async move {
-            // XXX TODO: Avoid converting to a ref? There's a bunch of things that expect
-            // an `AssetRef` but maybe could be specialized for an action.
-            let path = RootAssetRef::from(action.clone());
-
             let action_function = self.action(action.name()).ok_or_else(|| {
                 BevyError::from(format!("Couldn't find action \"{}\")", action.name()))
             })?;
@@ -611,11 +658,11 @@ impl ActionSource for DevelopmentActionSource {
                 // up in a situation where the saver has been compiled out but we still
                 // want to read from the cache.
 
-                let action_key = dependency_graph.action_key(&path, self).await;
+                let action_key = dependency_graph.action_key(action, self).await;
 
                 if let Some(action_key) = action_key
                     && let Some(cached_standalone_asset) =
-                        action_cache.get(&action_key, &path).await
+                        action_cache.get(&action_key, action).await
                 {
                     return read_standalone_asset(&cached_standalone_asset, asset_server).await;
                 }
@@ -625,7 +672,7 @@ impl ActionSource for DevelopmentActionSource {
             // XXX TODO: Could have a fast path here since we know the dependency key
             // is for an action?
             let dependency_key = self
-                .dependency_key_internal(&LoaderDependency::Load(path.clone()), None)
+                .dependency_key_internal(&LoaderDependency::Load(action.clone()), None)
                 .await;
 
             let apply_context = ApplyContext::new(asset_server, Some(dependency_key));
@@ -634,16 +681,6 @@ impl ActionSource for DevelopmentActionSource {
                 .apply(apply_context, action.params())
                 .await?;
 
-            // XXX TODO: Support action outputs with sub-assets. Could be troublesome
-            // as there's two potential cases:
-            //
-            // 1. The asset saver for the root asset expects to be given the sub-assets.
-            // 2. The root asset and sub-assets should be saved by separate savers.
-            assert!(
-                asset.labeled_assets.is_empty(),
-                "XXX TODO. Not supported yet. {action:?}",
-            );
-
             // XXX TODO: Review logging. Bit spammy right now.
             /*
             if let Some(keys) = asset.keys.as_ref()
@@ -651,13 +688,14 @@ impl ActionSource for DevelopmentActionSource {
             {
                 info!(
                     "{:?}: Dependencies = {:?}",
-                    path, keys.immediate_dependee_action_keys,
+                    action, keys.immediate_dependee_action_keys,
                 );
             }
             */
 
             // XXX TODO: Is settings parameter correct?
-            let action_key = if let Some(future) = self.register_dependencies(&path, None, &asset) {
+            let action_key = if let Some(future) = self.register_dependencies(action, None, &asset)
+            {
                 future.await
             } else {
                 None
@@ -668,6 +706,16 @@ impl ActionSource for DevelopmentActionSource {
                     && let Some(action_cache) = &self.action_cache
                 {
                     if let Some((saver, settings)) = self.saver(asset.asset_type_name()) {
+                        // XXX TODO: Support action outputs with sub-assets. Could be troublesome
+                        // as there's two potential cases:
+                        //
+                        // 1. The asset saver for the root asset expects to be given the sub-assets.
+                        // 2. The root asset and sub-assets should be saved by separate savers.
+                        assert!(
+                            asset.labeled_assets.is_empty(),
+                            "XXX TODO. Not supported yet. {action:?}",
+                        );
+
                         // XXX TODO: Verify loader matches saver? Need a way to get
                         // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
                         let loader = asset_server
@@ -678,14 +726,17 @@ impl ActionSource for DevelopmentActionSource {
                         let blob =
                             write_standalone_asset(&asset, &*loader, saver, settings).await?;
 
-                        action_cache.put(action_key, blob.into(), &path);
+                        action_cache.put(action_key, blob.into(), action);
                     } else {
                         let type_name = asset.asset_type_name();
-                        debug!(?type_name, ?path, "Cache ineligible, no saver for type.");
+                        debug!(?type_name, ?action, "Cache ineligible, no saver for type.");
                     }
                 }
             } else {
-                warn!(?path, "Register dependencies did not return an action key.");
+                warn!(
+                    ?action,
+                    "Register dependencies did not return an action key."
+                );
             }
 
             Ok(asset)
@@ -814,66 +865,66 @@ impl ActionSource for DevelopmentActionSource {
                 }
 
                 match &input_asset {
-                    PublishDependency::Load(RootAssetRef::Path(path)) => {
-                        // XXX TODO: Try using dependency key to avoid this load - it's
-                        // only needed for discovering dependencies and getting the meta.
-                        // Can we try and reuse the dependency graph? Implies that
-                        // dependency graph should store the loader name?
+                    // PublishDependency::Load(RootAssetRef::Path(path)) => {
+                    //     // XXX TODO: Try using dependency key to avoid this load - it's
+                    //     // only needed for discovering dependencies and getting the meta.
+                    //     // Can we try and reuse the dependency graph? Implies that
+                    //     // dependency graph should store the loader name?
 
-                        // XXX TODO: Settings parameter?
-                        let (loaded, loader) = load_path(asset_server, path, &None)
-                            .await
-                            .expect("XXX TODO");
+                    //     // XXX TODO: Settings parameter?
+                    //     let (loaded, loader) = load_path(asset_server, path, &None)
+                    //         .await
+                    //         .expect("XXX TODO");
 
-                        // XXX TODO: Duplicated in `RootAssetRef::Action` case?
-                        loaded.visit_dependencies(&mut |dependency| {
-                            if let Some(path) = match dependency {
-                                AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
-                                AssetDependency::Handle(handle) => handle.path().cloned(),
-                                AssetDependency::Path(path) => Some(path.clone()),
-                            } {
-                                // XXX TODO: Oh, this is awkward. We shouldn't assume
-                                // `PublishDependency::Load` here. Does `VisitAssetDependencies`
-                                // need to make a distinction? That will be ugly.
-                                input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
-                            };
-                        });
+                    //     // XXX TODO: Duplicated in `RootAssetRef::Action` case?
+                    //     loaded.visit_dependencies(&mut |dependency| {
+                    //         if let Some(path) = match dependency {
+                    //             AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
+                    //             AssetDependency::Handle(handle) => handle.path().cloned(),
+                    //             AssetDependency::Path(path) => Some(path.clone()),
+                    //         } {
+                    //             // XXX TODO: Oh, this is awkward. We shouldn't assume
+                    //             // `PublishDependency::Load` here. Does `VisitAssetDependencies`
+                    //             // need to make a distinction? That will be ugly.
+                    //             input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
+                    //         };
+                    //     });
 
-                        input_stack.extend(
-                            loaded
-                                .loader_dependencies
-                                .keys()
-                                .cloned()
-                                .map(PublishDependency::from),
-                        );
+                    //     input_stack.extend(
+                    //         loaded
+                    //             .loader_dependencies
+                    //             .keys()
+                    //             .cloned()
+                    //             .map(PublishDependency::from),
+                    //     );
 
-                        let asset_bytes = {
-                            let mut reader = asset_server
-                                .get_source(path.source())
-                                .expect("XXX TODO")
-                                .reader()
-                                .read(path.path())
-                                .await
-                                .expect("XXX TODO");
-                            let mut bytes = Vec::new();
-                            reader.read_to_end(&mut bytes).await.expect("XXX TODO");
-                            bytes.into()
-                        };
+                    //     let asset_bytes = {
+                    //         let mut reader = asset_server
+                    //             .get_source(path.source())
+                    //             .expect("XXX TODO")
+                    //             .reader()
+                    //             .read(path.path())
+                    //             .await
+                    //             .expect("XXX TODO");
+                    //         let mut bytes = Vec::new();
+                    //         reader.read_to_end(&mut bytes).await.expect("XXX TODO");
+                    //         bytes.into()
+                    //     };
 
-                        // XXX TODO: Sort out loader settings? See above where we call `load_path`.
-                        let meta_bytes = loader.default_meta().serialize().into_boxed_slice();
+                    //     // XXX TODO: Sort out loader settings? See above where we call `load_path`.
+                    //     let meta_bytes = loader.default_meta().serialize().into_boxed_slice();
 
-                        // XXX TODO: The action case somewhat duplicates this. Refactor?
+                    //     // XXX TODO: The action case somewhat duplicates this. Refactor?
 
-                        pack.paths.insert(
-                            ManifestPath::from(path),
-                            StagedAsset {
-                                asset_bytes,
-                                meta_bytes,
-                            },
-                        );
-                    }
-                    PublishDependency::Load(RootAssetRef::Action(action)) => {
+                    //     pack.paths.insert(
+                    //         ManifestPath::from(path),
+                    //         StagedAsset {
+                    //             asset_bytes,
+                    //             meta_bytes,
+                    //         },
+                    //     );
+                    // }
+                    PublishDependency::Load(action) => {
                         // XXX TODO: Can this handle actions that can't be saved?
 
                         // XXX TODO: Can this read directly out of the action cache? We're
@@ -983,6 +1034,8 @@ impl PolyAssetLoader for BassetLoader {
             load_context.path()
         );
 
+        let asset_server = load_context.asset_server();
+
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
 
@@ -990,7 +1043,9 @@ impl PolyAssetLoader for BassetLoader {
 
         let root_without_label = RootAssetRef::without_label(basset.root.clone());
 
-        let asset = load_ref(load_context.asset_server(), &root_without_label)
+        let asset = asset_server
+            .basset_action_source()
+            .apply(&root_without_label, asset_server)
             .await
             .map(|mut asset| {
                 // XXX TODO: See other cases of ignoring the hash.
@@ -1016,62 +1071,6 @@ impl PolyAssetLoader for BassetLoader {
     }
 }
 
-async fn load_ref(
-    asset_server: &AssetServer,
-    path: &RootAssetRef<'static>,
-) -> Result<ErasedLoadedAsset, BevyError> {
-    match path {
-        RootAssetRef::Path(path) => load_path(asset_server, path, &None).await.map(|(l, _)| l), // XXX TODO: Settings?
-        RootAssetRef::Action(action) => {
-            asset_server
-                .basset_action_source()
-                .apply(action, asset_server)
-                .await
-        }
-    }
-}
-
-// XXX TODO: Review how we're returning the loader. Only used by publishing.
-pub(crate) async fn load_path(
-    asset_server: &AssetServer,
-    path: &RootAssetPath<'static>,
-    settings: &Option<Box<ron::value::RawValue>>,
-) -> Result<(ErasedLoadedAsset, Arc<dyn ErasedAssetLoader>), BevyError> {
-    // XXX TODO: Try to avoid?
-    let full_path = AssetPath::from(path.clone());
-
-    let (mut meta, loader, mut reader) = asset_server
-        .get_meta_loader_and_reader(&full_path, None)
-        .await
-        .map_err(Into::<BevyError>::into)?;
-
-    if let Some(settings) = settings {
-        meta = loader.meta_from_settings(settings.get_ron().as_bytes())?;
-    }
-
-    // Roughly the same as LoadContext::load_direct_internal.
-
-    let load_dependencies = false;
-    let populate_hashes = false;
-    let update_dependency_cache = true;
-
-    let asset = asset_server
-        .load_with_settings_loader_and_reader(
-            // XXX TODO: Avoid clone?
-            &AssetPath::from(path.clone()),
-            meta.loader_settings().expect("meta is set to Load"),
-            &*loader,
-            &mut reader,
-            load_dependencies,
-            populate_hashes,
-            update_dependency_cache,
-        )
-        .await
-        .map_err(Into::<BevyError>::into)?;
-
-    Ok((asset, loader.clone()))
-}
-
 // XXX TODO: Review name? Does have some similarities to `AssetSource` but not
 // that much. `ActionHandler`?
 //
@@ -1079,7 +1078,8 @@ pub(crate) async fn load_path(
 pub trait ActionSource: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
-        action: &'a RootAssetAction2,
+        // XXX TODO: Consider `RootAssetRef<'a>`?
+        action: &'a RootAssetRef<'static>,
         // XXX TODO: Review and see if we can use something narrower than the
         // entire asset server.
         asset_server: &'a AssetServer,
@@ -1100,6 +1100,7 @@ pub trait ActionSource: Send + Sync + 'static {
     // redundantly created a boxed future it's a noop.
     fn register_dependencies<'a>(
         &'a self,
+        // XXX TODO: Consider `RootAssetRef<'a>`?
         _path: &'a RootAssetRef<'static>,
         _settings: Option<&'a dyn Settings>,
         _asset: &'a ErasedLoadedAsset,
@@ -1119,6 +1120,7 @@ pub trait ActionSource: Send + Sync + 'static {
     // XXX TODO: Review name. Compare to `LoaderDependency::File`.
     fn register_bytes_dependency<'a>(
         &'a self,
+        // XXX TODO: Consider `RootAssetRef<'a>`?
         _path: &'a RootAssetPath<'static>,
         _dependency_key: Option<DependencyCacheKey>,
     ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
@@ -1148,28 +1150,27 @@ pub trait ActionSourceBuilder: Send + Sync + 'static {
 
 // XXX TODO: Review use cases.
 async fn fallback_action_handler(
-    action: &RootAssetAction2,
+    action: &RootAssetRef<'static>,
     asset_server: &AssetServer,
     action_source: &dyn ActionSource,
 ) -> Result<ErasedLoadedAsset, BevyError> {
-    if &*action.name == type_name::<action::LoadPath>() {
+    if &*action.name == type_name::<LoadPath>() {
         // XXX TODO: Is there ever a situation where the dependency key will be found
         // here? `fallback_action_handler` is currently only used by minimal and
         // published action sources, which don't support dependency keys.
         // XXX TODO: Avoid clone?
         // XXX TODO: Could have a fast path here since we know the dependency
         // key is for an action?
-        let dependency_key = if let Some(future) = action_source.dependency_key(
-            &LoaderDependency::Load(RootAssetRef::from(action.clone())),
-            None,
-        ) {
+        let dependency_key = if let Some(future) =
+            action_source.dependency_key(&LoaderDependency::Load(action.clone()), None)
+        {
             future.await
         } else {
             None
         };
 
         ErasedBassetAction::apply(
-            &action::LoadPath,
+            &LoadPath,
             ApplyContext::new(asset_server, dependency_key),
             &action.params,
         )
@@ -1197,7 +1198,7 @@ pub(crate) struct MinimalActionSource;
 impl ActionSource for MinimalActionSource {
     fn apply<'a>(
         &'a self,
-        action: &'a RootAssetAction2,
+        action: &'a RootAssetRef<'static>,
         // XXX TODO: Review and see if we can use something narrower than the
         // entire asset server.
         asset_server: &'a AssetServer,
@@ -1231,7 +1232,7 @@ struct PublishedActionSource {
 impl ActionSource for PublishedActionSource {
     fn apply<'a>(
         &'a self,
-        action: &'a RootAssetAction2,
+        action: &'a RootAssetRef<'static>,
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         Box::pin(async move {
@@ -1328,7 +1329,7 @@ pub mod action {
             // of `BassetAction::apply`.
             let path = AssetPath::parse(&params.path).into_owned();
 
-            // XXX TODO: Selecting a subasset should be done by the `AssetAction2::label`,
+            // XXX TODO: Selecting a subasset should be done by the `RootAssetRef::label`,
             // not here. How do we make this more robust?
             assert!(path.label().is_none());
 

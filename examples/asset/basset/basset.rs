@@ -6,8 +6,8 @@
 use argh::FromArgs;
 use bevy::{
     asset::{
-        basset::*, io::Reader, saver::AssetSaver, AssetAction2, AssetLoader, AssetRef,
-        ErasedLoadedAsset, LoadContext,
+        basset::*, io::Reader, saver::AssetSaver, AssetLoader, AssetRef, ErasedLoadedAsset,
+        LoadContext,
     },
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     ecs::error::BevyError,
@@ -194,13 +194,14 @@ mod action {
             for entity in &mut scene.entities {
                 if let Some(mesh) = entity.mesh.take() {
                     entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
-                        asset: AssetRef::Action(make_action::<MeshletFromMesh>(
+                        asset: AssetRef::new::<MeshletFromMesh>(
                             &MeshletFromMeshParams {
                                 mesh: mesh.asset,
                                 vertex_position_quantization_factor: params
                                     .vertex_position_quantization_factor,
                             },
-                        )),
+                            None,
+                        ),
                     });
                 }
             }
@@ -786,14 +787,6 @@ fn dump(mut done: Local<bool>, args: Res<Args>, asset_server: Res<AssetServer>) 
     }
 }
 
-fn make_action<A: BassetAction>(params: &<A as BassetAction>::Params) -> AssetAction2<'static> {
-    AssetAction2::new(
-        core::any::type_name::<A>().into(),
-        ron::value::RawValue::from_rust(params).expect("TODO"),
-        None,
-    )
-}
-
 #[derive(PartialEq)]
 enum ArgMode {
     Development,
@@ -838,37 +831,58 @@ struct Args {
     mode: ArgMode,
 }
 
+#[expect(unused, reason = "XXX TODO")]
+fn test_serialization() {
+    {
+        use ron::{de, ser};
+
+        let a = dbg!(ser::to_string(&AssetRef::from(AssetPath::parse("asdf.txt"))).expect("TODO"));
+
+        dbg!(de::from_str::<AssetRef>(&a).expect("TODO"));
+
+        let b = dbg!(
+            ser::to_string(&AssetRef::new::<bevy_asset::basset::action::LoadPath>(
+                &bevy_asset::basset::action::LoadPathParams {
+                    path: "asdf.txt".into(),
+                    ..Default::default()
+                },
+                Some("subasset".into()),
+            ))
+            .expect("TODO")
+        );
+
+        dbg!(de::from_str::<AssetRef>(&b).expect("TODO"));
+    }
+
+    {
+        use serde_json::{de, ser};
+
+        let a = dbg!(ser::to_string(&AssetRef::from(AssetPath::parse("asdf.txt"))).expect("TODO"));
+
+        dbg!(de::from_str::<AssetRef>(&a).expect("TODO"));
+
+        let b = dbg!(
+            ser::to_string(&AssetRef::new::<bevy_asset::basset::action::LoadPath>(
+                &bevy_asset::basset::action::LoadPathParams {
+                    path: "asdf.txt".into(),
+                    ..Default::default()
+                },
+                Some("subasset".into()),
+            ))
+            .expect("TODO")
+        );
+
+        dbg!(de::from_str::<AssetRef>(&b).expect("TODO"));
+    }
+}
+
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
     let args: Args = argh::from_env();
     #[cfg(target_arch = "wasm32")]
     let args = Args::from_args(&[], &[]).unwrap();
 
-    /*
-    dbg!(ron::ser::to_string(&AssetRef::Path("asdf.txt".into())).expect("TODO"));
-    dbg!(
-        ron::ser::to_string(&AssetRef::Action(make_action::<action::LoadPath>(
-            &action::LoadPathParams {
-                path: "asdf.txt".into(),
-                ..Default::default()
-            }
-        )))
-        .expect("TODO")
-    );
-    dbg!(ron::de::from_str::<AssetRef>("Path(\"asdf.txt\")").expect("TODO"));
-    dbg!(ron::de::from_str::<AssetRef>("Action((name: \"foo\", params: ()))").expect("TODO"));
-
-    dbg!(serde_json::ser::to_string(&AssetRef::Path("asdf.txt".into())).expect("TODO"));
-    dbg!(
-        serde_json::ser::to_string(&AssetRef::Action(make_action::<action::LoadPath>(
-            &action::LoadPathParams {
-                path: "asdf.txt".into(),
-                ..Default::default()
-            }
-        )))
-        .expect("TODO")
-    );
-    */
+    //test_serialization();
 
     let asset_paths = AssetPaths {
         regular: vec![

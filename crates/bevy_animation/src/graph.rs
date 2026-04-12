@@ -819,7 +819,7 @@ impl TryFrom<AnimationGraph> for SerializedAnimationGraph {
                     AnimationNodeType::Clip(ref clip) => match clip.path() {
                         Some(path) => {
                             // XXX TODO: Review. Added `path().unwrap()`.
-                            SerializedAnimationNodeType::Clip(path.path().unwrap().clone())
+                            SerializedAnimationNodeType::Clip(path.temporary_path_workaround())
                         }
                         None => return Err(NonPathHandleError),
                     },
