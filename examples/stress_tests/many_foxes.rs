@@ -11,9 +11,9 @@ use bevy::{
     pbr::CacheSkin,
     post_process::motion_blur::MotionBlur,
     prelude::*,
-    scene::SceneInstanceReady,
     window::{PresentMode, WindowResolution},
     winit::WinitSettings,
+    world_serialization::WorldInstanceReady,
 };
 
 #[derive(FromArgs, Resource)]
@@ -189,7 +189,7 @@ fn setup(
             commands.entity(ring_parent).with_children(|builder| {
                 builder
                     .spawn((
-                        SceneRoot(fox_handle.clone()),
+                        WorldAssetRoot(fox_handle.clone()),
                         Transform::from_xyz(x, 0.0, z)
                             .with_scale(Vec3::splat(0.01))
                             .with_rotation(base_rotation * Quat::from_rotation_y(-fox_angle)),
@@ -259,7 +259,7 @@ fn setup(
 
 // Once the scene is loaded, start the animation
 fn setup_scene_once_loaded(
-    scene_ready: On<SceneInstanceReady>,
+    scene_ready: On<WorldInstanceReady>,
     animations: Res<Animations>,
     foxes: Res<Foxes>,
     mut commands: Commands,
