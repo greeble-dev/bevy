@@ -558,9 +558,7 @@ pub struct MeshUniform {
     /// If this mesh doesn't use skin caching, or the mesh is newly-visible this
     /// frame, this is `u32::MAX`.
     pub prev_cached_skin_offset: u32,
-    /// Padding.
     pub pad_a: u32,
-    /// Padding.
     pub pad_b: u32,
 }
 
@@ -642,9 +640,7 @@ pub struct MeshInputUniform {
     /// If this mesh doesn't use skin caching, or the mesh is newly-visible this
     /// frame, this is `u32::MAX`.
     pub prev_cached_skin_offset: u32,
-    /// Padding.
     pub pad_a: u32,
-    /// Padding.
     pub pad_b: u32,
 }
 
@@ -3828,9 +3824,9 @@ pub enum MeshMorphTargetBindGroups {
 /// morph target storage bind group set.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MeshMorphTargetStorageKey {
-    /// The vertex slab ID.
+    /// The ID of the vertex slab in the mesh allocator.
     pub vertex_slab_id: MeshSlabId,
-    /// The morph target slab ID.
+    /// The ID of the morph targets in the mesh allocator.
     pub morph_target_slab_id: MeshSlabId,
 }
 

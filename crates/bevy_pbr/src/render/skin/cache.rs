@@ -841,11 +841,10 @@ pub fn prepare_skin_cache_bind_groups(
 
 /// Data needed to construct a bind group for the skin caching shader.
 struct SkinCachingBindGroupInfo<'a> {
-    /// The render device.
     render_device: &'a RenderDevice,
     /// The IDs of the vertex buffer slab and morph target slab (if applicable).
     bind_group_key: CachedSkinBindGroupKey,
-    /// The layout for the bind group.
+    /// The layout for the bind group for the skin caching compute shader.
     bind_group_layout: &'a BindGroupLayout,
     /// The buffer containing the skin tasks.
     skin_tasks_buffer: &'a Buffer,
