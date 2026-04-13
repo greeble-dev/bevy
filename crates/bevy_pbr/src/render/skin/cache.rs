@@ -885,7 +885,10 @@ impl<'a> SkinCachingBindGroupInfo<'a> {
             )),
             self.bind_group_layout,
             &BindGroupEntries::sequential((
-                // NB: Make sure these are tightly bound!
+                // NB: We must specify the size instead of using
+                // `as_entire_binding`, since we use `arrayLength()` in the
+                // shader.
+                //
                 // @group(0) @binding(0) var<storage> skin_tasks:
                 // array<SkinTask>;
                 BufferBinding {
@@ -898,6 +901,9 @@ impl<'a> SkinCachingBindGroupInfo<'a> {
                         .unwrap(),
                     ),
                 },
+                // As above, we use `arrayLength()` here, so we must specify the
+                // size.
+                //
                 // @group(0) @binding(1) var<storage, read_write>
                 // cached_skinned_vertices: array<CachedSkinnedVertex>;
                 BufferBinding {
