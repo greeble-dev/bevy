@@ -36,8 +36,11 @@ use bevy_asset::{
     saver::SavedAsset,
     AssetPath, AsyncWriteExt,
 };
-use bevy_reflect::TypeRegistry;
-use core::{marker::PhantomData, result::Result};
+use bevy_reflect::{
+    serde::{TypedReflectDeserializer, TypedReflectSerializer},
+    TypeRegistry, TypeRegistryArc,
+};
+use core::{marker::PhantomData, ops::Deref, result::Result};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
@@ -109,6 +112,7 @@ mod action {
     pub struct AcmeSceneFromGltf;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
+    #[reflect(BassetActionParams)]
     pub struct AcmeSceneFromGltfParams {
         gltf: AssetRef<'static>,
         // XXX TODO: Would be nice to support selecting a scene. but that's
@@ -338,17 +342,30 @@ mod demo {
     }
 }
 
-#[derive(Default, TypePath)]
+#[derive(TypePath)]
 struct RonAssetLoader<Data>
 where
-    Data: Asset + for<'a> Deserialize<'a>,
+    Data: Asset + Reflect,
 {
+    registry: TypeRegistryArc,
     marker: PhantomData<Data>,
+}
+
+impl<Data> RonAssetLoader<Data>
+where
+    Data: Asset + Reflect,
+{
+    fn new(registry: TypeRegistryArc) -> Self {
+        Self {
+            registry,
+            marker: Default::default(),
+        }
+    }
 }
 
 impl<Data> AssetLoader for RonAssetLoader<Data>
 where
-    Data: Asset + for<'a> Deserialize<'a>,
+    Data: Asset + Reflect,
 {
     type Asset = Data;
     type Settings = ();
@@ -364,7 +381,14 @@ where
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
 
-        Ok(ron::de::from_bytes(&bytes).expect("XXX TODO"))
+        let registry = self.registry.read();
+        let registration = registry.get(TypeId::of::<Data>()).expect("XXX TODO");
+
+        Ok(TypedReflectDeserializer::new(registration, &registry)
+            .deserialize(&mut ron::de::Deserializer::from_bytes(&bytes).expect("XXX TODO"))
+            .expect("XXX TODO")
+            .try_take::<Data>()
+            .expect("XXX TODO"))
     }
 
     fn extensions(&self) -> &[&str] {
@@ -372,17 +396,30 @@ where
     }
 }
 
-#[derive(Default, TypePath)]
+#[derive(TypePath)]
 struct RonAssetSaver<Data>
 where
-    Data: Asset + Serialize + for<'a> Deserialize<'a>,
+    Data: Asset + Reflect,
 {
     marker: PhantomData<Data>,
+    registry: TypeRegistryArc,
+}
+
+impl<Data> RonAssetSaver<Data>
+where
+    Data: Asset + Reflect,
+{
+    fn new(registry: TypeRegistryArc) -> Self {
+        Self {
+            registry,
+            marker: Default::default(),
+        }
+    }
 }
 
 impl<Data> AssetSaver for RonAssetSaver<Data>
 where
-    Data: Asset + Serialize + for<'a> Deserialize<'a>,
+    Data: Asset + Reflect,
 {
     type Asset = Data;
     type Settings = ();
@@ -396,9 +433,16 @@ where
         _settings: &Self::Settings,
         _asset_path: AssetPath<'_>,
     ) -> Result<(), Self::Error> {
-        // XXX TODO: Check if we can use `ron::de::to_writer_pretty`.
-        let string = ron::ser::to_string_pretty(&*asset, ron::ser::PrettyConfig::default())
-            .expect("XXX TODO");
+        let string = {
+            let registry = self.registry.read();
+
+            // XXX TODO: Check if we can use `ron::de::to_writer_pretty`.
+            ron::ser::to_string_pretty(
+                &TypedReflectSerializer::new(&*asset, &registry),
+                ron::ser::PrettyConfig::default(),
+            )
+            .expect("XXX TODO")
+        };
 
         writer.write_all(string.as_bytes()).await?;
 
@@ -411,25 +455,25 @@ mod acme {
     use bevy::pbr::experimental::meshlet::MeshletMesh3d;
     use bevy_asset::VisitAssetDependencies;
 
-    #[derive(Debug, VisitAssetDependencies)]
+    #[derive(Debug, VisitAssetDependencies, Reflect)]
     pub struct AcmeMesh {
         #[dependency]
         pub asset: AssetRef<'static>,
     }
 
-    #[derive(Debug, VisitAssetDependencies)]
+    #[derive(Debug, VisitAssetDependencies, Reflect)]
     pub struct AcmeMeshletMesh {
         #[dependency]
         pub asset: AssetRef<'static>,
     }
 
-    #[derive(Debug, VisitAssetDependencies)]
+    #[derive(Debug, VisitAssetDependencies, Reflect)]
     pub struct AcmeMaterial {
         #[dependency]
         pub base_color_texture: Option<AssetRef<'static>>,
     }
 
-    #[derive(Default, Debug, VisitAssetDependencies)]
+    #[derive(Default, Debug, VisitAssetDependencies, Reflect)]
     pub struct AcmeEntity {
         pub transform: Transform,
 
@@ -443,7 +487,7 @@ mod acme {
         pub material: Option<AcmeMaterial>,
     }
 
-    #[derive(Asset, TypePath, Default, Debug)]
+    #[derive(Asset, Default, Debug, Reflect)]
     pub struct AcmeScene {
         #[dependency]
         pub entities: Vec<AcmeEntity>,
@@ -615,9 +659,7 @@ mod acme {
         }
     }
 
-    #[expect(unused, reason = "XXX TODO")]
     pub type AcmeSceneAssetLoader = RonAssetLoader<AcmeScene>;
-    #[expect(unused, reason = "XXX TODO")]
     pub type AcmeSceneAssetSaver = RonAssetSaver<AcmeScene>;
 }
 
@@ -944,6 +986,13 @@ fn main() {
 
     let mut app = App::new();
 
+    let registry = app
+        .world()
+        .get_resource::<AppTypeRegistry>()
+        .expect("XXX TODO")
+        .deref()
+        .clone();
+
     let pack_file_path = PathBuf::from("target/basset/published.pack");
 
     let asset_plugin = if args.mode == ArgMode::Published {
@@ -976,8 +1025,8 @@ fn main() {
                     .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
-                    .with_saver(MeshletMeshSaver), // XXX TODO post-reflection
-                                                   //.with_saver(acme::AcmeSceneAssetSaver::default()),
+                    .with_saver(MeshletMeshSaver)
+                    .with_saver(acme::AcmeSceneAssetSaver::new(registry.clone())),
             ))),
             ..Default::default()
         }
@@ -1000,8 +1049,7 @@ fn main() {
     .init_asset::<acme::AcmeScene>()
     .register_asset_loader(demo::StringAssetLoader)
     .register_asset_loader(demo::IntAssetLoader)
-    // XXX TODO post-reflection
-    //.register_asset_loader(acme::AcmeSceneAssetLoader::default())
+    .register_asset_loader(acme::AcmeSceneAssetLoader::new(registry))
     .insert_resource(asset_paths.clone());
 
     match args.mode {

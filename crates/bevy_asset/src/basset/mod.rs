@@ -27,7 +27,7 @@ use bevy_asset::{
     saver::{AssetSaver, ErasedAssetSaver},
     AssetRef, ErasedLoadedAsset, LoadContext, LoadedAsset,
 };
-use bevy_ecs::error::BevyError;
+use bevy_ecs::{error::BevyError, reflect::AppTypeRegistry};
 use bevy_platform::{
     collections::{HashMap, HashSet},
     hash::FixedHasher,
@@ -37,6 +37,7 @@ use bevy_reflect::{
     serde::{
         DeserializeWithRegistry, ReflectDeserializeWithRegistry, ReflectDeserializer,
         ReflectSerializeWithRegistry, ReflectSerializer, SerializeWithRegistry,
+        TypedReflectDeserializer,
     },
     Reflect, ReflectDeserialize, ReflectFromReflect, ReflectSerialize, TypePath, TypeRegistry,
     TypeRegistryArc,
@@ -52,7 +53,7 @@ use core::{
 use downcast_rs::{impl_downcast, Downcast};
 use futures_lite::FutureExt;
 use serde::{
-    de::{MapAccess, SeqAccess, Visitor},
+    de::{DeserializeSeed, MapAccess, SeqAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
@@ -74,7 +75,13 @@ pub struct BassetPlugin;
 
 impl Plugin for BassetPlugin {
     fn build(&self, app: &mut App) {
-        app.register_poly_asset_loader(BassetLoader);
+        app.register_poly_asset_loader(BassetLoader(
+            app.world()
+                .get_resource::<AppTypeRegistry>()
+                .expect("XXX TODO")
+                .deref()
+                .clone(),
+        ));
     }
 }
 
@@ -1157,16 +1164,17 @@ impl ActionSource for DevelopmentActionSource {
     }
 }
 
-#[derive(Debug, Clone)]
-#[expect(unused, reason = "XXX TODO")]
+#[derive(Debug, Clone, Reflect)]
 struct BassetFileSerializable {
     // XXX TODO: Consider renaming, could get confused with "root asset" versus "sub-asset".
     root: AssetRef<'static>,
     // TODO: Versioning?
 }
 
+// XXX TODO: Could be avoided if `LoadContext` or `AssetServer` exposed the
+// type registry. Is that a step too far?
 #[derive(TypePath)]
-struct BassetLoader;
+struct BassetLoader(TypeRegistryArc);
 
 impl PolyAssetLoader for BassetLoader {
     type Settings = ();
@@ -1184,37 +1192,48 @@ impl PolyAssetLoader for BassetLoader {
             load_context.path()
         );
 
-        let _asset_server = load_context.asset_server();
+        let asset_server = load_context.asset_server();
 
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
 
-        todo!();
-        // let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
+        let basset = {
+            let registry = self.0.read();
 
-        // let root_without_label = RootAssetRef::without_label(basset.root.clone());
+            let registration = registry
+                .get(TypeId::of::<BassetFileSerializable>())
+                .expect("XXX TODO");
 
-        // let asset = asset_server
-        //     .basset_action_source()
-        //     .apply(&root_without_label, asset_server)
-        //     .await
-        //     .map(|mut asset| {
-        //         // XXX TODO: See other cases of ignoring the hash.
-        //         let hash = [0u8; 32];
+            TypedReflectDeserializer::new(registration, &registry)
+                .deserialize(&mut ron::de::Deserializer::from_bytes(&bytes).expect("XXX TODO"))
+                .expect("XXX TODO")
+                .try_take::<BassetFileSerializable>()
+                .expect("XXX TODO")
+        };
 
-        //         // XXX TODO: Justify this dependency replacement.
-        //         asset.loader_dependencies.clear();
-        //         asset.loader_dependencies.insert(
-        //             LoaderDependency::Load(RootAssetRef::without_label(basset.root.clone())),
-        //             (hash, asset.dependency_key),
-        //         );
+        let root_without_label = RootAssetRef::without_label(basset.root.clone());
 
-        //         asset
-        //     })?;
+        let asset = asset_server
+            .basset_action_source()
+            .apply(&root_without_label, asset_server)
+            .await
+            .map(|mut asset| {
+                // XXX TODO: See other cases of ignoring the hash.
+                let hash = [0u8; 32];
 
-        // asset
-        //     .take_labeled(basset.root.label_cow())
-        //     .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", &basset.root).into())
+                // XXX TODO: Justify this dependency replacement.
+                asset.loader_dependencies.clear();
+                asset.loader_dependencies.insert(
+                    LoaderDependency::Load(RootAssetRef::without_label(basset.root.clone())),
+                    (hash, asset.dependency_key),
+                );
+
+                asset
+            })?;
+
+        asset
+            .take_labeled(basset.root.label_cow())
+            .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", &basset.root).into())
     }
 
     fn extensions(&self) -> &[&str] {
@@ -1475,6 +1494,7 @@ pub mod action {
         // be a `Box<dyn Settings>`, but serializing that will be a challenge.
         // Making `Settings` be `Reflect` is one option, but that's a fairly disruptive
         // change.
+        #[reflect(default)]
         pub loader_settings: Option<String>,
         // XXX TODO: Consider this? Might be useful to explicitly choose a loader
         // rather than relying on extension/type. But have to be careful around

@@ -990,14 +990,14 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
 
                             let params_concrete = params_registration
                                 .data::<ReflectFromReflect>()
-                                .unwrap()
+                                .expect("XXX TODO?")
                                 .from_reflect(&*params_dyn)
-                                .unwrap();
+                                .expect("XXX TODO? This has happened due to missing members, but not sure how we can print a meaningful error?");
 
                             params = Some(
                                 params_registration
                                     .data::<ReflectBassetActionParams>()
-                                    .expect("XXX TODO?")
+                                    .expect("XXX TODO: Missing \"#[reflect(BassetActionParams)]\"")
                                     .get_boxed(params_concrete)
                                     .expect("XXX TODO?"),
                             );
