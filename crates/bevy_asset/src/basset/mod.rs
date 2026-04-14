@@ -35,7 +35,7 @@ use bevy_platform::{
 use bevy_reflect::{Reflect, TypePath};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
-    any::type_name,
+    any::{type_name, TypeId},
     fmt::{Debug, Display},
     hash::{BuildHasher, Hash, Hasher},
     ops::Deref,
@@ -145,67 +145,47 @@ impl<'a> TryFrom<AssetPath<'a>> for RootAssetPath<'a> {
 /// An `AssetRef` without a label.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Reflect)]
 #[reflect(opaque)]
-pub struct RootAssetRef<'a> {
-    name: CowArc<'a, str>,
+pub struct RootAssetRef {
     params: ErasedBassetActionParams,
 }
 
-impl<'a> RootAssetRef<'a> {
-    pub fn new<A: BassetAction>(params: <A as BassetAction>::Params) -> Self {
+impl RootAssetRef {
+    pub fn new<P: BassetActionParams>(params: P) -> Self {
         Self {
-            // XXX TODO Double check this uses `CowArc::Static`.
-            name: type_name::<A>().into(),
             params: ErasedBassetActionParams::new(Arc::new(params)),
         }
     }
 
-    pub fn without_label(value: AssetRef<'a>) -> Self {
+    pub fn without_label(value: AssetRef<'_>) -> Self {
         Self {
-            name: value.name_cow(),
             params: value.params().clone(),
         }
-    }
-
-    fn name(&self) -> &str {
-        &self.name
     }
 
     fn params(&self) -> &ErasedBassetActionParams {
         &self.params
     }
-
-    pub fn into_owned(self) -> RootAssetRef<'static> {
-        RootAssetRef {
-            name: self.name.into_owned(),
-            params: self.params.clone(),
-        }
-    }
-
-    pub fn clone_owned(&self) -> RootAssetRef<'static> {
-        self.clone().into_owned()
-    }
 }
 
-impl Display for RootAssetRef<'_> {
+impl Display for RootAssetRef {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "(name: {}, params: {:?})", self.name, self.params)
+        write!(f, "{:?}", self.params)
     }
 }
 
-impl<'a> From<RootAssetRef<'a>> for AssetRef<'a> {
-    fn from(value: RootAssetRef<'a>) -> Self {
+impl From<RootAssetRef> for AssetRef<'_> {
+    fn from(value: RootAssetRef) -> Self {
         Self {
-            name: value.name,
             params: value.params,
             label: None,
         }
     }
 }
 
-impl<'a> TryFrom<AssetRef<'a>> for RootAssetRef<'a> {
+impl TryFrom<AssetRef<'_>> for RootAssetRef {
     type Error = (); // XXX TODO?
 
-    fn try_from(value: AssetRef<'a>) -> Result<Self, Self::Error> {
+    fn try_from(value: AssetRef<'_>) -> Result<Self, Self::Error> {
         if value.label().is_some() {
             Err(())
         } else {
@@ -214,9 +194,9 @@ impl<'a> TryFrom<AssetRef<'a>> for RootAssetRef<'a> {
     }
 }
 
-impl<'a> From<RootAssetPath<'a>> for RootAssetRef<'a> {
+impl From<RootAssetPath<'_>> for RootAssetRef {
     fn from(value: RootAssetPath) -> Self {
-        RootAssetRef::new::<LoadPath>(LoadPathParams {
+        RootAssetRef::new(LoadPathParams {
             path: value.to_string(),
             ..Default::default()
         })
@@ -307,6 +287,7 @@ impl ApplyContext<'_> {
 pub trait BassetActionParams: Downcast + Send + Sync + 'static + Debug {
     fn hash(&self) -> u64;
     fn eq(&self, other: &dyn BassetActionParams) -> bool;
+    fn type_name(&self) -> &'static str;
 }
 
 // XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
@@ -328,6 +309,10 @@ where
             false
         }
     }
+
+    fn type_name(&self) -> &'static str {
+        type_name::<T>()
+    }
 }
 
 // XXX TODO: Decide if member should be pub?
@@ -337,6 +322,14 @@ pub struct ErasedBassetActionParams(pub Arc<dyn BassetActionParams>);
 impl ErasedBassetActionParams {
     pub fn new(params: Arc<dyn BassetActionParams>) -> Self {
         Self(params)
+    }
+
+    pub fn type_id(&self) -> TypeId {
+        self.0.type_id()
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        self.0.type_name()
     }
 }
 
@@ -439,25 +432,30 @@ pub struct DevelopmentActionSourceSettings {
     file_cache_path: Option<PathBuf>,
     validate_dependency_cache: bool,
     validate_action_cache: bool,
-    action_type_name_to_action: HashMap<&'static str, Box<dyn ErasedBassetAction>>,
+    // XXX TODO: Better to use `TypeId` or type name?
+    action_params_type_id_to_action_function: HashMap<TypeId, Box<dyn ErasedBassetAction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
 }
 
 impl Default for DevelopmentActionSourceSettings {
     fn default() -> Self {
-        let mut action_type_name_to_action =
-            HashMap::<&'static str, Box<dyn ErasedBassetAction>>::new();
+        let mut action_params_type_id_to_action_function =
+            HashMap::<TypeId, Box<dyn ErasedBassetAction>>::new();
 
-        // XXX TODO: Review if we should be doing this. Maybe should be added
-        // afterwards so it's not exposed to the user. Maybe shouldn't even go
-        // in here since it could be special cases?
-        action_type_name_to_action.insert(type_name::<LoadPath>(), Box::new(LoadPath));
+        // XXX TODO: Review if we should be automatically adding `LoadPath`
+        // here. Maybe should be added afterwards so it's not exposed to the
+        // user. Maybe shouldn't even go in here since it could be special cased?
+        // It's likely the `LoadPath` will be the most common action, so making
+        // `DevelopmentActionSource::action_function` check for `LoadPath` before
+        // the hash lookup might pay off.
+        action_params_type_id_to_action_function
+            .insert(TypeId::of::<LoadPathParams>(), Box::new(LoadPath));
 
         Self {
             file_cache_path: Default::default(),
             validate_dependency_cache: Default::default(),
             validate_action_cache: Default::default(),
-            action_type_name_to_action,
+            action_params_type_id_to_action_function,
             asset_type_name_to_saver: Default::default(),
         }
     }
@@ -480,8 +478,8 @@ impl DevelopmentActionSourceSettings {
     }
 
     pub fn with_action<T: BassetAction>(mut self, action: T) -> Self {
-        self.action_type_name_to_action
-            .insert(type_name::<T>(), Box::new(action));
+        self.action_params_type_id_to_action_function
+            .insert(TypeId::of::<T::Params>(), Box::new(action));
 
         self
     }
@@ -557,10 +555,14 @@ impl DevelopmentActionSource {
         }
     }
 
-    pub(crate) fn action<'a>(&'a self, type_name: &str) -> Option<&'a dyn ErasedBassetAction> {
+    // XXX TODO: Clarify that this is mapping the `BassetActionParams` type name to action.
+    pub(crate) fn action_function<'a>(
+        &'a self,
+        type_id: TypeId,
+    ) -> Option<&'a dyn ErasedBassetAction> {
         self.settings
-            .action_type_name_to_action
-            .get(type_name)
+            .action_params_type_id_to_action_function
+            .get(&type_id)
             .map(move |a| &**a)
     }
 
@@ -616,13 +618,19 @@ impl DevelopmentActionSource {
 impl ActionSource for DevelopmentActionSource {
     fn apply<'a>(
         &'a self,
-        action: &'a RootAssetRef<'static>,
+        action: &'a RootAssetRef,
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         Box::pin(async move {
-            let action_function = self.action(action.name()).ok_or_else(|| {
-                BevyError::from(format!("Couldn't find action \"{}\")", action.name()))
-            })?;
+            let action_function =
+                self.action_function(action.params().type_id())
+                    .ok_or_else(|| {
+                        // XXX TODO: Clarify error?
+                        BevyError::from(format!(
+                            "Couldn't find action \"{}\")",
+                            action.params().type_name()
+                        ))
+                    })?;
 
             if action_function.cacheable()
                 && let Some(action_cache) = &self.action_cache
@@ -730,7 +738,7 @@ impl ActionSource for DevelopmentActionSource {
     // XXX TODO: Settings?
     fn register_dependencies<'a>(
         &'a self,
-        path: &'a RootAssetRef<'static>,
+        path: &'a RootAssetRef,
         // XXX TODO: Settings?
         _settings: Option<&'a dyn Settings>,
         asset: &'a ErasedLoadedAsset,
@@ -1055,7 +1063,7 @@ pub trait ActionSource: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
         // XXX TODO: Consider `RootAssetRef<'a>`?
-        action: &'a RootAssetRef<'static>,
+        action: &'a RootAssetRef,
         // XXX TODO: Review and see if we can use something narrower than the
         // entire asset server.
         asset_server: &'a AssetServer,
@@ -1077,7 +1085,7 @@ pub trait ActionSource: Send + Sync + 'static {
     fn register_dependencies<'a>(
         &'a self,
         // XXX TODO: Consider `RootAssetRef<'a>`?
-        _path: &'a RootAssetRef<'static>,
+        _path: &'a RootAssetRef,
         _settings: Option<&'a dyn Settings>,
         _asset: &'a ErasedLoadedAsset,
     ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
@@ -1126,11 +1134,12 @@ pub trait ActionSourceBuilder: Send + Sync + 'static {
 
 // XXX TODO: Review use cases.
 async fn fallback_action_handler(
-    action: &RootAssetRef<'static>,
+    action: &RootAssetRef,
     asset_server: &AssetServer,
     action_source: &dyn ActionSource,
 ) -> Result<ErasedLoadedAsset, BevyError> {
-    if &*action.name == type_name::<LoadPath>() {
+    // XXX TODO: Check if there's a better way to handle this.
+    if action.params.type_id() == TypeId::of::<LoadPathParams>() {
         // XXX TODO: Is there ever a situation where the dependency key will be found
         // here? `fallback_action_handler` is currently only used by minimal and
         // published action sources, which don't support dependency keys.
@@ -1174,7 +1183,7 @@ pub(crate) struct MinimalActionSource;
 impl ActionSource for MinimalActionSource {
     fn apply<'a>(
         &'a self,
-        action: &'a RootAssetRef<'static>,
+        action: &'a RootAssetRef,
         // XXX TODO: Review and see if we can use something narrower than the
         // entire asset server.
         asset_server: &'a AssetServer,
@@ -1208,7 +1217,7 @@ struct PublishedActionSource {
 impl ActionSource for PublishedActionSource {
     fn apply<'a>(
         &'a self,
-        action: &'a RootAssetRef<'static>,
+        action: &'a RootAssetRef,
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         Box::pin(async move {

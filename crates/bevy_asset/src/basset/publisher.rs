@@ -34,7 +34,7 @@ use tracing::error;
 // for publishing, but it might be convenient for the user or help debugging?
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum PublishDependency {
-    Load(RootAssetRef<'static>),
+    Load(RootAssetRef),
     File(RootAssetPath<'static>),
 }
 

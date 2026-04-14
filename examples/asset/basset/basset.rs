@@ -192,7 +192,7 @@ mod action {
             for entity in &mut scene.entities {
                 if let Some(mesh) = entity.mesh.take() {
                     entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
-                        asset: AssetRef::new::<MeshletFromMesh>(
+                        asset: AssetRef::new(
                             MeshletFromMeshParams {
                                 mesh: mesh.asset,
                                 vertex_position_quantization_factor: params

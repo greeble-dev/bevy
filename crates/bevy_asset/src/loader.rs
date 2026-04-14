@@ -341,7 +341,7 @@ impl<A: Asset> From<A> for LoadedAsset<A> {
 #[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub enum LoaderDependency {
     /// The loader will load this path or action through a normal load call. XXX TODO: Clarify?
-    Load(RootAssetRef<'static>),
+    Load(RootAssetRef),
     /// The loader will use the bytes of the file at this path. XXX TODO: Reconsider name? Bit vague.
     File(RootAssetPath<'static>),
 }

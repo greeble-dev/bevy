@@ -1,8 +1,5 @@
 use crate::{
-    basset::{
-        action::{LoadPath, LoadPathParams},
-        BassetAction, ErasedBassetActionParams,
-    },
+    basset::{action::LoadPathParams, BassetActionParams, ErasedBassetActionParams},
     io::AssetSourceId,
     meta::Settings,
 };
@@ -618,7 +615,7 @@ impl<'a> AssetPath<'a> {
             loader_settings: Some(settings_ron),
         };
 
-        AssetRef::new::<LoadPath>(params_value, self.label)
+        AssetRef::new(params_value, self.label)
     }
 }
 
@@ -760,7 +757,6 @@ pub(crate) fn normalize_path(path: &Path) -> PathBuf {
 #[derive(Reflect, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
 #[reflect(opaque)]
 pub struct AssetRef<'a> {
-    pub(crate) name: CowArc<'a, str>,
     pub(crate) params: ErasedBassetActionParams,
     pub(crate) label: Option<CowArc<'a, str>>,
 }
@@ -770,13 +766,9 @@ impl<'a> AssetRef<'a> {
     // to make that simpler? Maybe have a separate `from_params`?
     //
     // XXX TODO: If there ever a situation were someone might want to pass in
-    // an `Arc` params directly? But that means we can't check the type?
-    pub fn new<A: BassetAction>(
-        params: <A as BassetAction>::Params,
-        label: Option<CowArc<'a, str>>,
-    ) -> Self {
+    // an `Arc` params directly?
+    pub fn new<P: BassetActionParams>(params: P, label: Option<CowArc<'a, str>>) -> Self {
         AssetRef {
-            name: core::any::type_name::<A>().into(),
             params: ErasedBassetActionParams::new(Arc::new(params)),
             label,
         }
@@ -784,7 +776,6 @@ impl<'a> AssetRef<'a> {
 
     pub fn into_owned(self) -> AssetRef<'static> {
         AssetRef {
-            name: self.name.into_owned(),
             params: self.params.clone(),
             label: self.label.map(CowArc::into_owned),
         }
@@ -792,14 +783,6 @@ impl<'a> AssetRef<'a> {
 
     pub fn clone_owned(&self) -> AssetRef<'static> {
         self.clone().into_owned()
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn name_cow(&self) -> CowArc<'a, str> {
-        self.name.clone()
     }
 
     pub fn params(&self) -> &ErasedBassetActionParams {
@@ -816,7 +799,6 @@ impl<'a> AssetRef<'a> {
 
     pub fn without_label(&self) -> AssetRef<'a> {
         Self {
-            name: self.name.clone(),
             params: self.params.clone(),
             label: None,
         }
@@ -832,7 +814,6 @@ impl<'a> AssetRef<'a> {
 
     pub fn with_label(self, label: impl Into<CowArc<'a, str>>) -> AssetRef<'a> {
         Self {
-            name: self.name,
             params: self.params,
             label: Some(label.into()),
         }
@@ -875,13 +856,9 @@ impl Display for AssetRef<'_> {
         // XXX TODO: Specialize for `LoadPath` case?
 
         if let Some(label) = &self.label {
-            write!(
-                f,
-                "(name: {}, label: {:?}, params: {:?})",
-                self.name, label, self.params
-            )
+            write!(f, "(label: {:?}, params: {:?})", label, self.params)
         } else {
-            write!(f, "(name: {}, params: {:?})", self.name, self.params)
+            write!(f, "{:?}", self.params)
         }
     }
 }
@@ -897,7 +874,7 @@ impl Default for AssetRef<'_> {
 
 impl<'a> From<AssetPath<'a>> for AssetRef<'a> {
     fn from(value: AssetPath<'a>) -> Self {
-        Self::new::<LoadPath>(
+        Self::new(
             LoadPathParams {
                 path: value.without_label().to_string(),
                 ..Default::default()

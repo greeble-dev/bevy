@@ -748,10 +748,7 @@ impl AssetServer {
         // `apply` should handle the label?
         match self
             .basset_action_source()
-            .apply(
-                &RootAssetRef::without_label(path.clone()).into_owned(),
-                self,
-            )
+            .apply(&RootAssetRef::without_label(path.clone()), self)
             .await
         {
             Ok(loaded_asset) => {

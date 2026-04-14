@@ -76,13 +76,13 @@ struct MemoryCache<K: CacheKey, V: MemoryCacheValue> {
 }
 
 // XXX TODO: Where should this go?
-pub(crate) fn should_log(path: &RootAssetRef<'static>) -> bool {
+pub(crate) fn should_log(path: &RootAssetRef) -> bool {
     // Skip embedded sources for now as they're too spammy.
     // XXX TODO: Need more robust way of ignoring these.
     !path.to_string().contains("embedded://")
 }
 
-fn log(name: &'static str, path: &RootAssetRef<'static>, key: BassetHash, string: &'static str) {
+fn log(name: &'static str, path: &RootAssetRef, key: BassetHash, string: &'static str) {
     if should_log(path) {
         debug!(%key, %path, "{name}: {string}");
     }
@@ -98,7 +98,7 @@ impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn get(&self, key: &K, asset_path: &RootAssetRef<'static>) -> Option<V> {
+    fn get(&self, key: &K, asset_path: &RootAssetRef) -> Option<V> {
         if self.validate {
             return None;
         }
@@ -115,7 +115,7 @@ impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    fn put(&mut self, key: K, value: V, asset_path: &RootAssetRef<'static>) {
+    fn put(&mut self, key: K, value: V, asset_path: &RootAssetRef) {
         log(self.name, asset_path, key.as_hash(), "Memory cache put.");
 
         if self.validate
@@ -182,7 +182,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    pub(crate) async fn get(&self, key: &K, asset_path: &RootAssetRef<'static>) -> Option<V> {
+    pub(crate) async fn get(&self, key: &K, asset_path: &RootAssetRef) -> Option<V> {
         if self.validate {
             return None;
         }
@@ -211,7 +211,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    pub(crate) fn put(&self, key: K, value: V, asset_path: &RootAssetRef<'static>) {
+    pub(crate) fn put(&self, key: K, value: V, asset_path: &RootAssetRef) {
         let value_path = self.value_path(&key);
 
         // XXX TODO: Review faff that avoids lifetime issues.
@@ -283,7 +283,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    pub(crate) async fn get(&self, key: &K, asset_path: &RootAssetRef<'static>) -> Option<V> {
+    pub(crate) async fn get(&self, key: &K, asset_path: &RootAssetRef) -> Option<V> {
         if let Some(from_memory) = self
             .memory
             .read()
@@ -308,7 +308,7 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
     }
 
     // XXX TODO: `asset_path` is only for debugging. Maybe make it more opaque?
-    pub(crate) fn put(&self, key: K, value: V, asset_path: &RootAssetRef<'static>) {
+    pub(crate) fn put(&self, key: K, value: V, asset_path: &RootAssetRef) {
         // XXX TODO: Avoid `blob.clone()` if there's no file cache?
         self.memory
             .write()
@@ -415,7 +415,7 @@ pub(crate) struct DependencyCacheValue {
     loader_dependees: Vec<CacheLoaderDependency>,
     // XXX TODO: Reconsider name? These are any `Handle` or `AssetRef` dependencies
     // stored in the asset value.
-    external_dependees: Vec<RootAssetRef<'static>>,
+    external_dependees: Vec<RootAssetRef>,
     // XXX TODO: Consider storing more info for debugging. Loader name for one.
 }
 
@@ -455,7 +455,7 @@ impl CacheLoaderDependency {
 impl DependencyCacheValue {
     pub(crate) fn new(
         loader_dependees: impl Iterator<Item = CacheLoaderDependency>,
-        external_dependees: impl Iterator<Item = RootAssetRef<'static>>,
+        external_dependees: impl Iterator<Item = RootAssetRef>,
     ) -> Self {
         Self {
             loader_dependees: collect_sort_dedup(loader_dependees),
@@ -476,7 +476,7 @@ impl DependencyCacheValue {
     }
 
     #[expect(unused, reason = "XXX TODO")]
-    pub(crate) fn external_dependees<'a>(&'a self) -> &'a [RootAssetRef<'static>] {
+    pub(crate) fn external_dependees<'a>(&'a self) -> &'a [RootAssetRef] {
         &self.external_dependees
     }
 }

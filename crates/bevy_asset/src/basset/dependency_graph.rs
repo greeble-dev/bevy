@@ -40,7 +40,7 @@ impl InternalGraph {
     // XXX TODO: Document and reconsider name. Corresponds to `LoaderDependency::Load`.
     fn set_load(
         &mut self,
-        path: RootAssetRef<'static>,
+        path: RootAssetRef,
         dependency_key: DependencyCacheKey,
         dependency_value: &DependencyCacheValue,
     ) -> Option<ActionCacheKey> {
@@ -296,7 +296,7 @@ impl DependencyGraph {
     // to calculate the action key of actions.
     pub(crate) async fn action_key(
         &self,
-        path: &RootAssetRef<'static>,
+        path: &RootAssetRef,
         // XXX TODO: Should we take shared? Or do we contain content cache and anything else?
         // That would fit in with invalidation on file change - we want to invalidate both
         // the dependency graph and the content cache.
@@ -307,7 +307,7 @@ impl DependencyGraph {
 
             // XXX TODO: Document that `IndexMap` is for consistent ordering.
             let mut pending_loads = IndexMap::<
-                RootAssetRef<'static>,
+                RootAssetRef,
                 Option<(DependencyCacheKey, Arc<DependencyCacheValue>)>,
             >::new();
 
@@ -426,7 +426,7 @@ impl DependencyGraph {
 
     pub(crate) fn register_dependencies_load(
         &self,
-        path: &RootAssetRef<'static>,
+        path: &RootAssetRef,
         dependency_key: DependencyCacheKey,
         dependency_value: DependencyCacheValue,
     ) -> Option<ActionCacheKey> {
