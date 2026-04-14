@@ -430,6 +430,7 @@ impl Plugin for AssetPlugin {
             .init_asset::<LoadedFolder>()
             .init_asset::<LoadedUntypedAsset>()
             .init_asset::<()>()
+            .register_type::<AssetRef<'static>>()
             .add_message::<UntypedAssetLoadFailedEvent>()
             .configure_sets(
                 PreUpdate,

@@ -32,7 +32,7 @@ use bevy_platform::{
     collections::{HashMap, HashSet},
     hash::FixedHasher,
 };
-use bevy_reflect::{Reflect, TypePath};
+use bevy_reflect::{reflect_trait, Reflect, TypePath};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
     any::{type_name, TypeId},
@@ -284,7 +284,10 @@ impl ApplyContext<'_> {
 }
 
 // XXX TODO: Review `Debug` bound.
-pub trait BassetActionParams: Downcast + Send + Sync + 'static + Debug {
+#[reflect_trait]
+pub trait BassetActionParams: Downcast + Send + Sync + 'static + Reflect + Debug {
+    // XXX TODO: `PartialReflect` exposes some utilities for `hash` and `eq`. Can
+    // they replace our implementation? See `PartialReflect::reflect_hash`.
     fn hash(&self) -> u64;
     fn eq(&self, other: &dyn BassetActionParams) -> bool;
     fn type_name(&self) -> &'static str;
@@ -293,9 +296,20 @@ pub trait BassetActionParams: Downcast + Send + Sync + 'static + Debug {
 // XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
 impl_downcast!(BassetActionParams);
 
+// XXX TODO: Document? See bevy_reflect where it does `impl TypePath for dyn Enemy`.
+impl TypePath for dyn BassetActionParams {
+    fn type_path() -> &'static str {
+        "dyn bevy_asset::basset::BassetActionParams"
+    }
+
+    fn short_type_path() -> &'static str {
+        "dyn BassetActionParams"
+    }
+}
+
 impl<T> BassetActionParams for T
 where
-    T: Send + Sync + 'static + Hash + PartialEq + Debug,
+    T: Send + Sync + 'static + Hash + PartialEq + Reflect + Debug,
 {
     fn hash(&self) -> u64 {
         // XXX TODO: Should we include the type name of `T` as well?
@@ -1289,11 +1303,13 @@ pub mod action {
     // member non-optional? Not sure if we have any use case outside of `load_with_settings.`
     pub struct LoadPath;
 
-    #[derive(Default, Hash, PartialEq, Debug)]
+    #[derive(Reflect, Default, Hash, PartialEq, Debug)]
+    #[reflect(BassetActionParams)]
     pub struct LoadPathParams {
         // XXX TODO: Should be RootAssetPath? Avoiding for now to simplify lifetimes and defaults.
         pub path: String,
-        pub loader_settings: Option<Box<ron::value::RawValue>>,
+        // XXX TODO: How to handle this?
+        //pub loader_settings: Option<Box<ron::value::RawValue>>,
         // XXX TODO: Consider this? Might be useful to explicitly choose a loader
         // rather than relying on extension/type. But have to be careful around
         // how dependency/action keys are calculated.
@@ -1324,13 +1340,15 @@ pub mod action {
                 .await
                 .map_err(Into::<BevyError>::into)?;
 
-            if let Some(settings) = &params.loader_settings {
-                meta = loader.meta_from_settings(settings.get_ron().as_bytes())?;
-            }
+            // XXX TODO: `loader_settings` needs to be reflectable.
+            let settings: &dyn Settings = todo!("XXX TODO");
+            // if let Some(settings) = &params.loader_settings {
+            //     meta = loader.meta_from_settings(settings.get_ron().as_bytes())?;
+            // }
 
-            let settings = meta
-                .loader_settings()
-                .expect("XXX TODO: We should only support load metas");
+            // let settings = meta
+            //     .loader_settings()
+            //     .expect("XXX TODO: We should only support load metas");
 
             let file_dependency_path = RootAssetPath::without_label(path.clone());
 

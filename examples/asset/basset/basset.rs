@@ -18,19 +18,27 @@ use bevy::{
         MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR,
     },
     prelude::*,
-    reflect::TypePath,
+    reflect::{
+        serde::{ReflectDeserializer, ReflectSerializer},
+        TypePath,
+    },
     render::render_resource::AsBindGroup,
     tasks::block_on,
     time::common_conditions::on_timer,
 };
+// XXX TODO: Should be in `use bevy` above?
 use bevy_asset::{
-    basset::publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
+    basset::{
+        action::LoadPathParams,
+        publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
+    },
     io::{AssetSourceId, Writer},
     saver::SavedAsset,
     AssetPath, AsyncWriteExt,
 };
+use bevy_reflect::TypeRegistry;
 use core::{marker::PhantomData, result::Result};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 mod action {
@@ -38,7 +46,7 @@ mod action {
 
     pub struct JoinStrings;
 
-    #[derive(Default, Debug, PartialEq, Hash)]
+    #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     pub struct JoinStringsParams {
         separator: String,
         strings: Vec<AssetRef<'static>>,
@@ -70,7 +78,7 @@ mod action {
 
     pub struct UppercaseString;
 
-    #[derive(Default, Debug, PartialEq, Hash)]
+    #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     pub struct UppercaseStringParams {
         string: AssetRef<'static>,
     }
@@ -100,7 +108,7 @@ mod action {
     /// scenes list - it just takes every node.
     pub struct AcmeSceneFromGltf;
 
-    #[derive(Default, Debug, PartialEq, Hash)]
+    #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     pub struct AcmeSceneFromGltfParams {
         gltf: AssetRef<'static>,
         // XXX TODO: Would be nice to support selecting a scene. but that's
@@ -131,7 +139,7 @@ mod action {
 
     pub struct MeshletFromMesh;
 
-    #[derive(Default, Debug, PartialEq, Hash)]
+    #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     pub struct MeshletFromMeshParams {
         mesh: AssetRef<'static>, // XXX TODO: Better if we had a typed asset ref?
         vertex_position_quantization_factor: Option<u8>,
@@ -167,7 +175,7 @@ mod action {
 
     pub struct ConvertAcmeSceneMeshesToMeshlets;
 
-    #[derive(Default, Debug, PartialEq, Hash)]
+    #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     pub struct ConvertAcmeSceneMeshesToMeshletsParams {
         scene: AssetRef<'static>,
         vertex_position_quantization_factor: Option<u8>,
@@ -827,51 +835,44 @@ struct Args {
     mode: ArgMode,
 }
 
-#[expect(unused, reason = "XXX TODO")]
 fn test_serialization() {
-    todo!("XXX TODO");
+    let mut registry = TypeRegistry::default();
+    registry.register::<AssetRef<'static>>();
+    registry.register::<LoadPathParams>();
 
-    // {
-    //     use ron::{de, ser};
+    {
+        use ron::{de, ser};
 
-    //     let a = dbg!(ser::to_string(&AssetRef::from(AssetPath::parse("asdf.txt"))).expect("TODO"));
+        let a = dbg!(ser::to_string(&ReflectSerializer::new(
+            &AssetRef::from(AssetPath::parse("asdf.txt")),
+            &registry
+        ))
+        .expect("TODO"));
 
-    //     dbg!(de::from_str::<AssetRef>(&a).expect("TODO"));
+        dbg!(ReflectDeserializer::new(&registry)
+            .deserialize(&mut de::Deserializer::from_str(&a).expect("XXX TODO"))
+            .expect("XXX TODO")
+            .try_take::<AssetRef>()
+            .expect("XXX TODO"));
 
-    //     let b = dbg!(
-    //         ser::to_string(&AssetRef::new::<bevy_asset::basset::action::LoadPath>(
-    //             bevy_asset::basset::action::LoadPathParams {
-    //                 path: "asdf.txt".into(),
-    //                 ..Default::default()
-    //             },
-    //             Some("subasset".into()),
-    //         ))
-    //         .expect("TODO")
-    //     );
+        let b = dbg!(ser::to_string(&ReflectSerializer::new(
+            &AssetRef::new(
+                LoadPathParams {
+                    path: "asdf.txt".into(),
+                    ..Default::default()
+                },
+                Some("subasset".into()),
+            ),
+            &registry
+        ))
+        .expect("TODO"));
 
-    //     dbg!(de::from_str::<AssetRef>(&b).expect("TODO"));
-    // }
-
-    // {
-    //     use serde_json::{de, ser};
-
-    //     let a = dbg!(ser::to_string(&AssetRef::from(AssetPath::parse("asdf.txt"))).expect("TODO"));
-
-    //     dbg!(de::from_str::<AssetRef>(&a).expect("TODO"));
-
-    //     let b = dbg!(
-    //         ser::to_string(&AssetRef::new::<bevy_asset::basset::action::LoadPath>(
-    //             bevy_asset::basset::action::LoadPathParams {
-    //                 path: "asdf.txt".into(),
-    //                 ..Default::default()
-    //             },
-    //             Some("subasset".into()),
-    //         ))
-    //         .expect("TODO")
-    //     );
-
-    //     dbg!(de::from_str::<AssetRef>(&b).expect("TODO"));
-    // }
+        dbg!(ReflectDeserializer::new(&registry)
+            .deserialize(&mut de::Deserializer::from_str(&b).expect("XXX TODO"))
+            .expect("XXX TODO")
+            .try_take::<AssetRef>()
+            .expect("XXX TODO"));
+    }
 }
 
 fn main() {
@@ -880,7 +881,7 @@ fn main() {
     #[cfg(target_arch = "wasm32")]
     let args = Args::from_args(&[], &[]).unwrap();
 
-    //test_serialization();
+    test_serialization();
 
     let asset_paths = AssetPaths {
         regular: vec![

@@ -1,5 +1,8 @@
 use crate::{
-    basset::{action::LoadPathParams, BassetActionParams, ErasedBassetActionParams},
+    basset::{
+        action::LoadPathParams, BassetActionParams, ErasedBassetActionParams,
+        ReflectBassetActionParams,
+    },
     io::AssetSourceId,
     meta::Settings,
 };
@@ -9,13 +12,23 @@ use alloc::{
     sync::Arc,
 };
 use atomicow::CowArc;
-use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize};
+use bevy_reflect::{
+    serde::{
+        DeserializeWithRegistry, ReflectDeserializeWithRegistry, ReflectDeserializer,
+        ReflectSerializeWithRegistry, ReflectSerializer, SerializeWithRegistry,
+    },
+    Reflect, ReflectDeserialize, ReflectFromReflect, ReflectSerialize, TypeRegistry,
+};
 use core::{
     fmt::{Debug, Display},
     hash::Hash,
     ops::Deref,
 };
-use serde::{de::Visitor, Deserialize, Serialize};
+use serde::{
+    de::{SeqAccess, Visitor},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -612,7 +625,8 @@ impl<'a> AssetPath<'a> {
 
         let params_value = LoadPathParams {
             path: self.without_label().to_string(),
-            loader_settings: Some(settings_ron),
+            // XXX TODO
+            //loader_settings: Some(settings_ron),
         };
 
         AssetRef::new(params_value, self.label)
@@ -685,7 +699,7 @@ impl<'a> From<AssetPath<'a>> for PathBuf {
 impl<'a> Serialize for AssetPath<'a> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
         self.to_string().serialize(serializer)
     }
@@ -696,7 +710,7 @@ impl<'a> Serialize for AssetPath<'a> {
 impl<'a, 'de> Deserialize<'de> for AssetPath<'a> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
         deserializer.deserialize_string(AssetPathVisitor)
     }
@@ -755,7 +769,9 @@ pub(crate) fn normalize_path(path: &Path) -> PathBuf {
 // to construct an AssetRef, but feels like sitting on the fence - if we need it then things outside
 // of `bevy_asset` should be able to use it. Either make pub or add a constructor.
 #[derive(Reflect, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+// XXX TODO?
 #[reflect(opaque)]
+#[reflect(SerializeWithRegistry, DeserializeWithRegistry)]
 pub struct AssetRef<'a> {
     pub(crate) params: ErasedBassetActionParams,
     pub(crate) label: Option<CowArc<'a, str>>,
@@ -856,6 +872,10 @@ impl Display for AssetRef<'_> {
         // XXX TODO: Specialize for `LoadPath` case?
 
         if let Some(label) = &self.label {
+            // XXX TODO: The order is the reverse of what we accept when serializing
+            // as a sequence. Is that a problem? Putting the label first is clearer for
+            // display, but we want it to be optional for serialization. Maybe sequence
+            // serialization can be tweaked?
             write!(f, "(label: {:?}, params: {:?})", label, self.params)
         } else {
             write!(f, "{:?}", self.params)
@@ -872,12 +892,154 @@ impl Default for AssetRef<'_> {
     }
 }
 
+impl SerializeWithRegistry for AssetRef<'_> {
+    fn serialize<S>(&self, serializer: S, registry: &TypeRegistry) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("AssetRef", 3)?;
+
+        s.serialize_field(
+            "params",
+            &ReflectSerializer::new((*self.params.0).as_partial_reflect(), registry),
+        )?;
+        s.serialize_field("label", &self.label.as_ref().map(ToString::to_string))?;
+
+        s.end()
+    }
+}
+
+impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
+    fn deserialize<D>(deserializer: D, registry: &TypeRegistry) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct AssetRefVisitor<'a> {
+            registry: &'a TypeRegistry,
+        }
+
+        impl<'a, 'de> Visitor<'de> for AssetRefVisitor<'a> {
+            // XXX TODO: Is static lifetime correct?
+            type Value = AssetRef<'static>;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("struct AssetRef")
+            }
+
+            fn visit_seq<V>(self, mut seq: V) -> Result<AssetRef<'static>, V::Error>
+            where
+                V: SeqAccess<'de>,
+            {
+                let params_dyn = seq
+                    .next_element_seed(ReflectDeserializer::new(self.registry))?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+
+                // XXX TODO: Do we need `params_dyn.get_represented_type_info()" if we already know the type?
+                let params_registration = self
+                    .registry
+                    .get_with_type_path(params_dyn.get_represented_type_info().unwrap().type_path())
+                    .expect("XXX TODO?");
+
+                let params_concrete = params_registration
+                    .data::<ReflectFromReflect>()
+                    .unwrap()
+                    .from_reflect(&*params_dyn)
+                    .unwrap();
+
+                let params = params_registration
+                    .data::<ReflectBassetActionParams>()
+                    .expect("XXX TODO?")
+                    .get_boxed(params_concrete)
+                    .expect("XXX TODO?");
+
+                let label = seq
+                    .next_element::<Option<String>>()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+
+                Ok(AssetRef {
+                    params: ErasedBassetActionParams(params.into()),
+                    label: label.map(CowArc::from),
+                })
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<AssetRef<'static>, V::Error>
+            where
+                V: serde::de::MapAccess<'de>,
+            {
+                #[derive(Deserialize)]
+                #[serde(field_identifier, rename_all = "lowercase")]
+                enum Field {
+                    Params,
+                    Label,
+                }
+
+                let mut params = None;
+                let mut label = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Params => {
+                            if params.is_some() {
+                                return Err(serde::de::Error::duplicate_field("params"));
+                            }
+
+                            let params_dyn =
+                                map.next_value_seed(ReflectDeserializer::new(self.registry))?;
+
+                            // XXX TODO: Duplicates a bunch of `visit_seq`. Refactor?
+                            let params_registration = self
+                                .registry
+                                .get_with_type_path(
+                                    params_dyn.get_represented_type_info().unwrap().type_path(),
+                                )
+                                .expect("XXX TODO?");
+
+                            let params_concrete = params_registration
+                                .data::<ReflectFromReflect>()
+                                .unwrap()
+                                .from_reflect(&*params_dyn)
+                                .unwrap();
+
+                            params = Some(
+                                params_registration
+                                    .data::<ReflectBassetActionParams>()
+                                    .expect("XXX TODO?")
+                                    .get_boxed(params_concrete)
+                                    .expect("XXX TODO?"),
+                            );
+                        }
+                        Field::Label => {
+                            if label.is_some() {
+                                return Err(serde::de::Error::duplicate_field("label"));
+                            }
+                            label = Some(map.next_value::<Option<String>>()?);
+                        }
+                    }
+                }
+
+                let params = params.ok_or_else(|| serde::de::Error::missing_field("params"))?;
+                let label = label.flatten();
+
+                Ok(AssetRef {
+                    params: ErasedBassetActionParams(params.into()),
+                    label: label.map(CowArc::from),
+                })
+            }
+        }
+
+        deserializer.deserialize_struct(
+            "AssetRef",
+            &["name", "params", "label"],
+            AssetRefVisitor { registry },
+        )
+    }
+}
+
 impl<'a> From<AssetPath<'a>> for AssetRef<'a> {
     fn from(value: AssetPath<'a>) -> Self {
         Self::new(
             LoadPathParams {
                 path: value.without_label().to_string(),
-                ..Default::default()
             },
             value.label,
         )
