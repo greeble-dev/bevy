@@ -342,7 +342,7 @@ impl ErasedBassetActionParams {
 
 impl Hash for ErasedBassetActionParams {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u64(self.0.hash())
+        state.write_u64(self.0.hash());
     }
 }
 
@@ -354,16 +354,17 @@ impl PartialEq for ErasedBassetActionParams {
 
 impl Eq for ErasedBassetActionParams {}
 
+// XXX TODO: Can't we automatically derive this since we've implemented `Ord`?
 impl PartialOrd for ErasedBassetActionParams {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        // XXX TODO: Decide if this is good enough or if we need a proper Ord.
-        self.0.hash().partial_cmp(&other.0.hash())
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for ErasedBassetActionParams {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         // XXX TODO: Decide if this is good enough or if we need a proper Ord.
+        // Making clients implement `Ord` for all params is gonna suck though.
         self.0.hash().cmp(&other.0.hash())
     }
 }
@@ -379,7 +380,7 @@ impl Debug for ErasedBassetActionParams {
 /// An action that takes a parameter struct of a known type and returns an
 /// `ErasedLoadedAsset`.
 pub trait BassetAction: Send + Sync + 'static {
-    type Params: BassetActionParams + Serialize + for<'a> Deserialize<'a>;
+    type Params: BassetActionParams;
 
     /// XXX TODO: Document.
     type Error: Into<BevyError>;
@@ -981,7 +982,8 @@ impl ActionSource for DevelopmentActionSource {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
+#[expect(unused, reason = "XXX TODO")]
 struct BassetFileSerializable {
     // XXX TODO: Consider renaming, could get confused with "root asset" versus "sub-asset".
     root: AssetRef<'static>,
@@ -1007,36 +1009,37 @@ impl PolyAssetLoader for BassetLoader {
             load_context.path()
         );
 
-        let asset_server = load_context.asset_server();
+        let _asset_server = load_context.asset_server();
 
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
 
-        let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
+        todo!();
+        // let basset = ron::de::from_bytes::<BassetFileSerializable>(&bytes)?;
 
-        let root_without_label = RootAssetRef::without_label(basset.root.clone());
+        // let root_without_label = RootAssetRef::without_label(basset.root.clone());
 
-        let asset = asset_server
-            .basset_action_source()
-            .apply(&root_without_label, asset_server)
-            .await
-            .map(|mut asset| {
-                // XXX TODO: See other cases of ignoring the hash.
-                let hash = [0u8; 32];
+        // let asset = asset_server
+        //     .basset_action_source()
+        //     .apply(&root_without_label, asset_server)
+        //     .await
+        //     .map(|mut asset| {
+        //         // XXX TODO: See other cases of ignoring the hash.
+        //         let hash = [0u8; 32];
 
-                // XXX TODO: Justify this dependency replacement.
-                asset.loader_dependencies.clear();
-                asset.loader_dependencies.insert(
-                    LoaderDependency::Load(RootAssetRef::without_label(basset.root.clone())),
-                    (hash, asset.dependency_key),
-                );
+        //         // XXX TODO: Justify this dependency replacement.
+        //         asset.loader_dependencies.clear();
+        //         asset.loader_dependencies.insert(
+        //             LoaderDependency::Load(RootAssetRef::without_label(basset.root.clone())),
+        //             (hash, asset.dependency_key),
+        //         );
 
-                asset
-            })?;
+        //         asset
+        //     })?;
 
-        asset
-            .take_labeled(basset.root.label_cow())
-            .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", &basset.root).into())
+        // asset
+        //     .take_labeled(basset.root.label_cow())
+        //     .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", &basset.root).into())
     }
 
     fn extensions(&self) -> &[&str] {
@@ -1277,11 +1280,10 @@ pub mod action {
     // member non-optional? Not sure if we have any use case outside of `load_with_settings.`
     pub struct LoadPath;
 
-    #[derive(Serialize, Deserialize, Default, Hash, PartialEq, Debug)]
+    #[derive(Default, Hash, PartialEq, Debug)]
     pub struct LoadPathParams {
         // XXX TODO: Should be RootAssetPath? Avoiding for now to simplify lifetimes and defaults.
         pub path: String,
-        #[serde(default)]
         pub loader_settings: Option<Box<ron::value::RawValue>>,
         // XXX TODO: Consider this? Might be useful to explicitly choose a loader
         // rather than relying on extension/type. But have to be careful around

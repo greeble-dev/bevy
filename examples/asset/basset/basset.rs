@@ -38,7 +38,7 @@ mod action {
 
     pub struct JoinStrings;
 
-    #[derive(Serialize, Deserialize, Default)]
+    #[derive(Default, Debug, PartialEq, Hash)]
     pub struct JoinStringsParams {
         separator: String,
         strings: Vec<AssetRef<'static>>,
@@ -70,7 +70,7 @@ mod action {
 
     pub struct UppercaseString;
 
-    #[derive(Serialize, Deserialize, Default)]
+    #[derive(Default, Debug, PartialEq, Hash)]
     pub struct UppercaseStringParams {
         string: AssetRef<'static>,
     }
@@ -100,7 +100,7 @@ mod action {
     /// scenes list - it just takes every node.
     pub struct AcmeSceneFromGltf;
 
-    #[derive(Serialize, Deserialize, Default)]
+    #[derive(Default, Debug, PartialEq, Hash)]
     pub struct AcmeSceneFromGltfParams {
         gltf: AssetRef<'static>,
         // XXX TODO: Would be nice to support selecting a scene. but that's
@@ -131,10 +131,9 @@ mod action {
 
     pub struct MeshletFromMesh;
 
-    #[derive(Serialize, Deserialize, Default)]
+    #[derive(Default, Debug, PartialEq, Hash)]
     pub struct MeshletFromMeshParams {
         mesh: AssetRef<'static>, // XXX TODO: Better if we had a typed asset ref?
-        #[serde(default)]
         vertex_position_quantization_factor: Option<u8>,
     }
 
@@ -168,10 +167,9 @@ mod action {
 
     pub struct ConvertAcmeSceneMeshesToMeshlets;
 
-    #[derive(Serialize, Deserialize, Default)]
+    #[derive(Default, Debug, PartialEq, Hash)]
     pub struct ConvertAcmeSceneMeshesToMeshletsParams {
         scene: AssetRef<'static>,
-        #[serde(default)]
         vertex_position_quantization_factor: Option<u8>,
     }
 
@@ -195,7 +193,7 @@ mod action {
                 if let Some(mesh) = entity.mesh.take() {
                     entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
                         asset: AssetRef::new::<MeshletFromMesh>(
-                            &MeshletFromMeshParams {
+                            MeshletFromMeshParams {
                                 mesh: mesh.asset,
                                 vertex_position_quantization_factor: params
                                     .vertex_position_quantization_factor,
@@ -405,43 +403,39 @@ mod acme {
     use bevy::pbr::experimental::meshlet::MeshletMesh3d;
     use bevy_asset::VisitAssetDependencies;
 
-    #[derive(Serialize, Deserialize, Debug, VisitAssetDependencies)]
+    #[derive(Debug, VisitAssetDependencies)]
     pub struct AcmeMesh {
         #[dependency]
         pub asset: AssetRef<'static>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, VisitAssetDependencies)]
+    #[derive(Debug, VisitAssetDependencies)]
     pub struct AcmeMeshletMesh {
         #[dependency]
         pub asset: AssetRef<'static>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, VisitAssetDependencies)]
+    #[derive(Debug, VisitAssetDependencies)]
     pub struct AcmeMaterial {
         #[dependency]
         pub base_color_texture: Option<AssetRef<'static>>,
     }
 
-    #[derive(Serialize, Deserialize, Default, Debug, VisitAssetDependencies)]
+    #[derive(Default, Debug, VisitAssetDependencies)]
     pub struct AcmeEntity {
-        #[serde(default)]
         pub transform: Transform,
 
-        #[serde(default)]
         #[dependency]
         pub mesh: Option<AcmeMesh>,
 
-        #[serde(default)]
         #[dependency]
         pub meshlet_mesh: Option<AcmeMeshletMesh>,
 
-        #[serde(default)]
         #[dependency]
         pub material: Option<AcmeMaterial>,
     }
 
-    #[derive(Asset, TypePath, Serialize, Deserialize, Default, Debug)]
+    #[derive(Asset, TypePath, Default, Debug)]
     pub struct AcmeScene {
         #[dependency]
         pub entities: Vec<AcmeEntity>,
@@ -613,7 +607,9 @@ mod acme {
         }
     }
 
+    #[expect(unused, reason = "XXX TODO")]
     pub type AcmeSceneAssetLoader = RonAssetLoader<AcmeScene>;
+    #[expect(unused, reason = "XXX TODO")]
     pub type AcmeSceneAssetSaver = RonAssetSaver<AcmeScene>;
 }
 
@@ -833,47 +829,49 @@ struct Args {
 
 #[expect(unused, reason = "XXX TODO")]
 fn test_serialization() {
-    {
-        use ron::{de, ser};
+    todo!("XXX TODO");
 
-        let a = dbg!(ser::to_string(&AssetRef::from(AssetPath::parse("asdf.txt"))).expect("TODO"));
+    // {
+    //     use ron::{de, ser};
 
-        dbg!(de::from_str::<AssetRef>(&a).expect("TODO"));
+    //     let a = dbg!(ser::to_string(&AssetRef::from(AssetPath::parse("asdf.txt"))).expect("TODO"));
 
-        let b = dbg!(
-            ser::to_string(&AssetRef::new::<bevy_asset::basset::action::LoadPath>(
-                &bevy_asset::basset::action::LoadPathParams {
-                    path: "asdf.txt".into(),
-                    ..Default::default()
-                },
-                Some("subasset".into()),
-            ))
-            .expect("TODO")
-        );
+    //     dbg!(de::from_str::<AssetRef>(&a).expect("TODO"));
 
-        dbg!(de::from_str::<AssetRef>(&b).expect("TODO"));
-    }
+    //     let b = dbg!(
+    //         ser::to_string(&AssetRef::new::<bevy_asset::basset::action::LoadPath>(
+    //             bevy_asset::basset::action::LoadPathParams {
+    //                 path: "asdf.txt".into(),
+    //                 ..Default::default()
+    //             },
+    //             Some("subasset".into()),
+    //         ))
+    //         .expect("TODO")
+    //     );
 
-    {
-        use serde_json::{de, ser};
+    //     dbg!(de::from_str::<AssetRef>(&b).expect("TODO"));
+    // }
 
-        let a = dbg!(ser::to_string(&AssetRef::from(AssetPath::parse("asdf.txt"))).expect("TODO"));
+    // {
+    //     use serde_json::{de, ser};
 
-        dbg!(de::from_str::<AssetRef>(&a).expect("TODO"));
+    //     let a = dbg!(ser::to_string(&AssetRef::from(AssetPath::parse("asdf.txt"))).expect("TODO"));
 
-        let b = dbg!(
-            ser::to_string(&AssetRef::new::<bevy_asset::basset::action::LoadPath>(
-                &bevy_asset::basset::action::LoadPathParams {
-                    path: "asdf.txt".into(),
-                    ..Default::default()
-                },
-                Some("subasset".into()),
-            ))
-            .expect("TODO")
-        );
+    //     dbg!(de::from_str::<AssetRef>(&a).expect("TODO"));
 
-        dbg!(de::from_str::<AssetRef>(&b).expect("TODO"));
-    }
+    //     let b = dbg!(
+    //         ser::to_string(&AssetRef::new::<bevy_asset::basset::action::LoadPath>(
+    //             bevy_asset::basset::action::LoadPathParams {
+    //                 path: "asdf.txt".into(),
+    //                 ..Default::default()
+    //             },
+    //             Some("subasset".into()),
+    //         ))
+    //         .expect("TODO")
+    //     );
+
+    //     dbg!(de::from_str::<AssetRef>(&b).expect("TODO"));
+    // }
 }
 
 fn main() {
@@ -962,8 +960,8 @@ fn main() {
                     .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
-                    .with_saver(MeshletMeshSaver)
-                    .with_saver(acme::AcmeSceneAssetSaver::default()),
+                    .with_saver(MeshletMeshSaver), // XXX TODO post-reflection
+                                                   //.with_saver(acme::AcmeSceneAssetSaver::default()),
             ))),
             ..Default::default()
         }
@@ -986,7 +984,8 @@ fn main() {
     .init_asset::<acme::AcmeScene>()
     .register_asset_loader(demo::StringAssetLoader)
     .register_asset_loader(demo::IntAssetLoader)
-    .register_asset_loader(acme::AcmeSceneAssetLoader::default())
+    // XXX TODO post-reflection
+    //.register_asset_loader(acme::AcmeSceneAssetLoader::default())
     .insert_resource(asset_paths.clone());
 
     match args.mode {

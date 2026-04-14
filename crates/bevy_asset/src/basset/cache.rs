@@ -410,7 +410,7 @@ impl CacheKey for DependencyCacheKey {
     }
 }
 
-#[derive(Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Eq, PartialEq)]
 pub(crate) struct DependencyCacheValue {
     loader_dependees: Vec<CacheLoaderDependency>,
     // XXX TODO: Reconsider name? These are any `Handle` or `AssetRef` dependencies
@@ -433,7 +433,7 @@ fn collect_sort_dedup<T: Ord + PartialEq>(iter: impl Iterator<Item = T>) -> Vec<
 // we shouldn't - in theory - ever have a mix of None and Some dependency keys.
 // We should be consistently keying everything or nothing. Check if that's ever true
 // and maybe the dependency key yes/no decision can be moved higher up.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub struct CacheLoaderDependency(pub LoaderDependency, pub DependencyCacheKey);
 
 impl CacheLoaderDependency {
@@ -482,20 +482,22 @@ impl DependencyCacheValue {
 }
 
 impl FileCacheValue for Arc<DependencyCacheValue> {
-    async fn write(&self, file: &mut File) -> Result<(), BevyError> {
+    async fn write(&self, _file: &mut File) -> Result<(), BevyError> {
         // XXX TODO: Should have a serialized struct that includes a version number and an opaque value.
         // XXX TODO: Consider non-pretty serialization. Will be annoying for debugging,
         // but files will be a bit smaller and might\ be faster to save?
-        let string = ron::ser::to_string_pretty(self.as_ref(), Default::default())
-            .map_err(BevyError::from)?;
+        todo!("XXX TODO");
+        // let string = ron::ser::to_string_pretty(self.as_ref(), Default::default())
+        //     .map_err(BevyError::from)?;
 
-        file.write_all(string.as_bytes())
-            .await
-            .map_err(BevyError::from)
+        // file.write_all(string.as_bytes())
+        //     .await
+        //     .map_err(BevyError::from)
     }
 
-    fn read(bytes: Box<[u8]>) -> Self {
-        Arc::new(ron::de::from_bytes::<DependencyCacheValue>(&bytes).expect("TODO"))
+    fn read(_bytes: Box<[u8]>) -> Self {
+        todo!("XXX TODO");
+        //Arc::new(ron::de::from_bytes::<DependencyCacheValue>(&bytes).expect("TODO"))
     }
 }
 
