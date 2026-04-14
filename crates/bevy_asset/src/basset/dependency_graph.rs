@@ -10,6 +10,7 @@ use crate::{
 };
 use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
 use bevy_platform::collections::HashMap;
+use bevy_reflect::TypeRegistryArc;
 use core::fmt::{Debug, Display, Write};
 use indexmap::IndexMap;
 use petgraph::{
@@ -278,7 +279,11 @@ pub(crate) struct DependencyGraph {
 }
 
 impl DependencyGraph {
-    pub(crate) fn new(dependency_cache_path: Option<PathBuf>, validate: bool) -> Self {
+    pub(crate) fn new(
+        dependency_cache_path: Option<PathBuf>,
+        validate: bool,
+        registry: TypeRegistryArc,
+    ) -> Self {
         Self {
             graph: Default::default(),
             // XXX TODO: Add an option to disable the dependency memory cache?
@@ -286,6 +291,7 @@ impl DependencyGraph {
                 "dependency_cache",
                 dependency_cache_path,
                 validate,
+                registry,
             )),
         }
     }

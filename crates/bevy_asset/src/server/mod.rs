@@ -30,6 +30,7 @@ use bevy_platform::{
     collections::HashSet,
     sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
+use bevy_reflect::TypeRegistryArc;
 use bevy_tasks::IoTaskPool;
 use core::{any::TypeId, future::Future, panic::AssertUnwindSafe, task::Poll};
 use crossbeam_channel::{Receiver, Sender};
@@ -95,6 +96,7 @@ impl AssetServer {
         watching_for_changes: bool,
         unapproved_path_mode: UnapprovedPathMode,
         basset_action_source_builder: Option<Arc<dyn ActionSourceBuilder>>,
+        registry: TypeRegistryArc,
     ) -> Self {
         Self::new_with_loaders(
             sources,
@@ -104,6 +106,7 @@ impl AssetServer {
             watching_for_changes,
             unapproved_path_mode,
             basset_action_source_builder,
+            registry,
         )
     }
 
@@ -116,6 +119,7 @@ impl AssetServer {
         watching_for_changes: bool,
         unapproved_path_mode: UnapprovedPathMode,
         basset_action_source_builder: Option<Arc<dyn ActionSourceBuilder>>,
+        registry: TypeRegistryArc,
     ) -> Self {
         Self::new_with_loaders(
             sources,
@@ -125,6 +129,7 @@ impl AssetServer {
             watching_for_changes,
             unapproved_path_mode,
             basset_action_source_builder,
+            registry,
         )
     }
 
@@ -136,13 +141,14 @@ impl AssetServer {
         watching_for_changes: bool,
         unapproved_path_mode: UnapprovedPathMode,
         basset_action_source_builder: Option<Arc<dyn ActionSourceBuilder>>,
+        registry: TypeRegistryArc,
     ) -> Self {
         let (asset_event_sender, asset_event_receiver) = crossbeam_channel::unbounded();
         let mut infos = AssetInfos::default();
         infos.watching_for_changes = watching_for_changes;
 
         let basset_action_source = basset_action_source_builder
-            .map(|s| s.build(sources.clone()))
+            .map(|s| s.build(sources.clone(), registry))
             .unwrap_or_else(|| Arc::new(MinimalActionSource));
         Self {
             data: Arc::new(AssetServerData {

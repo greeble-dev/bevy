@@ -72,7 +72,13 @@ fn create_empty_asset_processor() -> AssetProcessor {
         AssetSourceBuilder::new(move || Box::new(memory_reader.clone())),
     );
 
-    AssetProcessor::new(&mut sources, false).0
+    // XXX TODO: Is the type registry a problem?
+    AssetProcessor::new(
+        &mut sources,
+        false,
+        bevy_reflect::TypeRegistryArc::default(),
+    )
+    .0
 }
 
 #[test]

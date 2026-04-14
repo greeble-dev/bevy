@@ -32,7 +32,15 @@ use bevy_platform::{
     collections::{HashMap, HashSet},
     hash::FixedHasher,
 };
-use bevy_reflect::{reflect_trait, Reflect, TypePath};
+use bevy_reflect::{
+    reflect_trait,
+    serde::{
+        DeserializeWithRegistry, ReflectDeserializeWithRegistry, ReflectDeserializer,
+        ReflectSerializeWithRegistry, ReflectSerializer, SerializeWithRegistry,
+    },
+    Reflect, ReflectDeserialize, ReflectFromReflect, ReflectSerialize, TypePath, TypeRegistry,
+    TypeRegistryArc,
+};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
     any::{type_name, TypeId},
@@ -43,7 +51,11 @@ use core::{
 };
 use downcast_rs::{impl_downcast, Downcast};
 use futures_lite::FutureExt;
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{MapAccess, SeqAccess, Visitor},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use std::{
     format,
     path::{Path, PathBuf},
@@ -71,7 +83,9 @@ impl Plugin for BassetPlugin {
 // XXX TODO: Maybe think more about the name. "root asset" does match other parts
 // of the asset system, but it's a bit ambiguous. E.g. publishing wants a list
 // of "root assets", but they're the roots of the publishing tree.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Reflect)]
+#[reflect(opaque)]
+#[reflect(Serialize, Deserialize)]
 pub struct RootAssetPath<'a> {
     source: AssetSourceId<'a>,
     path: CowArc<'a, Path>,
@@ -105,7 +119,7 @@ impl Display for RootAssetPath<'_> {
 impl<'a> Serialize for RootAssetPath<'a> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
         // XXX TODO: Implement without using AssetPath?
         AssetPath::from(self.clone()).serialize(serializer)
@@ -115,7 +129,7 @@ impl<'a> Serialize for RootAssetPath<'a> {
 impl<'a, 'de> Deserialize<'de> for RootAssetPath<'a> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
         // XXX TODO: Implement without using AssetPath?
         Ok(RootAssetPath::try_from(AssetPath::deserialize(deserializer)?).expect("XXX TODO?"))
@@ -145,6 +159,7 @@ impl<'a> TryFrom<AssetPath<'a>> for RootAssetPath<'a> {
 /// An `AssetRef` without a label.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Reflect)]
 #[reflect(opaque)]
+#[reflect(SerializeWithRegistry, DeserializeWithRegistry)]
 pub struct RootAssetRef {
     params: ErasedBassetActionParams,
 }
@@ -170,6 +185,133 @@ impl RootAssetRef {
 impl Display for RootAssetRef {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:?}", self.params)
+    }
+}
+
+impl SerializeWithRegistry for RootAssetRef {
+    fn serialize<S>(&self, serializer: S, registry: &TypeRegistry) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("AssetRef", 3)?;
+
+        s.serialize_field(
+            "params",
+            &ReflectSerializer::new((*self.params.0).as_partial_reflect(), registry),
+        )?;
+
+        s.end()
+    }
+}
+
+// XXX TODO: Duplicates a lot of the `AssetRef` equivalent. Awkward to refactor though?
+impl<'de> DeserializeWithRegistry<'de> for RootAssetRef {
+    fn deserialize<D>(deserializer: D, registry: &TypeRegistry) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RootAssetRefVisitor<'a> {
+            registry: &'a TypeRegistry,
+        }
+
+        impl<'a, 'de> Visitor<'de> for RootAssetRefVisitor<'a> {
+            type Value = RootAssetRef;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("struct RootAssetRef")
+            }
+
+            fn visit_seq<V>(self, mut seq: V) -> Result<RootAssetRef, V::Error>
+            where
+                V: SeqAccess<'de>,
+            {
+                let params_dyn = seq
+                    .next_element_seed(ReflectDeserializer::new(self.registry))?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+
+                // XXX TODO: Do we need `params_dyn.get_represented_type_info()" if we already know the type?
+                let params_registration = self
+                    .registry
+                    .get_with_type_path(params_dyn.get_represented_type_info().unwrap().type_path())
+                    .expect("XXX TODO?");
+
+                let params_concrete = params_registration
+                    .data::<ReflectFromReflect>()
+                    .unwrap()
+                    .from_reflect(&*params_dyn)
+                    .unwrap();
+
+                let params = params_registration
+                    .data::<ReflectBassetActionParams>()
+                    .expect("XXX TODO?")
+                    .get_boxed(params_concrete)
+                    .expect("XXX TODO?");
+
+                Ok(RootAssetRef {
+                    params: ErasedBassetActionParams(params.into()),
+                })
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<RootAssetRef, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                #[derive(Deserialize)]
+                #[serde(field_identifier, rename_all = "lowercase")]
+                enum Field {
+                    Params,
+                }
+
+                let mut params = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Params => {
+                            if params.is_some() {
+                                return Err(serde::de::Error::duplicate_field("params"));
+                            }
+
+                            let params_dyn =
+                                map.next_value_seed(ReflectDeserializer::new(self.registry))?;
+
+                            // XXX TODO: Duplicates a bunch of `visit_seq`. Refactor?
+                            let params_registration = self
+                                .registry
+                                .get_with_type_path(
+                                    params_dyn.get_represented_type_info().unwrap().type_path(),
+                                )
+                                .expect("XXX TODO?");
+
+                            let params_concrete = params_registration
+                                .data::<ReflectFromReflect>()
+                                .unwrap()
+                                .from_reflect(&*params_dyn)
+                                .unwrap();
+
+                            params = Some(
+                                params_registration
+                                    .data::<ReflectBassetActionParams>()
+                                    .expect("XXX TODO?")
+                                    .get_boxed(params_concrete)
+                                    .expect("XXX TODO?"),
+                            );
+                        }
+                    }
+                }
+
+                let params = params.ok_or_else(|| serde::de::Error::missing_field("params"))?;
+
+                Ok(RootAssetRef {
+                    params: ErasedBassetActionParams(params.into()),
+                })
+            }
+        }
+
+        deserializer.deserialize_struct(
+            "RootAssetRef",
+            &["params"],
+            RootAssetRefVisitor { registry },
+        )
     }
 }
 
@@ -526,8 +668,16 @@ impl DevelopmentActionSourceBuilder {
 }
 
 impl ActionSourceBuilder for DevelopmentActionSourceBuilder {
-    fn build(&self, sources: Arc<AssetSources>) -> Arc<dyn ActionSource> {
-        Arc::new(DevelopmentActionSource::new(self.settings.clone(), sources))
+    fn build(
+        &self,
+        sources: Arc<AssetSources>,
+        registry: TypeRegistryArc,
+    ) -> Arc<dyn ActionSource> {
+        Arc::new(DevelopmentActionSource::new(
+            self.settings.clone(),
+            sources,
+            registry,
+        ))
     }
 }
 
@@ -546,6 +696,7 @@ impl DevelopmentActionSource {
     pub(crate) fn new(
         settings: Arc<DevelopmentActionSourceSettings>,
         sources: Arc<AssetSources>,
+        registry: TypeRegistryArc,
     ) -> Self {
         let dependency_graph = Some(DependencyGraph::new(
             settings
@@ -553,12 +704,14 @@ impl DevelopmentActionSource {
                 .as_ref()
                 .map(|p| p.join("dependency")),
             settings.validate_dependency_cache,
+            registry.clone(),
         ));
 
         let action_cache = Some(MemoryAndFileCache::new(
             "action_cache",
             settings.file_cache_path.as_ref().map(|p| p.join("action")),
             settings.validate_action_cache,
+            registry,
         ));
 
         Self {
@@ -1143,7 +1296,8 @@ pub trait ActionSource: Send + Sync + 'static {
 }
 
 pub trait ActionSourceBuilder: Send + Sync + 'static {
-    fn build(&self, sources: Arc<AssetSources>) -> Arc<dyn ActionSource>;
+    fn build(&self, sources: Arc<AssetSources>, registry: TypeRegistryArc)
+        -> Arc<dyn ActionSource>;
 }
 
 // XXX TODO: Review use cases.
@@ -1185,7 +1339,11 @@ async fn fallback_action_handler(
 pub(crate) struct MinimalActionSourceBuilder;
 
 impl ActionSourceBuilder for MinimalActionSourceBuilder {
-    fn build(&self, _sources: Arc<AssetSources>) -> Arc<dyn ActionSource> {
+    fn build(
+        &self,
+        _sources: Arc<AssetSources>,
+        _registry: TypeRegistryArc,
+    ) -> Arc<dyn ActionSource> {
         Arc::new(MinimalActionSource)
     }
 }
@@ -1217,7 +1375,11 @@ impl PublishedActionSourceBuilder {
 }
 
 impl ActionSourceBuilder for PublishedActionSourceBuilder {
-    fn build(&self, _sources: Arc<AssetSources>) -> Arc<dyn ActionSource> {
+    fn build(
+        &self,
+        _sources: Arc<AssetSources>,
+        _registry: TypeRegistryArc,
+    ) -> Arc<dyn ActionSource> {
         Arc::new(PublishedActionSource {
             pack_file: self.pack_file.clone(),
         })
@@ -1306,10 +1468,14 @@ pub mod action {
     #[derive(Reflect, Default, Hash, PartialEq, Debug)]
     #[reflect(BassetActionParams)]
     pub struct LoadPathParams {
-        // XXX TODO: Should be RootAssetPath? Avoiding for now to simplify lifetimes and defaults.
+        // XXX TODO: Should be `RootAssetPath`? Avoiding for now to simplify lifetimes and defaults.
         pub path: String,
-        // XXX TODO: How to handle this?
-        //pub loader_settings: Option<Box<ron::value::RawValue>>,
+        // XXX TODO: Currently the settings are simply serialized RON, which means we're
+        // going to get duplication due to being non-canonical. Ideally it would
+        // be a `Box<dyn Settings>`, but serializing that will be a challenge.
+        // Making `Settings` be `Reflect` is one option, but that's a fairly disruptive
+        // change.
+        pub loader_settings: Option<String>,
         // XXX TODO: Consider this? Might be useful to explicitly choose a loader
         // rather than relying on extension/type. But have to be careful around
         // how dependency/action keys are calculated.
@@ -1340,15 +1506,13 @@ pub mod action {
                 .await
                 .map_err(Into::<BevyError>::into)?;
 
-            // XXX TODO: `loader_settings` needs to be reflectable.
-            let settings: &dyn Settings = todo!("XXX TODO");
-            // if let Some(settings) = &params.loader_settings {
-            //     meta = loader.meta_from_settings(settings.get_ron().as_bytes())?;
-            // }
+            if let Some(override_settings) = &params.loader_settings {
+                meta = loader.meta_from_settings(override_settings.as_bytes())?;
+            }
 
-            // let settings = meta
-            //     .loader_settings()
-            //     .expect("XXX TODO: We should only support load metas");
+            let settings = meta
+                .loader_settings()
+                .expect("XXX TODO: We should only support load metas");
 
             let file_dependency_path = RootAssetPath::without_label(path.clone());
 

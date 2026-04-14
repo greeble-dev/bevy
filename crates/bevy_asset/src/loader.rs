@@ -11,7 +11,7 @@ use alloc::{boxed::Box, string::ToString, vec::Vec};
 use atomicow::CowArc;
 use bevy_ecs::{error::BevyError, world::World};
 use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
-use bevy_reflect::TypePath;
+use bevy_reflect::{Reflect, TypePath};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::any::{Any, TypeId};
 use downcast_rs::{impl_downcast, Downcast};
@@ -338,7 +338,7 @@ impl<A: Asset> From<A> for LoadedAsset<A> {
 }
 
 /// How an asset loader depends on paths and actions. XXX TODO: Clarify?
-#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, Reflect)]
 pub enum LoaderDependency {
     /// The loader will load this path or action through a normal load call. XXX TODO: Clarify?
     Load(RootAssetRef),

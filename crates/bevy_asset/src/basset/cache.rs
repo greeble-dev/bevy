@@ -13,19 +13,22 @@ use bevy_platform::{
     collections::HashMap,
     sync::{PoisonError, RwLock},
 };
+use bevy_reflect::{
+    serde::{ReflectDeserializer, ReflectSerializer},
+    Reflect, TypeRegistryArc,
+};
 use bevy_tasks::{ConditionalSendFuture, IoTaskPool};
 use core::{
     fmt::{Debug, Display},
     result::Result,
 };
 use core::{hash::Hash, marker::PhantomData};
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeSeed;
 use std::{format, path::PathBuf};
 use tracing::debug;
 
-// XXX TODO: The RON serialization of `BassetHash` is verbose. Maybe do a custom
-// serialize that uses hex?
-#[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+// XXX TODO: Can we avoid reflect?
+#[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Reflect)]
 pub struct BassetHash([u8; 32]);
 
 impl BassetHash {
@@ -130,17 +133,21 @@ impl<K: CacheKey, V: MemoryCacheValue> MemoryCache<K, V> {
 
 // XXX TODO: Why do we need this `static` bound to make the async happy?
 pub(crate) trait FileCacheValue: Send + Sync + Clone + Eq + Debug + 'static {
-    fn write(&self, file: &mut File) -> impl ConditionalSendFuture<Output = Result<(), BevyError>>;
+    fn write(
+        &self,
+        file: &mut File,
+        registry: &TypeRegistryArc,
+    ) -> impl ConditionalSendFuture<Output = Result<(), BevyError>>;
 
-    fn read(bytes: Box<[u8]>) -> Self;
+    fn read(bytes: Box<[u8]>, registry: &TypeRegistryArc) -> Self;
 }
 
 impl FileCacheValue for Arc<[u8]> {
-    async fn write(&self, file: &mut File) -> Result<(), BevyError> {
+    async fn write(&self, file: &mut File, _registry: &TypeRegistryArc) -> Result<(), BevyError> {
         file.write_all(self).await.map_err(BevyError::from)
     }
 
-    fn read(bytes: Box<[u8]>) -> Self {
+    fn read(bytes: Box<[u8]>, _registry: &TypeRegistryArc) -> Self {
         bytes.into()
     }
 }
@@ -150,15 +157,22 @@ pub(crate) struct FileCache<K: CacheKey, V: FileCacheValue> {
     name: &'static str,
     base_path: PathBuf,
     validate: bool,
+    registry: TypeRegistryArc,
     phantom: PhantomData<(K, V)>,
 }
 
 impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
-    pub(crate) fn new(name: &'static str, base_path: PathBuf, validate: bool) -> Self {
+    pub(crate) fn new(
+        name: &'static str,
+        base_path: PathBuf,
+        validate: bool,
+        registry: TypeRegistryArc,
+    ) -> Self {
         Self {
             name,
             base_path,
             validate,
+            registry,
             phantom: PhantomData::<(K, V)>,
         }
     }
@@ -204,7 +218,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
         let value_path = self.value_path(key);
 
         if let Ok(value) = async_fs::read(value_path).await {
-            Some(<V as FileCacheValue>::read(value.into()))
+            Some(<V as FileCacheValue>::read(value.into(), &self.registry))
         } else {
             None
         }
@@ -228,6 +242,9 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
         //    assert_eq!(&value, &existing, "{key:?}");
         //}
 
+        // XXX TODO: This clone is annoying if the writer doesn't need it.
+        let registry = self.registry.clone();
+
         IoTaskPool::get()
             .spawn(async move {
                 // XXX TODO: Early out if file already exists?
@@ -249,7 +266,7 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
                     return;
                 };
 
-                <V as FileCacheValue>::write(&value, &mut temp_file)
+                <V as FileCacheValue>::write(&value, &mut temp_file, &registry)
                     .await
                     .expect("XXX TODO");
 
@@ -275,10 +292,11 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
         name: &'static str,
         file_cache_path: Option<PathBuf>,
         validate: bool,
+        registry: TypeRegistryArc,
     ) -> Self {
         MemoryAndFileCache {
             memory: Arc::new(RwLock::new(MemoryCache::new(name, validate))),
-            file: file_cache_path.map(|p| FileCache::new(name, p, validate)),
+            file: file_cache_path.map(|p| FileCache::new(name, p, validate, registry)),
         }
     }
 
@@ -389,7 +407,8 @@ impl ContentCache {
     }
 }
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Serialize, Deserialize)]
+// XXX TODO: Can we avoid reflect?
+#[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Reflect)]
 pub struct DependencyCacheKey(pub BassetHash);
 
 impl DependencyCacheKey {
@@ -410,7 +429,7 @@ impl CacheKey for DependencyCacheKey {
     }
 }
 
-#[derive(Default, Debug, Eq, PartialEq)]
+#[derive(Default, Debug, Eq, PartialEq, Reflect)]
 pub(crate) struct DependencyCacheValue {
     loader_dependees: Vec<CacheLoaderDependency>,
     // XXX TODO: Reconsider name? These are any `Handle` or `AssetRef` dependencies
@@ -433,7 +452,7 @@ fn collect_sort_dedup<T: Ord + PartialEq>(iter: impl Iterator<Item = T>) -> Vec<
 // we shouldn't - in theory - ever have a mix of None and Some dependency keys.
 // We should be consistently keying everything or nothing. Check if that's ever true
 // and maybe the dependency key yes/no decision can be moved higher up.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, Reflect)]
 pub struct CacheLoaderDependency(pub LoaderDependency, pub DependencyCacheKey);
 
 impl CacheLoaderDependency {
@@ -482,22 +501,30 @@ impl DependencyCacheValue {
 }
 
 impl FileCacheValue for Arc<DependencyCacheValue> {
-    async fn write(&self, _file: &mut File) -> Result<(), BevyError> {
+    async fn write(&self, file: &mut File, registry: &TypeRegistryArc) -> Result<(), BevyError> {
         // XXX TODO: Should have a serialized struct that includes a version number and an opaque value.
         // XXX TODO: Consider non-pretty serialization. Will be annoying for debugging,
-        // but files will be a bit smaller and might\ be faster to save?
-        todo!("XXX TODO");
-        // let string = ron::ser::to_string_pretty(self.as_ref(), Default::default())
-        //     .map_err(BevyError::from)?;
+        // but files will be a bit smaller and might be faster to save?
 
-        // file.write_all(string.as_bytes())
-        //     .await
-        //     .map_err(BevyError::from)
+        let string = ron::ser::to_string_pretty(
+            &ReflectSerializer::new(self.as_ref(), &registry.read()),
+            Default::default(),
+        )
+        .map_err(BevyError::from)?;
+
+        file.write_all(string.as_bytes())
+            .await
+            .map_err(BevyError::from)
     }
 
-    fn read(_bytes: Box<[u8]>) -> Self {
-        todo!("XXX TODO");
-        //Arc::new(ron::de::from_bytes::<DependencyCacheValue>(&bytes).expect("TODO"))
+    fn read(bytes: Box<[u8]>, registry: &TypeRegistryArc) -> Self {
+        Arc::new(
+            ReflectDeserializer::new(&registry.read())
+                .deserialize(&mut ron::de::Deserializer::from_bytes(&bytes).expect("XXX TODO"))
+                .expect("XXX TODO")
+                .try_take::<DependencyCacheValue>()
+                .expect("XXX TODO"),
+        )
     }
 }
 
@@ -507,7 +534,7 @@ fn content_hash(bytes: &[u8]) -> ContentHash {
     ContentHash(BassetHash::new(*hasher.finalize().as_bytes()))
 }
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Serialize, Deserialize)]
+#[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Reflect)]
 pub struct ActionCacheKey(pub BassetHash);
 
 impl ActionCacheKey {

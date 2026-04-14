@@ -41,6 +41,7 @@ mod log;
 mod process;
 
 use async_lock::RwLockReadGuardArc;
+use bevy_reflect::TypeRegistryArc;
 pub use log::*;
 pub use process::*;
 
@@ -160,6 +161,7 @@ impl AssetProcessor {
     pub fn new(
         sources: &mut AssetSourceBuilders,
         watch_processed: bool,
+        registry: TypeRegistryArc,
     ) -> (Self, Arc<AssetSources>) {
         let state = Arc::new(ProcessingState::new());
         let mut sources = sources.build_sources(true, watch_processed);
@@ -178,6 +180,7 @@ impl AssetProcessor {
             // Unsure if we want to try and keep regular asset processing
             // working.
             None,
+            registry,
         );
         (Self { server, data }, sources)
     }

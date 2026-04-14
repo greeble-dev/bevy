@@ -873,6 +873,21 @@ fn test_serialization() {
             .try_take::<AssetRef>()
             .expect("XXX TODO"));
     }
+
+    // #[derive(Serialize, Deserialize)]
+    // struct Foo {
+    //     i: usize,
+    //     s: Box<ron::value::RawValue>,
+    // }
+
+    // {
+    //     use serde_json::ser;
+
+    //     let _ = dbg!(ser::to_string(&Foo {
+    //         i: 123,
+    //         s: ron::value::RawValue::from_boxed_ron("456".into()).unwrap()
+    //     }));
+    // }
 }
 
 fn main() {

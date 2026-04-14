@@ -209,7 +209,7 @@ pub mod basset;
 pub use uuid;
 
 use crate::{
-    basset::ActionSourceBuilder,
+    basset::{ActionSourceBuilder, RootAssetPath, RootAssetRef},
     io::{embedded::EmbeddedAssetRegistry, AssetSourceBuilder, AssetSourceBuilders, AssetSourceId},
     processor::{AssetProcessor, Process},
 };
@@ -227,7 +227,7 @@ use bevy_ecs::{
 };
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_reflect::{FromReflect, GetTypeRegistration, Reflect, TypePath};
-use core::any::TypeId;
+use core::{any::TypeId, ops::Deref};
 use tracing::error;
 
 /// Provides "asset" loading and processing functionality. An [`Asset`] is a "runtime value" that is loaded from an [`AssetSource`],
@@ -362,6 +362,16 @@ impl AssetPlugin {
 
 impl Plugin for AssetPlugin {
     fn build(&self, app: &mut App) {
+        // XXX TODO: Is there any potential for avoiding this if the `ActionSource`
+        // doesn't need it? Good to explore how far we can avoid depending on
+        // reflection - maybe published builds could skip it if they accept some limitations?
+        let registry = app
+            .world()
+            .get_resource::<AppTypeRegistry>()
+            .expect("XXX TODO: Error handling?")
+            .deref()
+            .clone();
+
         let embedded = EmbeddedAssetRegistry::default();
         {
             let mut sources = app
@@ -390,6 +400,7 @@ impl Plugin for AssetPlugin {
                         watch,
                         self.unapproved_path_mode.clone(),
                         self.basset_action_source_builder.clone(),
+                        registry,
                     ));
                 }
                 AssetMode::Processed => {
@@ -398,7 +409,8 @@ impl Plugin for AssetPlugin {
                         .unwrap_or(cfg!(feature = "asset_processor"));
                     if use_asset_processor {
                         let mut builders = app.world_mut().resource_mut::<AssetSourceBuilders>();
-                        let (processor, sources) = AssetProcessor::new(&mut builders, watch);
+                        let (processor, sources) =
+                            AssetProcessor::new(&mut builders, watch, registry.clone());
                         // the main asset server shares loaders with the processor asset server
                         app.insert_resource(AssetServer::new_with_loaders(
                             sources.clone(),
@@ -408,6 +420,7 @@ impl Plugin for AssetPlugin {
                             watch,
                             self.unapproved_path_mode.clone(),
                             self.basset_action_source_builder.clone(),
+                            registry.clone(),
                         ))
                         .insert_resource(processor)
                         .add_systems(bevy_app::Startup, AssetProcessor::start);
@@ -421,6 +434,7 @@ impl Plugin for AssetPlugin {
                             watch,
                             self.unapproved_path_mode.clone(),
                             self.basset_action_source_builder.clone(),
+                            registry,
                         ));
                     }
                 }
@@ -430,7 +444,10 @@ impl Plugin for AssetPlugin {
             .init_asset::<LoadedFolder>()
             .init_asset::<LoadedUntypedAsset>()
             .init_asset::<()>()
+            // XXX TODO: Check if we can avoid registering these manually?
             .register_type::<AssetRef<'static>>()
+            .register_type::<RootAssetRef>()
+            .register_type::<RootAssetPath<'static>>()
             .add_message::<UntypedAssetLoadFailedEvent>()
             .configure_sets(
                 PreUpdate,

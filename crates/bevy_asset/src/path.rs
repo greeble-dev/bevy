@@ -25,7 +25,7 @@ use core::{
     ops::Deref,
 };
 use serde::{
-    de::{SeqAccess, Visitor},
+    de::{MapAccess, SeqAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
@@ -616,17 +616,11 @@ impl<'a> AssetPath<'a> {
         // RON. Would go away if we changed `AssetRef` to store the action params
         // as a `Box<dyn>` rather than RON.
 
-        let settings_ron = ron::value::RawValue::from_boxed_ron(
-            ron::ser::to_string(&settings_value)
-                .expect("XXX TODO")
-                .into(),
-        )
-        .expect("XXX TODO");
+        let settings_ron = ron::ser::to_string(&settings_value).expect("XXX TODO");
 
         let params_value = LoadPathParams {
             path: self.without_label().to_string(),
-            // XXX TODO
-            //loader_settings: Some(settings_ron),
+            loader_settings: Some(settings_ron),
         };
 
         AssetRef::new(params_value, self.label)
@@ -964,7 +958,7 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
 
             fn visit_map<V>(self, mut map: V) -> Result<AssetRef<'static>, V::Error>
             where
-                V: serde::de::MapAccess<'de>,
+                V: MapAccess<'de>,
             {
                 #[derive(Deserialize)]
                 #[serde(field_identifier, rename_all = "lowercase")]
@@ -1029,7 +1023,7 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
 
         deserializer.deserialize_struct(
             "AssetRef",
-            &["name", "params", "label"],
+            &["params", "label"],
             AssetRefVisitor { registry },
         )
     }
@@ -1040,6 +1034,7 @@ impl<'a> From<AssetPath<'a>> for AssetRef<'a> {
         Self::new(
             LoadPathParams {
                 path: value.without_label().to_string(),
+                loader_settings: None,
             },
             value.label,
         )
