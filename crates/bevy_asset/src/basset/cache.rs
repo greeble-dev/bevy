@@ -511,13 +511,6 @@ impl CacheLoaderDependency {
     ) -> Self {
         Self(loader_dependency, dependency_key)
     }
-
-    pub(crate) fn optional(
-        loader_dependency: LoaderDependency,
-        dependency_key: Option<DependencyCacheKey>,
-    ) -> Option<Self> {
-        dependency_key.map(|k| Self::new(loader_dependency, k))
-    }
 }
 
 impl DependencyCacheValue {

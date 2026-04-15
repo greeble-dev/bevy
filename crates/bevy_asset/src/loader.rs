@@ -553,7 +553,9 @@ pub struct LoadContext<'a> {
     /// This is entirely redundant with [`Self::labeled_assets`], but it allows looking up the
     /// labeled asset by its asset ID.
     pub(crate) asset_id_to_asset_index: HashMap<UntypedAssetId, usize>,
-    dependency_key: Option<DependencyCacheKey>,
+
+    // XXX TODO: Shouldn't be `pub(crate)`? Review where it's used in `BassetLoader`.
+    pub(crate) dependency_key: Option<DependencyCacheKey>,
 }
 
 impl<'a> LoadContext<'a> {

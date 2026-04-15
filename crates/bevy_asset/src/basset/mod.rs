@@ -772,13 +772,15 @@ impl DevelopmentActionSource {
 
         match path {
             LoaderDependency::Load(action) => {
-                // XXX TODO: Double check this is appropriate for actions.
-                hasher.update(action.to_string().as_bytes());
+                // XXX TODO: Is this the best way to hash actions?
+                let mut action_hasher = FixedHasher.build_hasher();
+                Hash::hash(&action, &mut action_hasher);
+                hasher.update(&action_hasher.finish().to_le_bytes());
             }
             LoaderDependency::File(path) => {
                 hasher.update(path.to_string().as_bytes());
-                let content_hash = self.content_cache.get(path).await.expect("XXX TODO");
 
+                let content_hash = self.content_cache.get(path).await.expect("XXX TODO");
                 hasher.update(&content_hash.as_bytes());
             }
         }
@@ -806,6 +808,13 @@ impl ActionSource for DevelopmentActionSource {
                         ))
                     })?;
 
+            // XXX TODO: Avoid clone?
+            // XXX TODO: Could have a fast path here since we know the dependency key
+            // is for an action?
+            let dependency_key = self
+                .dependency_key_internal(&LoaderDependency::Load(action.clone()), None)
+                .await;
+
             if action_function.cacheable()
                 && let Some(action_cache) = &self.action_cache
                 && let Some(dependency_graph) = &self.dependency_graph
@@ -820,16 +829,14 @@ impl ActionSource for DevelopmentActionSource {
                     && let Some(cached_standalone_asset) =
                         action_cache.get(&action_key, action).await
                 {
-                    return read_standalone_asset(&cached_standalone_asset, asset_server).await;
+                    return read_standalone_asset(
+                        &cached_standalone_asset,
+                        asset_server,
+                        dependency_key,
+                    )
+                    .await;
                 }
             }
-
-            // XXX TODO: Avoid clone?
-            // XXX TODO: Could have a fast path here since we know the dependency key
-            // is for an action?
-            let dependency_key = self
-                .dependency_key_internal(&LoaderDependency::Load(action.clone()), None)
-                .await;
 
             let apply_context = ApplyContext::new(asset_server, Some(dependency_key));
 
@@ -922,18 +929,20 @@ impl ActionSource for DevelopmentActionSource {
             if let Some(dependency_key) = asset.dependency_key
                 && let Some(dependency_graph) = &self.dependency_graph
             {
-                let Some(loader_dependencies) = asset
-                    .loader_dependencies
-                    .iter()
-                    .map(|(path, (_, dependency_key))| {
-                        CacheLoaderDependency::optional(path.clone(), *dependency_key)
-                    })
-                    .collect::<Option<Vec<_>>>()
-                else {
-                    // XXX TODO: Double check we're correct to bail here. Should be a warning
-                    // since the development source always gives dependency keys?
-                    return None;
-                };
+                let mut loader_dependencies =
+                    Vec::<CacheLoaderDependency>::with_capacity(asset.loader_dependencies.len());
+
+                for (loader_dependency, (_, dependency_key)) in &asset.loader_dependencies {
+                    if let Some(dependency_key) = dependency_key {
+                        loader_dependencies.push(CacheLoaderDependency::new(
+                            loader_dependency.clone(),
+                            *dependency_key,
+                        ));
+                    } else {
+                        warn!("Missing dependency key for loader dependency. path: {path:?} dependency: {loader_dependency:?}");
+                        return None;
+                    }
+                }
 
                 let mut external_dependees = HashSet::<RootAssetRef>::new();
 
@@ -1167,6 +1176,10 @@ impl ActionSource for DevelopmentActionSource {
 #[derive(Debug, Clone, Reflect)]
 struct BassetFileSerializable {
     // XXX TODO: Consider renaming, could get confused with "root asset" versus "sub-asset".
+    // XXX TODO: What happens if the `AssetRef` has a label? Need to think through how
+    // the dependencies work. Suspect it may be wrong, as we'll end up calling
+    // `register_dependencies` with a sub-asset that has the root asset's dependency
+    // key but not the root asset's dependencies.
     root: AssetRef<'static>,
     // TODO: Versioning?
 }
@@ -1228,9 +1241,12 @@ impl PolyAssetLoader for BassetLoader {
                     (hash, asset.dependency_key),
                 );
 
+                asset.dependency_key = load_context.dependency_key;
+
                 asset
             })?;
 
+        // XXX TODO: Maybe wrong. See comment on `BassetFileSerializable::root`.
         asset
             .take_labeled(basset.root.label_cow())
             .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", &basset.root).into())
@@ -1600,6 +1616,9 @@ pub mod action {
                     })
                 })
                 .map_err(Into::<BevyError>::into)?;
+
+            // XXX TODO: Justify. Change to error rather than panic.
+            assert_eq!(context.dependency_key, asset.dependency_key);
 
             // XXX TODO: Decide what to do here. The hash only appears to be used
             // for asset processing, so maybe can ignore for now.

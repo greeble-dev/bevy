@@ -5,7 +5,10 @@
 // text editor without binary data getting in the way.
 
 use crate::{
-    basset::blob::{BlobReader, BlobWriter},
+    basset::{
+        blob::{BlobReader, BlobWriter},
+        cache::DependencyCacheKey,
+    },
     io::SliceReader,
     meta::{AssetActionMinimal, AssetMetaMinimal, Settings},
     saver::ErasedAssetSaver,
@@ -22,6 +25,7 @@ const STANDALONE_VERSION: u16 = 1;
 pub async fn read_standalone_asset(
     blob: &[u8],
     asset_server: &AssetServer,
+    dependency_key: DependencyCacheKey,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     let mut blob = BlobReader::new(blob);
 
@@ -76,7 +80,7 @@ pub async fn read_standalone_asset(
     // XXX TODO: Ew? Need to decide if we try to support the original path.
     let fake_path = AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
 
-    asset_server
+    let mut asset = asset_server
         .load_with_settings_loader_and_reader(
             &fake_path,
             meta.loader_settings().expect("meta is set to Load"),
@@ -87,7 +91,13 @@ pub async fn read_standalone_asset(
             update_dependency_cache,
         )
         .await
-        .map_err(Into::<BevyError>::into)
+        .map_err(Into::<BevyError>::into)?;
+
+    // XXX TODO: Janky. Need to review as this isn't the only place with some
+    // fragile poking of dependency stuff (see `BassetLoader`, `LoadPath`).
+    asset.dependency_key = Some(dependency_key);
+
+    Ok(asset)
 }
 
 pub async fn write_standalone_asset(
