@@ -15,7 +15,7 @@ use bevy_platform::{
 };
 use bevy_reflect::{
     serde::{ReflectDeserializer, ReflectSerializer},
-    Reflect, TypeRegistryArc,
+    Reflect, ReflectDeserialize, ReflectSerialize, TypeRegistryArc,
 };
 use bevy_tasks::{ConditionalSendFuture, IoTaskPool};
 use core::{
@@ -23,12 +23,16 @@ use core::{
     result::Result,
 };
 use core::{hash::Hash, marker::PhantomData};
-use serde::de::DeserializeSeed;
-use std::{format, path::PathBuf};
+use serde::{
+    de::{DeserializeSeed, Visitor},
+    Deserialize, Serialize,
+};
+use std::path::PathBuf;
 use tracing::debug;
 
 // XXX TODO: Can we avoid reflect?
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Reflect)]
+#[reflect(Serialize, Deserialize)]
 pub struct BassetHash([u8; 32]);
 
 impl BassetHash {
@@ -46,21 +50,63 @@ impl BassetHash {
 
 impl Debug for BassetHash {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // XXX TODO: Review. Duplicated elsewhere. Could be optimized. Avoid `std`?
-        let hex = String::from_iter(self.0.iter().map(|b| std::format!("{:x}", b)));
-
-        Debug::fmt(&hex, f)
+        hex::write_hex(f, &self.0)
     }
 }
 
 impl Display for BassetHash {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // Display only the first 8 characters.
-        //
-        // XXX TODO: Review. Duplicated elsewhere. Could be optimized. Avoid `std`?
-        let hex = String::from_iter(self.0.iter().take(4).map(|b| std::format!("{:x}", b)));
+        // Display only the first four bytes for brevity. `Debug` emits
+        // all characters.
+        hex::write_hex(f, &self.0[0..4])
+    }
+}
 
-        Display::fmt(&hex, f)
+impl Serialize for BassetHash {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // XXX TODO: How can we avoid allocation? We know the length of the string.
+        // XXX TODO: If we avoid allocating then also try to avoid error handling
+        // since we should be infallible.
+        let mut string = String::with_capacity(64);
+        hex::write_hex(&mut string, &self.0).expect("XXX TODO: Handle error?");
+
+        string.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BassetHash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_string(BassetHashVisitor)
+    }
+}
+
+struct BassetHashVisitor;
+
+impl<'de> Visitor<'de> for BassetHashVisitor {
+    type Value = BassetHash;
+
+    fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+        formatter.write_str("string BassetHash")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(BassetHash(hex::read_hex(v.as_bytes()).expect("XXX TODO")))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(BassetHash(hex::read_hex(v.as_bytes()).expect("XXX TODO")))
     }
 }
 
@@ -178,9 +224,10 @@ impl<K: CacheKey, V: FileCacheValue> FileCache<K, V> {
     }
 
     pub(crate) fn value_path(&self, key: &K) -> PathBuf {
-        // XXX TODO: Duplicates `BassetHash` debug?
-        // XXX TODO: Check if this is worth optimizing.
-        let hex = String::from_iter(key.as_hash().0.iter().map(|b| format!("{:x}", b)));
+        // XXX TODO: Similar to `Serialize` for `BassetHash`, try to avoid allocating
+        // since we know the length of the string.
+        let mut hex = String::with_capacity(64);
+        hex::write_hex(&mut hex, &key.as_hash().as_bytes()).expect("XXX TODO");
 
         // Spread files across multiple folders by using the first few digits of
         // the hash. This is a hedge against filesystems that don't like
@@ -407,7 +454,9 @@ impl ContentCache {
     }
 }
 
-// XXX TODO: Can we avoid reflect?
+// XXX TODO: Can we avoid reflect? Currently needed by `CacheLoaderDependency`
+// since it indirectly uses an `AssetRef` that requires reflection and also
+// a `DependencyCacheKey`.
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Reflect)]
 pub struct DependencyCacheKey(pub BassetHash);
 
@@ -578,5 +627,136 @@ impl Display for ActionCacheKey {
 impl CacheKey for ActionCacheKey {
     fn as_hash(&self) -> BassetHash {
         self.0
+    }
+}
+
+// XXX TODO: Move this somewhere else. Also should consider just using the common `hex` crate.
+mod hex {
+    use core::fmt::{Debug, Display, Write};
+
+    // XXX TODO: Annoying that we have to return a result even for the (almost?)
+    // infallible case of writing to a string. We also have cases where the
+    // length is known and we want to avoid allocation (see `BassetHash::serialize`).
+    // Maybe needs a rethink, although
+    pub(crate) fn write_hex(f: &mut dyn Write, bytes: &[u8]) -> core::fmt::Result {
+        const TABLE: [char; 16] = [
+            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+        ];
+
+        for byte in bytes {
+            f.write_char(TABLE[(byte >> 4) as usize])?;
+            f.write_char(TABLE[(byte & 0xf) as usize])?;
+        }
+
+        Ok(())
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) enum HexReadError {
+        InvalidCharCount(usize),
+        OutOfRangeChar(u8),
+    }
+
+    // XXX TODO: Should probably do a proper `thiserror`.
+    impl Display for HexReadError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            Debug::fmt(self, f)
+        }
+    }
+
+    pub(crate) fn read_hex_char(value: u8) -> Result<u8, HexReadError> {
+        match value {
+            b'0'..=b'9' => Ok(value - b'0'),
+            b'a'..=b'f' => Ok(value - b'a' + 10),
+            // XXX TODO: Consider being stricter and requiring lowercase.
+            b'A'..=b'F' => Ok(value - b'A' + 10),
+            _ => Err(HexReadError::OutOfRangeChar(value)),
+        }
+    }
+
+    pub(crate) fn read_hex<const BYTE_COUNT: usize>(
+        chars: &[u8],
+    ) -> Result<[u8; BYTE_COUNT], HexReadError> {
+        let char_count = BYTE_COUNT * 2;
+
+        if char_count != chars.len() {
+            return Err(HexReadError::InvalidCharCount(chars.len()));
+        }
+
+        let mut result = [0u8; BYTE_COUNT];
+
+        for i in 0..BYTE_COUNT {
+            let hi = read_hex_char(chars[i * 2])?;
+            let lo = read_hex_char(chars[(i * 2) + 1])?;
+
+            result[i] = (hi << 4) | lo;
+        }
+
+        Ok(result)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use alloc::{string::String, vec::Vec};
+        use std::format;
+
+        #[test]
+        fn hex() {
+            let expected_bytes = (0..=255u8).collect::<Vec<_>>();
+
+            let expected_string = expected_bytes
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
+
+            let mut actual_string = String::new();
+            write_hex(&mut actual_string, &expected_bytes).unwrap();
+
+            assert_eq!(expected_string, actual_string);
+
+            let actual_bytes = read_hex::<256>(actual_string.as_bytes()).unwrap();
+
+            assert_eq!(expected_bytes, actual_bytes);
+
+            assert_eq!(
+                read_hex::<1>("123".as_bytes()),
+                Err(HexReadError::InvalidCharCount(3))
+            );
+
+            assert_eq!(
+                read_hex::<1>("1".as_bytes()),
+                Err(HexReadError::InvalidCharCount(1))
+            );
+
+            assert_eq!(
+                read_hex::<1>("".as_bytes()),
+                Err(HexReadError::InvalidCharCount(0))
+            );
+
+            assert_eq!(read_hex::<0>("".as_bytes()).unwrap().len(), 0);
+
+            for byte in 0..=255u8 {
+                if byte.is_ascii_hexdigit() {
+                    assert_eq!(
+                        read_hex::<1>(&[byte, b'0']).unwrap(),
+                        [read_hex_char(byte).unwrap() << 4]
+                    );
+                    assert_eq!(
+                        read_hex::<1>(&[b'0', byte]).unwrap(),
+                        [read_hex_char(byte).unwrap()]
+                    );
+                } else {
+                    assert_eq!(
+                        read_hex::<1>(&[byte, b'0']),
+                        Err(HexReadError::OutOfRangeChar(byte))
+                    );
+                    assert_eq!(
+                        read_hex::<1>(&[b'0', byte]),
+                        Err(HexReadError::OutOfRangeChar(byte))
+                    );
+                }
+            }
+        }
     }
 }
