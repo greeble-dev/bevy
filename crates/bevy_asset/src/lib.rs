@@ -435,7 +435,6 @@ impl Plugin for AssetPlugin {
         }
         app.insert_resource(embedded)
             .init_asset::<LoadedFolder>()
-            .init_asset::<LoadedUntypedAsset>()
             .init_asset::<()>()
             .add_message::<UntypedAssetLoadFailedEvent>()
             // `handle_internal_asset_events` requires the use of `&mut World`,
@@ -506,7 +505,19 @@ impl VisitAssetDependencies for UntypedHandle {
     }
 }
 
+impl VisitAssetDependencies for ErasedHandle {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetEntity)) {
+        self.entity().map(visit);
+    }
+}
+
 impl VisitAssetDependencies for UntypedAssetId {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetEntity)) {
+        self.entity().map(visit);
+    }
+}
+
+impl VisitAssetDependencies for ErasedAssetId {
     fn visit_dependencies(&self, visit: &mut impl FnMut(AssetEntity)) {
         self.entity().map(visit);
     }
@@ -521,6 +532,14 @@ impl<A: Asset, const N: usize> VisitAssetDependencies for [Handle<A>; N] {
 }
 
 impl<const N: usize> VisitAssetDependencies for [UntypedHandle; N] {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetEntity)) {
+        for dependency in self {
+            dependency.visit_dependencies(visit);
+        }
+    }
+}
+
+impl<const N: usize> VisitAssetDependencies for [ErasedHandle; N] {
     fn visit_dependencies(&self, visit: &mut impl FnMut(AssetEntity)) {
         for dependency in self {
             dependency.visit_dependencies(visit);
@@ -553,6 +572,14 @@ impl<A: Asset, K> VisitAssetDependencies for HashMap<K, Handle<A>> {
 }
 
 impl<K> VisitAssetDependencies for HashMap<K, UntypedHandle> {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetEntity)) {
+        for dependency in self.values() {
+            dependency.visit_dependencies(visit);
+        }
+    }
+}
+
+impl<K> VisitAssetDependencies for HashMap<K, ErasedHandle> {
     fn visit_dependencies(&self, visit: &mut impl FnMut(AssetEntity)) {
         for dependency in self.values() {
             dependency.visit_dependencies(visit);
@@ -2927,7 +2954,7 @@ mod tests {
             match value {
                 LoadState::NotLoaded => Self::NotLoaded,
                 LoadState::Loading => Self::Loading,
-                LoadState::Loaded => Self::Loaded,
+                LoadState::Loaded(_) => Self::Loaded,
                 LoadState::Failed(err) => Self::Failed((&*err).into()),
             }
         }
@@ -3103,7 +3130,7 @@ mod tests {
                 asset_server.load_override(path),
                 Handle::<TestAsset>::default()
             );
-            assert_eq!(asset_server.load_untyped(path), Handle::default());
+            assert_eq!(asset_server.load_untyped(path), UntypedHandle::default());
             assert!(matches!(
                 block_on(asset_server.load_untyped_async(path)),
                 Err(AssetLoadError::EmptyPath(reported_path)) if AssetPath::from(path) == reported_path

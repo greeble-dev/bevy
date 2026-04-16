@@ -1,4 +1,4 @@
-use crate::{Asset, AssetEntity, AssetId, AssetLoadError, AssetPath, UntypedAssetId};
+use crate::{Asset, AssetEntity, AssetId, AssetLoadError, AssetPath, ErasedAssetId};
 use bevy_ecs::{message::Message, resource::Resource, world::World};
 use bevy_reflect::Reflect;
 use bevy_utils::TypeIdMap;
@@ -27,9 +27,10 @@ impl<A: Asset> AssetLoadFailedEvent<A> {
 
 /// An untyped version of [`AssetLoadFailedEvent`].
 #[derive(Message, Clone, Debug)]
+// XXX TODO: Technically should be renamed to `Erased`, but not worth it?
 pub struct UntypedAssetLoadFailedEvent {
     /// The stable identifier of the asset that failed to load.
-    pub id: UntypedAssetId,
+    pub id: ErasedAssetId,
     /// The asset path that was attempted.
     pub path: AssetPath<'static>,
     /// Why the asset failed to load.
@@ -39,7 +40,7 @@ pub struct UntypedAssetLoadFailedEvent {
 impl<A: Asset> From<&AssetLoadFailedEvent<A>> for UntypedAssetLoadFailedEvent {
     fn from(value: &AssetLoadFailedEvent<A>) -> Self {
         UntypedAssetLoadFailedEvent {
-            id: value.id.untyped(),
+            id: value.id.erased(),
             path: value.path.clone(),
             error: value.error.clone(),
         }
@@ -153,16 +154,21 @@ impl AssetEventUnusedWriters {
     ///
     /// This is not a method so that we don't need to hokey-pokey this type.
     pub(crate) fn write_message(
-        world: &mut World,
-        entity: AssetEntity,
-        type_id: TypeId,
+        _world: &mut World,
+        _entity: AssetEntity,
+        // XXX TODO FATAL?: Uh oh, we don't have the type id because handles don't know their
+        // type. But we do have access to the world and the entity - can we get it out
+        // of there? Not currently possible since it's behind an `AssetData` that we
+        // don't know the type of.
+        //type_id: TypeId,
     ) -> Result<(), MissingAssetTypeError> {
-        let func = world
-            .resource::<Self>()
-            .0
-            .get(&type_id)
-            .ok_or(MissingAssetTypeError(type_id))?;
-        func(world, entity);
+        // XXX TODO: See above comment.
+        // let func = world
+        //     .resource::<Self>()
+        //     .0
+        //     .get(&type_id)
+        //     .ok_or(MissingAssetTypeError(type_id))?;
+        // func(world, entity);
         Ok(())
     }
 }

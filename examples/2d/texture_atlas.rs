@@ -230,7 +230,7 @@ fn create_texture_atlas(
     let mut texture_atlas_builder = TextureAtlasBuilder::default();
     texture_atlas_builder.padding(padding.unwrap_or_default());
     for handle in folder.handles.iter() {
-        let id = handle.id().typed_unchecked::<Image>();
+        let id = handle.id().typed::<Image>();
         let Some(texture) = textures.get(id) else {
             warn!(
                 "{} did not resolve to an `Image` asset.",

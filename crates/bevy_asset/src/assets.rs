@@ -1,7 +1,6 @@
 use crate::{
     asset_changed::AssetChanges, Asset, AssetEntity, AssetEvent, AssetEventUnusedWriters,
     AssetHandleProvider, AssetId, AssetSelfHandle, AssetUuidMap, Handle, StrongHandle,
-    UntypedHandle,
 };
 use alloc::sync::Arc;
 use bevy_ecs::{
@@ -14,7 +13,6 @@ use bevy_ecs::{
     system::{Query, Res, ResMut, SystemChangeTick, SystemParam},
     world::{DeferredWorld, Mut, Ref, World},
 };
-use bevy_reflect::TypePath;
 use core::{
     any::TypeId,
     marker::PhantomData,
@@ -297,16 +295,6 @@ impl<'w, A: Asset> DetectChangesMut for AssetMut<'w, A> {
     }
 }
 
-/// A "loaded asset" containing the untyped handle for an asset stored in a given [`AssetPath`].
-///
-/// [`AssetPath`]: crate::AssetPath
-#[derive(Asset, TypePath)]
-pub struct LoadedUntypedAsset {
-    /// The handle to the loaded asset.
-    #[dependency]
-    pub handle: UntypedHandle,
-}
-
 /// Initializes the entity for `handle` with the minimum it needs to be considered an asset.
 ///
 /// Importantly, this omits inserting any asset data - use [`insert_asset`] for that.
@@ -447,8 +435,8 @@ pub(crate) fn despawn_unused_assets(world: &mut World) {
         .resource::<AssetHandleProvider>()
         .drop_receiver
         .clone();
-    for (entity, type_id) in drop_receiver.try_iter() {
-        AssetEventUnusedWriters::write_message(world, entity, type_id)
+    for entity in drop_receiver.try_iter() {
+        AssetEventUnusedWriters::write_message(world, entity)
             .expect("Asset type has been registered");
 
         world.despawn(entity.raw_entity());

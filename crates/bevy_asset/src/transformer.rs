@@ -1,6 +1,6 @@
 use crate::{
-    meta::Settings, Asset, AssetId, ErasedLoadedAsset, Handle, LabeledAsset, UntypedAssetId,
-    UntypedHandle,
+    meta::Settings, Asset, AssetId, ErasedHandle, ErasedLoadedAsset, Handle, LabeledAsset,
+    UntypedAssetId,
 };
 use alloc::{boxed::Box, vec::Vec};
 use atomicow::CowArc;
@@ -176,7 +176,7 @@ impl<A: Asset> TransformedAsset<A> {
     }
 
     /// Returns the [`UntypedHandle`] of the labeled asset with the provided 'label', if it exists.
-    pub fn get_untyped_handle<Q>(&self, label: &Q) -> Option<UntypedHandle>
+    pub fn get_untyped_handle<Q>(&self, label: &Q) -> Option<ErasedHandle>
     where
         CowArc<'static, str>: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -204,7 +204,7 @@ impl<A: Asset> TransformedAsset<A> {
     pub fn insert_labeled(
         &mut self,
         label: impl Into<CowArc<'static, str>>,
-        handle: impl Into<UntypedHandle>,
+        handle: impl Into<ErasedHandle>,
         asset: impl Into<ErasedLoadedAsset>,
     ) {
         let labeled = LabeledAsset {
@@ -216,16 +216,16 @@ impl<A: Asset> TransformedAsset<A> {
                 let labeled_entry = &mut self.labeled_assets[*entry.get()];
                 if labeled.handle != labeled_entry.handle {
                     self.asset_id_to_asset_index
-                        .remove(&labeled_entry.handle.id());
+                        .remove(&labeled_entry.handle.id().untyped());
                     self.asset_id_to_asset_index
-                        .insert(labeled.handle.id(), *entry.get());
+                        .insert(labeled.handle.id().untyped(), *entry.get());
                 }
                 *labeled_entry = labeled;
             }
             Entry::Vacant(entry) => {
                 entry.insert(self.labeled_assets.len());
                 self.asset_id_to_asset_index
-                    .insert(labeled.handle.id(), self.labeled_assets.len());
+                    .insert(labeled.handle.id().untyped(), self.labeled_assets.len());
                 self.labeled_assets.push(labeled);
             }
         }
@@ -355,7 +355,7 @@ impl<'a, A: Asset> TransformedSubAsset<'a, A> {
     }
 
     /// Returns the [`UntypedHandle`] of the labeled asset with the provided 'label', if it exists.
-    pub fn get_untyped_handle<Q>(&self, label: &Q) -> Option<UntypedHandle>
+    pub fn get_untyped_handle<Q>(&self, label: &Q) -> Option<ErasedHandle>
     where
         CowArc<'static, str>: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -383,7 +383,7 @@ impl<'a, A: Asset> TransformedSubAsset<'a, A> {
     pub fn insert_labeled(
         &mut self,
         label: impl Into<CowArc<'static, str>>,
-        handle: impl Into<UntypedHandle>,
+        handle: impl Into<ErasedHandle>,
         asset: impl Into<ErasedLoadedAsset>,
     ) {
         let labeled = LabeledAsset {
@@ -395,16 +395,16 @@ impl<'a, A: Asset> TransformedSubAsset<'a, A> {
                 let labeled_entry = &mut self.labeled_assets[*entry.get()];
                 if labeled.handle != labeled_entry.handle {
                     self.asset_id_to_asset_index
-                        .remove(&labeled_entry.handle.id());
+                        .remove(&labeled_entry.handle.id().untyped());
                     self.asset_id_to_asset_index
-                        .insert(labeled.handle.id(), *entry.get());
+                        .insert(labeled.handle.id().untyped(), *entry.get());
                 }
                 *labeled_entry = labeled;
             }
             Entry::Vacant(entry) => {
                 entry.insert(self.labeled_assets.len());
                 self.asset_id_to_asset_index
-                    .insert(labeled.handle.id(), self.labeled_assets.len());
+                    .insert(labeled.handle.id().untyped(), self.labeled_assets.len());
                 self.labeled_assets.push(labeled);
             }
         }

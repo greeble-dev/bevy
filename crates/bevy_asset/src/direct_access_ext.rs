@@ -1,7 +1,7 @@
 //! Add methods on `World` to simplify loading assets when all
 //! you have is a `World`.
 
-use core::{any::TypeId, marker::PhantomData};
+use core::marker::PhantomData;
 
 use bevy_ecs::{
     system::{Commands, Res, SystemParam},
@@ -14,8 +14,8 @@ use uuid::Uuid;
 use crate::{
     insert_asset, meta::Settings, setup_asset, Asset, AssetData, AssetEntity,
     AssetEntityDoesNotExistError, AssetEvent, AssetHandleProvider, AssetId, AssetMut, AssetPath,
-    AssetSelfHandle, AssetServer, AssetUuidMap, EntityHandle, Handle, ResolveUuidError,
-    UntypedEntityHandle, UntypedHandle,
+    AssetSelfHandle, AssetServer, AssetUuidMap, EntityHandle, ErasedEntityHandle, Handle,
+    ResolveUuidError, UntypedHandle,
 };
 
 /// An extension trait for methods for working with assets directly from a [`World`].
@@ -86,7 +86,7 @@ impl DirectAssetAccessExt for World {
     fn spawn_uuid_asset<A: Asset>(&mut self, uuid: Uuid, asset: A) -> Handle<A> {
         let handle = self.spawn_asset(asset);
         // spawn_asset always returns a Strong variant, so unwrap here is safe.
-        let entity_handle = UntypedEntityHandle::from(EntityHandle::try_from(handle).unwrap());
+        let entity_handle = ErasedEntityHandle::from(EntityHandle::try_from(handle).unwrap());
         self.resource_mut::<AssetUuidMap>()
             .set_uuid(uuid, entity_handle);
         // Send an asset event that this UUID has been added.
@@ -120,12 +120,9 @@ impl DirectAssetAccessExt for World {
 
     fn reserve_asset_handle<A: Asset>(&mut self) -> Handle<A> {
         let entity = AssetEntity::new_unchecked(self.spawn_empty().id());
-        let handle = self.resource::<AssetHandleProvider>().create_handle(
-            entity,
-            TypeId::of::<A>(),
-            None,
-            None,
-        );
+        let handle = self
+            .resource::<AssetHandleProvider>()
+            .create_handle(entity, None, None);
         setup_asset(self, &handle).unwrap();
         Handle::Strong(handle)
     }
@@ -368,7 +365,7 @@ impl InternalAssetCommands<'_, '_, '_> {
     fn spawn_uuid_asset<A: Asset>(&mut self, uuid: Uuid, asset: A) -> Handle<A> {
         let handle = self.spawn_asset::<A>(asset);
         // spawn_asset always returns a Strong variant, so unwrap here is safe.
-        let entity_handle = UntypedEntityHandle::from(EntityHandle::try_from(handle).unwrap());
+        let entity_handle = ErasedEntityHandle::from(EntityHandle::try_from(handle).unwrap());
         self.commands.queue(move |world: &mut World| {
             world
                 .resource_mut::<AssetUuidMap>()
@@ -411,9 +408,7 @@ impl InternalAssetCommands<'_, '_, '_> {
     #[must_use]
     fn reserve_handle<A: Asset>(&mut self) -> Handle<A> {
         let entity = AssetEntity::new_unchecked(self.commands.spawn_empty().id());
-        let handle = self
-            .provider
-            .create_handle(entity, TypeId::of::<A>(), None, None);
+        let handle = self.provider.create_handle(entity, None, None);
         {
             let handle = handle.clone();
             self.commands.queue(move |world: &mut World| {

@@ -2174,7 +2174,7 @@ mod test {
         run_app_until(&mut app, |_world| {
             let load_state = asset_server.get_load_state(handle_id).unwrap();
             match load_state {
-                LoadState::Loaded => Some(()),
+                LoadState::Loaded(_) => Some(()),
                 LoadState::Failed(err) => panic!("{err}"),
                 _ => None,
             }
@@ -2586,7 +2586,7 @@ mod test {
         run_app_until(&mut app, |_world| {
             let load_state = asset_server.get_load_state(handle.id()).unwrap();
             match load_state {
-                LoadState::Loaded => Some(()),
+                LoadState::Loaded(_) => Some(()),
                 LoadState::Failed(err) => panic!("{err}"),
                 _ => None,
             }

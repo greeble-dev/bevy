@@ -4,8 +4,8 @@
 use crate::{
     io::Reader,
     meta::{meta_transform_settings, AssetMetaDyn, MetaTransform, Settings},
-    Asset, AssetLoadError, AssetPath, ErasedAssetLoader, ErasedLoadedAsset, Handle, LoadContext,
-    LoadDirectError, LoadedAsset, LoadedUntypedAsset, UntypedHandle,
+    Asset, AssetLoadError, AssetPath, ErasedAssetLoader, ErasedHandle, ErasedLoadedAsset, Handle,
+    LoadContext, LoadDirectError, LoadedAsset, UntypedHandle,
 };
 use alloc::{borrow::ToOwned, boxed::Box, sync::Arc};
 use core::any::TypeId;
@@ -338,11 +338,11 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
     /// [`with_dynamic_type`].
     ///
     /// [`with_dynamic_type`]: Self::with_dynamic_type
-    pub fn load<'p>(self, path: impl Into<AssetPath<'p>>) -> UntypedHandle {
+    pub fn load<'p>(self, path: impl Into<AssetPath<'p>>) -> ErasedHandle {
         let path = path.into().to_owned();
         if path.path() == Path::new("") {
             error!("Attempted to load an asset with an empty path \"{path}\"!");
-            return UntypedHandle::default_for_type(self.typing.asset_type_id);
+            return ErasedHandle::default_for_type(self.typing.asset_type_id);
         }
         let handle = if self.load_context.should_load_dependencies {
             self.load_context
@@ -356,11 +356,8 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
         } else {
             self.load_context
                 .asset_server
-                .get_or_create_path_handle_erased(
-                    path,
-                    self.typing.asset_type_id,
-                    self.meta_transform,
-                )
+                .get_or_create_path_handle_untyped(path, self.meta_transform)
+                .erased(self.typing.asset_type_id)
         };
         // `load_erased_with_meta_transform` and `get_or_create_path_handle_erased` always returns a
         // Strong variant, so we are safe to unwrap.
@@ -375,11 +372,11 @@ impl NestedLoader<'_, '_, UnknownTyped, Deferred> {
     /// a dependency of this asset.
     ///
     /// This will infer the asset type from metadata.
-    pub fn load<'p>(self, path: impl Into<AssetPath<'p>>) -> Handle<LoadedUntypedAsset> {
+    pub fn load<'p>(self, path: impl Into<AssetPath<'p>>) -> UntypedHandle {
         let path = path.into().to_owned();
         if path.path() == Path::new("") {
             error!("Attempted to load an asset with an empty path \"{path}\"!");
-            return Handle::default();
+            return UntypedHandle::default();
         }
         let handle = if self.load_context.should_load_dependencies {
             self.load_context
@@ -388,7 +385,7 @@ impl NestedLoader<'_, '_, UnknownTyped, Deferred> {
         } else {
             self.load_context
                 .asset_server
-                .get_or_create_path_handle(path, self.meta_transform)
+                .get_or_create_path_handle_untyped(path, self.meta_transform)
         };
         // `load_unknown_type_with_meta_transform` and `get_or_create_path_handle` always returns a
         // Strong variant, so we are safe to unwrap.

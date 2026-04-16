@@ -20,7 +20,8 @@ use bevy_reflect::{
 
 use crate::{
     Asset, AssetData, AssetEntity, AssetId, AssetPath, AssetServer, AssetUuidMap,
-    DirectAssetAccessExt, Handle, InsertAssetError, LoadContext, UntypedAssetId, UntypedHandle,
+    DirectAssetAccessExt, ErasedAssetId, ErasedHandle, Handle, InsertAssetError, LoadContext,
+    UntypedAssetId, UntypedHandle,
 };
 
 /// Type data for the [`TypeRegistry`] used to operate on reflected [`Asset`]s.
@@ -38,18 +39,19 @@ use crate::{
 pub struct ReflectAsset {
     handle_type_id: TypeId,
     asset_data_type_id: TypeId,
+    asset_type_id: TypeId,
 
-    get: fn(&World, UntypedAssetId) -> Option<&dyn Reflect>,
+    get: fn(&World, ErasedAssetId) -> Option<&dyn Reflect>,
     // SAFETY:
     // - may only be called with an [`UnsafeWorldCell`] which can be used to read `AssetUuidMap`
     //   resource, and the `AssetData` component mutably
     // - may only be used to access **at most one** access at once
-    get_unchecked_mut: unsafe fn(UnsafeWorldCell<'_>, UntypedAssetId) -> Option<&mut dyn Reflect>,
-    spawn: fn(&mut World, &dyn PartialReflect) -> UntypedHandle,
-    insert: fn(&mut World, UntypedAssetId, &dyn PartialReflect) -> Result<(), InsertAssetError>,
+    get_unchecked_mut: unsafe fn(UnsafeWorldCell<'_>, ErasedAssetId) -> Option<&mut dyn Reflect>,
+    spawn: fn(&mut World, &dyn PartialReflect) -> ErasedHandle,
+    insert: fn(&mut World, ErasedAssetId, &dyn PartialReflect) -> Result<(), InsertAssetError>,
     count: fn(&World) -> usize,
-    ids: for<'w> fn(&'w World) -> Box<dyn Iterator<Item = UntypedAssetId> + 'w>,
-    remove: fn(&mut World, UntypedAssetId) -> Option<Box<dyn Reflect>>,
+    ids: for<'w> fn(&'w World) -> Box<dyn Iterator<Item = ErasedAssetId> + 'w>,
+    remove: fn(&mut World, ErasedAssetId) -> Option<Box<dyn Reflect>>,
 }
 
 impl ReflectAsset {
@@ -63,13 +65,18 @@ impl ReflectAsset {
         self.asset_data_type_id
     }
 
+    /// The [`TypeId`] of the asset.
+    pub fn asset_type_id(&self) -> TypeId {
+        self.asset_type_id
+    }
+
     /// Equivalent of [`Assets::get`](crate::Assets::get)
     pub fn get<'w>(
         &self,
         world: &'w World,
         asset_id: impl Into<UntypedAssetId>,
     ) -> Option<&'w dyn Reflect> {
-        (self.get)(world, asset_id.into())
+        (self.get)(world, asset_id.into().erased(self.asset_type_id))
     }
 
     /// Equivalent of [`AssetsMut::get_mut`](crate::AssetsMut::get)
@@ -84,7 +91,10 @@ impl ReflectAsset {
         )]
         // SAFETY: We have exclusive access to the whole world, which includes all
         unsafe {
-            (self.get_unchecked_mut)(world.as_unsafe_world_cell(), asset_id.into())
+            (self.get_unchecked_mut)(
+                world.as_unsafe_world_cell(),
+                asset_id.into().erased(self.asset_type_id),
+            )
         }
     }
 
@@ -127,11 +137,11 @@ impl ReflectAsset {
         asset_id: impl Into<UntypedAssetId>,
     ) -> Option<&'w mut dyn Reflect> {
         // SAFETY: requirements are deferred to the caller
-        unsafe { (self.get_unchecked_mut)(world, asset_id.into()) }
+        unsafe { (self.get_unchecked_mut)(world, asset_id.into().erased(self.asset_type_id)) }
     }
 
     /// Equivalent of [`DirectAssetAccessExt::spawn_asset`]
-    pub fn spawn(&self, world: &mut World, value: &dyn PartialReflect) -> UntypedHandle {
+    pub fn spawn(&self, world: &mut World, value: &dyn PartialReflect) -> ErasedHandle {
         (self.spawn)(world, value)
     }
     /// Equivalent of [`DirectAssetAccessExt::insert_asset`]
@@ -141,7 +151,7 @@ impl ReflectAsset {
         asset_id: impl Into<UntypedAssetId>,
         value: &dyn PartialReflect,
     ) -> Result<(), InsertAssetError> {
-        (self.insert)(world, asset_id.into(), value)
+        (self.insert)(world, asset_id.into().erased(self.asset_type_id), value)
     }
 
     /// Equivalent of [`DirectAssetAccessExt::remove_asset`]
@@ -150,7 +160,7 @@ impl ReflectAsset {
         world: &mut World,
         asset_id: impl Into<UntypedAssetId>,
     ) -> Option<Box<dyn Reflect>> {
-        (self.remove)(world, asset_id.into())
+        (self.remove)(world, asset_id.into().erased(self.asset_type_id))
     }
 
     /// Equivalent of [`Assets::count`](crate::Assets::count)
@@ -164,7 +174,7 @@ impl ReflectAsset {
     }
 
     /// Similar to [`Assets::iter`](crate::Assets::iter).
-    pub fn ids<'w>(&self, world: &'w World) -> impl Iterator<Item = UntypedAssetId> + 'w {
+    pub fn ids<'w>(&self, world: &'w World) -> impl Iterator<Item = ErasedAssetId> + 'w {
         (self.ids)(world)
     }
 }
@@ -174,6 +184,7 @@ impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
         ReflectAsset {
             handle_type_id: TypeId::of::<Handle<A>>(),
             asset_data_type_id: TypeId::of::<AssetData<A>>(),
+            asset_type_id: TypeId::of::<A>(),
             get: |world, asset_id| {
                 world
                     .get_asset::<A>(asset_id.typed_debug_checked())
@@ -202,7 +213,7 @@ impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
             spawn: |world, value| {
                 let value: A = FromReflect::from_reflect(value)
                     .expect("could not call `FromReflect::from_reflect` in `ReflectAsset::add`");
-                world.spawn_asset(value).untyped()
+                world.spawn_asset(value).erased()
             },
             insert: |world, asset_id, value| {
                 let value: A = FromReflect::from_reflect(value)
@@ -227,15 +238,15 @@ impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
             ids: |world| {
                 let Some(component_id) = world.components().get_id(TypeId::of::<AssetData<A>>())
                 else {
-                    return Box::new(empty::<UntypedAssetId>());
+                    return Box::new(empty::<ErasedAssetId>());
                 };
                 let Some(archetypes) = world.archetypes().component_index().get(&component_id)
                 else {
-                    return Box::new(empty::<UntypedAssetId>());
+                    return Box::new(empty::<ErasedAssetId>());
                 };
                 let mut archetype_ids = archetypes.keys();
                 let Some(first_id) = archetype_ids.next() else {
-                    return Box::new(empty::<UntypedAssetId>());
+                    return Box::new(empty::<ErasedAssetId>());
                 };
                 let archetype = world.archetypes().get(*first_id).unwrap();
                 let entities = archetype.entities().iter();
@@ -244,19 +255,19 @@ impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
                     world: &'w World,
                     archetype_ids: Keys<'w, ArchetypeId, ArchetypeRecord>,
                     entities: core::slice::Iter<'w, ArchetypeEntity>,
-                    type_id: TypeId,
+                    asset_type_id: TypeId,
                 }
 
                 impl Iterator for AssetIdIter<'_> {
-                    type Item = UntypedAssetId;
+                    type Item = ErasedAssetId;
 
                     fn next(&mut self) -> Option<Self::Item> {
                         // Loop until we either get an entity, or we run out of archetypes.
                         loop {
                             if let Some(archetype_entity) = self.entities.next() {
-                                return Some(UntypedAssetId::Entity {
-                                    type_id: self.type_id,
+                                return Some(ErasedAssetId::Entity {
                                     entity: AssetEntity::new_unchecked(archetype_entity.id()),
+                                    type_id: self.asset_type_id,
                                 });
                             }
 
@@ -273,12 +284,12 @@ impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
                     world,
                     archetype_ids,
                     entities,
-                    type_id: TypeId::of::<A>(),
+                    asset_type_id: TypeId::of::<A>(),
                 })
             },
             remove: |world, asset_id| {
                 world
-                    .remove_asset::<A>(asset_id.typed_debug_checked())
+                    .remove_asset::<A>(asset_id.typed())
                     .ok()
                     .map(|asset| Box::new(asset) as _)
             },
@@ -315,7 +326,7 @@ impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
 pub struct ReflectHandle {
     asset_type_id: TypeId,
     downcast_handle_untyped: fn(&dyn Any) -> Option<UntypedHandle>,
-    typed: fn(UntypedHandle) -> Box<dyn Reflect>,
+    typed: fn(ErasedHandle) -> Box<dyn Reflect>,
 }
 
 impl ReflectHandle {
@@ -331,7 +342,7 @@ impl ReflectHandle {
 
     /// A way to go from a [`UntypedHandle`] to a [`Handle<T>`] in a `Box<dyn Reflect>`.
     /// Equivalent of [`UntypedHandle::typed`].
-    pub fn typed(&self, handle: UntypedHandle) -> Box<dyn Reflect> {
+    pub fn typed(&self, handle: ErasedHandle) -> Box<dyn Reflect> {
         (self.typed)(handle)
     }
 }
@@ -345,7 +356,7 @@ impl<A: Asset> FromType<Handle<A>> for ReflectHandle {
                     .downcast_ref::<Handle<A>>()
                     .map(|h| h.clone().untyped())
             },
-            typed: |handle: UntypedHandle| Box::new(handle.typed_debug_checked::<A>()),
+            typed: |handle: ErasedHandle| Box::new(handle.typed_debug_checked::<A>()),
         }
     }
 }
@@ -417,7 +428,7 @@ impl ReflectSerializerProcessor for HandleSerializeProcessor {
                     }
                     Some(path) => HandleReference::Path(path.clone_owned()),
                 },
-                UntypedHandle::Uuid { uuid, .. } => HandleReference::Uuid(*uuid),
+                UntypedHandle::Uuid(uuid) => HandleReference::Uuid(*uuid),
             })
         }
 
@@ -482,36 +493,23 @@ pub trait LoadFromPath {
     /// Initiates the load for the given expected type ID, and the path.
     ///
     /// See [`AssetServer::load_erased`] for more.
-    fn load_from_path_erased(&mut self, type_id: TypeId, path: AssetPath<'static>)
-        -> UntypedHandle;
+    fn load_from_path_erased(&mut self, type_id: TypeId, path: AssetPath<'static>) -> ErasedHandle;
 }
 
 impl LoadFromPath for LoadContext<'_> {
-    fn load_from_path_erased(
-        &mut self,
-        type_id: TypeId,
-        path: AssetPath<'static>,
-    ) -> UntypedHandle {
+    fn load_from_path_erased(&mut self, type_id: TypeId, path: AssetPath<'static>) -> ErasedHandle {
         self.loader().with_dynamic_type(type_id).load(path)
     }
 }
 
 impl LoadFromPath for AssetServer {
-    fn load_from_path_erased(
-        &mut self,
-        type_id: TypeId,
-        path: AssetPath<'static>,
-    ) -> UntypedHandle {
+    fn load_from_path_erased(&mut self, type_id: TypeId, path: AssetPath<'static>) -> ErasedHandle {
         self.load_erased(type_id, path)
     }
 }
 
 impl LoadFromPath for &AssetServer {
-    fn load_from_path_erased(
-        &mut self,
-        type_id: TypeId,
-        path: AssetPath<'static>,
-    ) -> UntypedHandle {
+    fn load_from_path_erased(&mut self, type_id: TypeId, path: AssetPath<'static>) -> ErasedHandle {
         self.load_erased(type_id, path)
     }
 }
@@ -554,7 +552,7 @@ impl ReflectDeserializerProcessor for HandleDeserializeProcessor<'_> {
                 HandleReference::Path(path) => {
                     self.load_from_path.load_from_path_erased(type_id, path)
                 }
-                HandleReference::Uuid(uuid) => UntypedHandle::Uuid { type_id, uuid },
+                HandleReference::Uuid(uuid) => ErasedHandle::Uuid { type_id, uuid },
             })));
         }
 
@@ -571,7 +569,7 @@ impl ReflectDeserializerProcessor for HandleDeserializeProcessor<'_> {
         let type_id = reflect_handle.asset_type_id;
         Ok(Ok(reflect_handle.typed(match handle_reference {
             HandleReference::Path(path) => self.load_from_path.load_from_path_erased(type_id, path),
-            HandleReference::Uuid(uuid) => UntypedHandle::Uuid { type_id, uuid },
+            HandleReference::Uuid(uuid) => ErasedHandle::Uuid { type_id, uuid },
         })))
     }
 }
@@ -709,7 +707,6 @@ mod tests {
 
             let untyped = asset_server.load_untyped("def.cool.ron");
             run_app_until(&mut app, |_| asset_server.is_loaded(&untyped).then_some(()));
-            let untyped = app.world().get_asset(untyped.id()).unwrap().handle.clone();
 
             let ephemeral = app.world_mut().spawn_asset(OtherAsset);
 
@@ -783,7 +780,7 @@ mod tests {
         );
         assert_eq!(
             app.world()
-                .get_asset(stuff.untyped.try_typed::<CoolText>().unwrap().id())
+                .get_asset(stuff.untyped.typed::<CoolText>().id())
                 .unwrap()
                 .text,
             "world"

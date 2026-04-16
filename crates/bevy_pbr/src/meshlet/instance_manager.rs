@@ -4,7 +4,7 @@ use crate::{
     meshlet::asset::MeshletAabb, MaterialBindingId, MeshFlags, MeshTransforms, MeshUniform,
     PreviousGlobalTransform, RenderMaterialBindings, RenderMaterialInstances,
 };
-use bevy_asset::{AssetCommands, AssetEvent, AssetServer, Assets, UntypedAssetId};
+use bevy_asset::{AssetCommands, AssetEvent, AssetServer, Assets, ErasedAssetId};
 use bevy_camera::visibility::RenderLayers;
 use bevy_ecs::{
     entity::{Entities, Entity, EntityHashMap},
@@ -44,7 +44,7 @@ pub struct InstanceManager {
     /// Next material ID available.
     next_material_id: u32,
     /// Map of material asset to material ID.
-    material_id_lookup: HashMap<UntypedAssetId, u32>,
+    material_id_lookup: HashMap<ErasedAssetId, u32>,
     /// Set of material IDs used in the scene.
     material_ids_present_in_scene: HashSet<u32>,
 }
@@ -116,7 +116,7 @@ impl InstanceManager {
         };
 
         let mesh_material = mesh_material_ids.mesh_material(instance);
-        let mesh_material_binding_id = if mesh_material != DUMMY_MESH_MATERIAL.untyped() {
+        let mesh_material_binding_id = if mesh_material != DUMMY_MESH_MATERIAL.erased() {
             render_material_bindings
                 .get(&mesh_material)
                 .cloned()
@@ -152,7 +152,7 @@ impl InstanceManager {
     }
 
     /// Get the material ID for a [`crate::Material`].
-    pub fn get_material_id(&mut self, material_asset_id: UntypedAssetId) -> u32 {
+    pub fn get_material_id(&mut self, material_asset_id: ErasedAssetId) -> u32 {
         *self
             .material_id_lookup
             .entry(material_asset_id)

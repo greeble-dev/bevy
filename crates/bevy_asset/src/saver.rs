@@ -2,8 +2,8 @@ use crate::{
     io::{AssetWriterError, MissingAssetSourceError, MissingAssetWriterError, Writer},
     meta::{AssetAction, AssetMeta, AssetMetaDyn, Settings},
     transformer::TransformedAsset,
-    Asset, AssetContainer, AssetId, AssetLoader, AssetPath, AssetServer, ErasedLoadedAsset, Handle,
-    LabeledAsset, UntypedAssetId, UntypedHandle,
+    Asset, AssetContainer, AssetId, AssetLoader, AssetPath, AssetServer, ErasedHandle,
+    ErasedLoadedAsset, Handle, LabeledAsset, UntypedAssetId,
 };
 use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use atomicow::CowArc;
@@ -240,7 +240,8 @@ impl<'a, 'b, A: Asset> SavedAsset<'a, 'b, A> {
     }
 
     /// Returns the [`UntypedHandle`] of the labeled asset with the provided 'label', if it exists.
-    pub fn get_untyped_handle(&self, label: impl AsRef<str>) -> Option<UntypedHandle> {
+    // XXX TODO: Should be `get_erased_handle`?
+    pub fn get_untyped_handle(&self, label: impl AsRef<str>) -> Option<ErasedHandle> {
         let index = self.label_to_asset_index.get(label.as_ref())?;
         let labeled = &self.labeled_assets[*index];
         Some(labeled.handle.clone())
@@ -319,7 +320,7 @@ struct LabeledSavedAsset<'a> {
     /// The asset and its labeled assets.
     asset: ErasedSavedAsset<'a, 'a>,
     /// The handle of this labeled asset.
-    handle: UntypedHandle,
+    handle: ErasedHandle,
 }
 
 impl<'a> LabeledSavedAsset<'a> {
@@ -415,7 +416,7 @@ impl<'a> SavedAssetBuilder<'a> {
         self.add_labeled_asset_with_existing_handle_erased(
             label.into(),
             asset.upcast(),
-            handle.untyped(),
+            handle.erased(),
         );
     }
 
@@ -426,7 +427,7 @@ impl<'a> SavedAssetBuilder<'a> {
         &mut self,
         label: impl Into<CowArc<'b, str>>,
         asset: ErasedSavedAsset<'a, 'a>,
-    ) -> UntypedHandle {
+    ) -> ErasedHandle {
         let label = label.into();
         let handle = self.asset_server.create_fake_handle(
             asset.value.type_id(),
@@ -443,7 +444,9 @@ impl<'a> SavedAssetBuilder<'a> {
         &mut self,
         label: impl Into<CowArc<'b, str>>,
         asset: ErasedSavedAsset<'a, 'a>,
-        handle: UntypedHandle,
+        // XXX TODO: Should this be `ErasedHandle` or `UntypedHandle`? In theory
+        // we could get the type from `ErasedSavedAsset`?
+        handle: ErasedHandle,
     ) {
         // TODO: Check asset and handle have the same type.
         let labeled = LabeledSavedAsset { asset, handle };
@@ -452,16 +455,16 @@ impl<'a> SavedAssetBuilder<'a> {
                 let labeled_entry = &mut self.labeled_assets[*entry.get()];
                 if labeled.handle != labeled_entry.handle {
                     self.asset_id_to_asset_index
-                        .remove(&labeled_entry.handle.id());
+                        .remove(&labeled_entry.handle.id().untyped());
                     self.asset_id_to_asset_index
-                        .insert(labeled.handle.id(), *entry.get());
+                        .insert(labeled.handle.id().untyped(), *entry.get());
                 }
                 *labeled_entry = labeled;
             }
             Entry::Vacant(entry) => {
                 entry.insert(self.labeled_assets.len());
                 self.asset_id_to_asset_index
-                    .insert(labeled.handle.id(), self.labeled_assets.len());
+                    .insert(labeled.handle.id().untyped(), self.labeled_assets.len());
                 self.labeled_assets.push(labeled);
             }
         }

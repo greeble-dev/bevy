@@ -3,7 +3,7 @@ use crate::{
     RenderStartup, RenderSystems, Res,
 };
 use bevy_app::{App, Plugin, SubApp};
-use bevy_asset::{Asset, AssetEvent, AssetId, DirectAssetAccessExt, UntypedAssetId};
+use bevy_asset::{Asset, AssetEvent, AssetId, DirectAssetAccessExt, ErasedAssetId};
 use bevy_asset::{AssetsMut, RenderAssetUsages};
 use bevy_ecs::{
     prelude::{Commands, IntoScheduleConfigs, MessageReader, ResMut, Resource},
@@ -14,7 +14,7 @@ use bevy_ecs::{
 use bevy_log::{debug, error};
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_render::render_asset::RenderAssetBytesPerFrameLimiter;
-use core::marker::PhantomData;
+use core::{any::TypeId, marker::PhantomData};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -194,7 +194,7 @@ impl<A: ErasedRenderAsset> Default for ExtractedAssets<A> {
 /// Stores all GPU representations ([`ErasedRenderAsset`])
 /// of [`ErasedRenderAsset::SourceAsset`] as long as they exist.
 #[derive(Resource)]
-pub struct ErasedRenderAssets<ERA>(HashMap<UntypedAssetId, ERA>);
+pub struct ErasedRenderAssets<ERA>(HashMap<ErasedAssetId, ERA>);
 
 impl<ERA> Default for ErasedRenderAssets<ERA> {
     fn default() -> Self {
@@ -203,27 +203,27 @@ impl<ERA> Default for ErasedRenderAssets<ERA> {
 }
 
 impl<ERA> ErasedRenderAssets<ERA> {
-    pub fn get(&self, id: impl Into<UntypedAssetId>) -> Option<&ERA> {
+    pub fn get(&self, id: impl Into<ErasedAssetId>) -> Option<&ERA> {
         self.0.get(&id.into())
     }
 
-    pub fn get_mut(&mut self, id: impl Into<UntypedAssetId>) -> Option<&mut ERA> {
+    pub fn get_mut(&mut self, id: impl Into<ErasedAssetId>) -> Option<&mut ERA> {
         self.0.get_mut(&id.into())
     }
 
-    pub fn insert(&mut self, id: impl Into<UntypedAssetId>, value: ERA) -> Option<ERA> {
+    pub fn insert(&mut self, id: impl Into<ErasedAssetId>, value: ERA) -> Option<ERA> {
         self.0.insert(id.into(), value)
     }
 
-    pub fn remove(&mut self, id: impl Into<UntypedAssetId>) -> Option<ERA> {
+    pub fn remove(&mut self, id: impl Into<ErasedAssetId>) -> Option<ERA> {
         self.0.remove(&id.into())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (UntypedAssetId, &ERA)> {
+    pub fn iter(&self) -> impl Iterator<Item = (ErasedAssetId, &ERA)> {
         self.0.iter().map(|(k, v)| (*k, v))
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (UntypedAssetId, &mut ERA)> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (ErasedAssetId, &mut ERA)> {
         self.0.iter_mut().map(|(k, v)| (*k, v))
     }
 }
@@ -257,7 +257,7 @@ fn collect_erased_render_assets_to_reextract<A: ErasedRenderAsset>(
     mut render_assets: ResMut<ErasedRenderAssets<A::ErasedAsset>>,
     mut prepare_next_frame: ResMut<PrepareNextFrameAssets<A>>,
 ) {
-    let source_type_id = core::any::TypeId::of::<A::SourceAsset>();
+    let source_type_id = TypeId::of::<A::SourceAsset>();
     // ErasedRenderAssets is shared across all material types that produce
     // the same ErasedAsset type. Drain only the entries matching our SourceAsset.
     let mut ids = Vec::new();

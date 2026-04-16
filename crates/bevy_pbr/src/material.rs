@@ -4,7 +4,7 @@ use crate::material_bind_groups::{
 use crate::*;
 use alloc::sync::Arc;
 use bevy_asset::prelude::AssetChanged;
-use bevy_asset::{Asset, AssetEventSystems, AssetId, AssetServer, UntypedAssetId};
+use bevy_asset::{Asset, AssetEventSystems, AssetId, AssetServer, ErasedAssetId};
 use bevy_camera::visibility::ViewVisibility;
 use bevy_core_pipeline::core_3d::TransparentSortingInfo3d;
 use bevy_core_pipeline::deferred::{AlphaMask3dDeferred, Opaque3dDeferred};
@@ -577,7 +577,7 @@ impl RenderMaterialInstances {
     /// Meshes almost always have materials, but in very specific circumstances
     /// involving custom pipelines they won't. (See the
     /// `specialized_mesh_pipelines` example.)
-    pub(crate) fn mesh_material(&self, entity: MainEntity) -> UntypedAssetId {
+    pub(crate) fn mesh_material(&self, entity: MainEntity) -> ErasedAssetId {
         match self.instances.get(&entity) {
             Some(render_instance) => render_instance.asset_id,
             None => DUMMY_MESH_MATERIAL.into(),
@@ -591,7 +591,7 @@ impl RenderMaterialInstances {
 /// material type, for simplicity.
 pub struct RenderMaterialInstance {
     /// The material asset.
-    pub asset_id: UntypedAssetId,
+    pub asset_id: ErasedAssetId,
     /// The [`RenderMaterialInstances::current_change_tick`] at which this
     /// material instance was last modified.
     pub last_change_tick: Tick,
@@ -677,7 +677,7 @@ fn extract_mesh_materials<M: Material>(
             material_instances.instances.insert(
                 entity.into(),
                 RenderMaterialInstance {
-                    asset_id: material.id().untyped(),
+                    asset_id: material.id().erased(),
                     last_change_tick,
                 },
             );
@@ -1411,7 +1411,7 @@ pub struct ShadowsDepthOnlyDrawFunction;
 /// `M` type parameter, so it can be used in untyped contexts like
 /// [`crate::render::mesh::collect_meshes_for_gpu_building`].
 #[derive(Resource, Default, Deref, DerefMut)]
-pub struct RenderMaterialBindings(HashMap<UntypedAssetId, MaterialBindingId>);
+pub struct RenderMaterialBindings(HashMap<ErasedAssetId, MaterialBindingId>);
 
 /// Data prepared for a [`Material`] instance.
 pub struct PreparedMaterial {
@@ -1737,7 +1737,7 @@ where
             Self::Param,
         >,
     ) {
-        let Some(material_binding_id) = render_material_bindings.remove(&source_asset.untyped())
+        let Some(material_binding_id) = render_material_bindings.remove(&source_asset.erased())
         else {
             return;
         };

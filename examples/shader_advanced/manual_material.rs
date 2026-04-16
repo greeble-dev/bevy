@@ -254,7 +254,7 @@ fn extract_image_materials(
             material_instances.instances.insert(
                 entity.into(),
                 RenderMaterialInstance {
-                    asset_id: material.0.id().untyped(),
+                    asset_id: material.0.id().erased(),
                     last_change_tick,
                 },
             );

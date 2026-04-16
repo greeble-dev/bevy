@@ -551,7 +551,7 @@ mod tests {
         serde::{DynamicWorldSerializer, WorldDeserializer},
         DynamicWorld, DynamicWorldBuilder,
     };
-    use bevy_asset::{Asset, AssetPath, Handle, LoadFromPath, ReflectAsset, UntypedHandle};
+    use bevy_asset::{Asset, AssetPath, ErasedHandle, Handle, LoadFromPath, ReflectAsset};
     use bevy_ecs::{
         entity::{Entity, EntityHashMap},
         prelude::{Component, ReflectComponent, ReflectResource, Resource, World},
@@ -733,7 +733,7 @@ mod tests {
             &mut self,
             _type_id: TypeId,
             _path: AssetPath<'static>,
-        ) -> UntypedHandle {
+        ) -> ErasedHandle {
             unimplemented!()
         }
     }

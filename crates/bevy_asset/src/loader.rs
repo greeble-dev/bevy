@@ -5,7 +5,7 @@ use crate::{
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfo, ProcessedInfoMinimal, Settings},
     path::AssetPath,
     Asset, AssetEntity, AssetEntityDoesNotExistError, AssetLoadError, AssetServer, AssetServerMode,
-    Handle, UntypedAssetId, UntypedHandle,
+    ErasedHandle, Handle, UntypedAssetId,
 };
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use atomicow::CowArc;
@@ -132,7 +132,7 @@ where
 
 pub(crate) struct LabeledAsset {
     pub(crate) asset: ErasedLoadedAsset,
-    pub(crate) handle: UntypedHandle,
+    pub(crate) handle: ErasedHandle,
 }
 
 /// The successful result of an [`AssetLoader::load`] call. This contains the loaded "root" asset and any other "labeled" assets produced
@@ -192,7 +192,7 @@ impl<A: Asset> LoadedAsset<A> {
     /// Returns the labeled asset given its asset ID if it exists.
     ///
     /// This can be used to get the asset from its handle since `&Handle` implements
-    /// [`Into<UntypedAssetId>`].
+    /// [`Into<ErasedAssetId>`].
     pub fn get_labeled_by_id(&self, id: impl Into<UntypedAssetId>) -> Option<&ErasedLoadedAsset> {
         let index = self.asset_id_to_asset_index.get(&id.into())?;
         let labeled = &self.labeled_assets[*index];
@@ -504,7 +504,7 @@ impl<'a> LoadContext<'a> {
             .get_or_create_path_handle(labeled_path, None);
         let asset = LabeledAsset {
             asset: loaded_asset,
-            handle: handle.clone().untyped(),
+            handle: handle.clone().erased(),
         };
         match self.label_to_asset_index.entry(label) {
             Entry::Occupied(entry) => {
@@ -531,7 +531,7 @@ impl<'a> LoadContext<'a> {
     /// See [`AssetPath`] for more on labeled assets.
     pub fn has_labeled_asset<'b>(&self, label: impl Into<CowArc<'b, str>>) -> bool {
         let path = self.asset_path.clone().with_label(label.into());
-        !self.asset_server.get_handles_untyped(&path).is_empty()
+        self.asset_server.get_handle_untyped(&path).is_some()
     }
 
     /// "Finishes" this context by populating the final [`Asset`] value.

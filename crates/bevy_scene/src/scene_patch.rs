@@ -3,7 +3,7 @@ use crate::{
     ResolvedSceneRoot, Scene, SceneDependencies, SceneList,
 };
 use alloc::sync::Arc;
-use bevy_asset::{Asset, AssetServer, Assets, Handle, LoadFromPath, UntypedHandle};
+use bevy_asset::{Asset, AssetServer, Assets, ErasedHandle, Handle, LoadFromPath};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     component::Component,
@@ -21,7 +21,7 @@ pub struct ScenePatch {
     pub scene: Box<dyn Scene>,
     /// The dependencies of `scene` (populated using [`Scene::register_dependencies`]). These are "asset dependencies" and will affect the load state.
     #[dependency]
-    pub dependencies: Vec<UntypedHandle>,
+    pub dependencies: Vec<ErasedHandle>,
     /// The [`ResolvedScene`], if exists. This is populated after the [`Scene`] has been loaded and resolved
     // TODO: consider breaking this out to prevent mutating asset events when resolved. Assets as Entities will enable this!
     // TODO: This Arc exists to allow nested ResolvedSceneRoot::apply when borrowing inherited ScenePatch assets (see the ResolvedSceneRoot::apply implementation).
@@ -136,7 +136,7 @@ pub struct SceneListPatch {
 
     /// The dependencies of `scene_list` (populated using [`SceneList::register_dependencies`]). These are "asset dependencies" and will affect the load state.
     #[dependency]
-    pub dependencies: Vec<UntypedHandle>,
+    pub dependencies: Vec<ErasedHandle>,
 
     /// The [`ResolvedSceneListRoot`], if exists. This is populated after the scene list and its dependencies have been loaded and resolved.
     // TODO: consider breaking this out to prevent mutating asset events when resolved
