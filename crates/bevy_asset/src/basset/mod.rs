@@ -4,8 +4,8 @@ use crate::{
     basset::{
         action::{LoadPath, LoadPathParams},
         cache::{
-            ActionCacheKey, BassetHash, CacheLoaderDependency, ContentCache, DependencyCacheKey,
-            DependencyCacheValue, MemoryAndFileCache,
+            ActionCacheKey, CacheLoaderDependency, DependencyCacheKey, DependencyCacheValue,
+            MemoryAndFileCache,
         },
         dependency_graph::DependencyGraph,
         publisher::{
@@ -697,7 +697,6 @@ pub(crate) struct DevelopmentActionSource {
     // see to avoid cloning things like `BassetSettings::asset_type_name_to_action'.
     // See also comment on `AssetPlugin::basset_settings`.
     settings: Arc<DevelopmentActionSourceSettings>,
-    content_cache: ContentCache,
     dependency_graph: Option<DependencyGraph>,
     action_cache: Option<MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>>,
 }
@@ -708,12 +707,14 @@ impl DevelopmentActionSource {
         sources: Arc<AssetSources>,
         registry: TypeRegistryArc,
     ) -> Self {
+        // TODO: Dependency graph should be optional based on a setting?
         let dependency_graph = Some(DependencyGraph::new(
             settings
                 .file_cache_path
                 .as_ref()
                 .map(|p| p.join("dependency")),
             settings.validate_dependency_cache,
+            sources,
             registry.clone(),
         ));
 
@@ -726,7 +727,6 @@ impl DevelopmentActionSource {
 
         Self {
             settings,
-            content_cache: ContentCache::new(sources),
             dependency_graph,
             action_cache,
         }
@@ -752,46 +752,6 @@ impl DevelopmentActionSource {
             .get(type_name)
             .map(move |s| (&*s.0, &*s.1))
     }
-
-    // XXX TODO: If we know the path is an action then we don't need async? Is that
-    // worth optimizing for?
-    async fn dependency_key_internal(
-        &self,
-        path: &LoaderDependency,
-        _settings: Option<&dyn Settings>,
-    ) -> DependencyCacheKey {
-        // XXX TODO: Seed hash?
-        let mut hasher = blake3::Hasher::new();
-
-        // XXX TODO: Should we be including settings in the dependency key? Unclear
-        // if needed now with that we have the `LoadPath` action.
-        //
-        // if let Some(meta) = meta {
-        //     hasher.update(&meta.serialize());
-        // }
-
-        // XXX TODO: Should we also mix in something here to make sure that the two
-        // `LoaderDependency` variants are separate?
-
-        match path {
-            LoaderDependency::Load(action) => {
-                // XXX TODO: Is this the best way to hash actions?
-                let mut action_hasher = FixedHasher.build_hasher();
-                Hash::hash(&action, &mut action_hasher);
-                hasher.update(&action_hasher.finish().to_le_bytes());
-            }
-            LoaderDependency::File(path) => {
-                hasher.update(path.to_string().as_bytes());
-
-                let content_hash = self.content_cache.get(path).await.expect("XXX TODO");
-                hasher.update(&content_hash.as_bytes());
-            }
-        }
-
-        // XXX TODO: if `LoaderDependency::Load` then we should include the loader versions.
-
-        DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
-    }
 }
 
 impl ActionSource for DevelopmentActionSource {
@@ -814,11 +774,18 @@ impl ActionSource for DevelopmentActionSource {
             // XXX TODO: Avoid clone?
             // XXX TODO: Could have a fast path here since we know the dependency key
             // is for an action?
-            let dependency_key = self
-                .dependency_key_internal(&LoaderDependency::Load(action.clone()), None)
-                .await;
+            let dependency_key = if let Some(dependency_graph) = &self.dependency_graph {
+                Some(
+                    dependency_graph
+                        .dependency_key(&LoaderDependency::Load(action.clone()), None)
+                        .await,
+                )
+            } else {
+                None
+            };
 
             if action_function.cacheable()
+                && let Some(dependency_key) = dependency_key
                 && let Some(action_cache) = &self.action_cache
                 && let Some(dependency_graph) = &self.dependency_graph
             {
@@ -826,7 +793,7 @@ impl ActionSource for DevelopmentActionSource {
                 // up in a situation where the saver has been compiled out but we still
                 // want to read from the cache.
 
-                if let Some((action_key, _)) = dependency_graph.action_key(action, self).await
+                if let Some((action_key, _)) = dependency_graph.action_key(action).await
                     && let Some(cached_standalone_asset) =
                         action_cache.get(&action_key, action).await
                 {
@@ -837,7 +804,7 @@ impl ActionSource for DevelopmentActionSource {
                 }
             }
 
-            let apply_context = ApplyContext::new(asset_server, Some(dependency_key));
+            let apply_context = ApplyContext::new(asset_server, dependency_key);
 
             let asset = action_function
                 .apply(apply_context, action.params())
@@ -912,9 +879,13 @@ impl ActionSource for DevelopmentActionSource {
         path: &'a LoaderDependency,
         settings: Option<&'a dyn Settings>,
     ) -> Option<BoxedFuture<'a, Option<DependencyCacheKey>>> {
-        Some(Box::pin(async move {
-            Some(self.dependency_key_internal(path, settings).await)
-        }))
+        if let Some(dependency_graph) = &self.dependency_graph {
+            Some(Box::pin(async move {
+                Some(dependency_graph.dependency_key(path, settings).await)
+            }))
+        } else {
+            None
+        }
     }
 
     // XXX TODO: Settings?
@@ -1025,7 +996,7 @@ impl ActionSource for DevelopmentActionSource {
                 //
                 // XXX TODO: Should we be checking for done here or where we add stuff to
                 // the input stack? Note that the latter would mean we have to de-dupe
-                // before we initialise the input stack above.
+                // before we initialize the input stack above.
                 if !done.insert(input_asset.clone()) {
                     continue;
                 }

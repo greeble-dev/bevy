@@ -1,17 +1,22 @@
 use crate::{
     basset::{
         cache::{
-            ActionCacheKey, CacheLoaderDependency, DependencyCacheKey, DependencyCacheValue,
-            MemoryAndFileCache,
+            ActionCacheKey, BassetHash, CacheLoaderDependency, ContentCache, DependencyCacheKey,
+            DependencyCacheValue, MemoryAndFileCache,
         },
-        DevelopmentActionSource, RootAssetPath, RootAssetRef,
+        RootAssetPath, RootAssetRef,
     },
+    io::AssetSources,
+    meta::Settings,
     LoaderDependency,
 };
 use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
-use bevy_platform::collections::HashMap;
+use bevy_platform::{collections::HashMap, hash::FixedHasher};
 use bevy_reflect::TypeRegistryArc;
-use core::fmt::{Debug, Display, Write};
+use core::{
+    fmt::{Debug, Display, Write},
+    hash::{BuildHasher, Hash, Hasher},
+};
 use indexmap::IndexMap;
 use petgraph::{
     acyclic::Acyclic, data::Build, graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef,
@@ -291,7 +296,8 @@ pub(crate) struct DependencyGraph {
     // XXX TODO: Would have preferred `RwLock`, but we can't because `petgraph::Acyclic`
     // is not `Sync` due to using `RefCell`.
     graph: Mutex<InternalGraph>,
-    cache: Option<MemoryAndFileCache<DependencyCacheKey, Arc<DependencyCacheValue>>>,
+    dependency_cache: Option<MemoryAndFileCache<DependencyCacheKey, Arc<DependencyCacheValue>>>,
+    content_cache: ContentCache,
     // XXX TODO: We should have loader versions here for calculating dependency keys?
 }
 
@@ -299,27 +305,67 @@ impl DependencyGraph {
     pub(crate) fn new(
         dependency_cache_path: Option<PathBuf>,
         validate: bool,
+        sources: Arc<AssetSources>,
         registry: TypeRegistryArc,
     ) -> Self {
         Self {
             graph: Default::default(),
             // XXX TODO: Add an option to disable the dependency memory cache?
-            cache: Some(MemoryAndFileCache::new(
+            dependency_cache: Some(MemoryAndFileCache::new(
                 "dependency_cache",
                 dependency_cache_path,
                 validate,
                 registry,
             )),
+            content_cache: ContentCache::new(sources),
         }
+    }
+
+    // XXX TODO: If we know the path is an action then we don't need async? Is that
+    // worth optimizing for?
+    pub(crate) async fn dependency_key(
+        &self,
+        path: &LoaderDependency,
+        _settings: Option<&dyn Settings>,
+    ) -> DependencyCacheKey {
+        // XXX TODO: Seed hash?
+        let mut hasher = blake3::Hasher::new();
+
+        // XXX TODO: Should we be including settings in the dependency key? Unclear
+        // if needed now with that we have the `LoadPath` action.
+        //
+        // if let Some(meta) = meta {
+        //     hasher.update(&meta.serialize());
+        // }
+
+        // XXX TODO: Should we also mix in something here to make sure that the two
+        // `LoaderDependency` variants are separate?
+
+        match path {
+            LoaderDependency::Load(action) => {
+                // XXX TODO: Is this the best way to hash actions?
+                let mut action_hasher = FixedHasher.build_hasher();
+                Hash::hash(&action, &mut action_hasher);
+                hasher.update(&action_hasher.finish().to_le_bytes());
+            }
+            LoaderDependency::File(path) => {
+                hasher.update(path.to_string().as_bytes());
+
+                let content_hash = self.content_cache.get(path).await.expect("XXX TODO");
+                hasher.update(&content_hash.as_bytes());
+            }
+        }
+
+        // XXX TODO: if `LoaderDependency::Load` then we should include the loader versions.
+
+        DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
     }
 
     pub(crate) async fn action_key(
         &self,
         path: &RootAssetRef,
-        // XXX TODO: Try to avoid dependency on our containing action source.
-        action_source: &DevelopmentActionSource,
     ) -> Option<(ActionCacheKey, Arc<DependencyCacheValue>)> {
-        if let Some(cache) = &self.cache {
+        if let Some(cache) = &self.dependency_cache {
             let mut stack = Vec::<(LoaderDependency, Option<DependencyCacheKey>)>::new();
 
             // XXX TODO: Document that `IndexMap` is for consistent ordering.
@@ -331,7 +377,6 @@ impl DependencyGraph {
             let mut pending_files =
                 IndexMap::<RootAssetPath<'static>, Option<DependencyCacheKey>>::new();
 
-            // XXX TODO: Check that we're correct to assume `LoaderDependency::Load`.
             stack.push((LoaderDependency::Load(path.clone()), None));
 
             while let Some((path, tentative_dependency_key)) = stack.pop() {
@@ -354,8 +399,7 @@ impl DependencyGraph {
                 };
 
                 // XXX TODO: Settings parameter?
-                let current_dependency_key =
-                    action_source.dependency_key_internal(&path, None).await;
+                let current_dependency_key = self.dependency_key(&path, None).await;
 
                 // The tentative dependency key came from the dependency cache. Check
                 // if it matches the current file state. If not then invalidate the
@@ -455,7 +499,7 @@ impl DependencyGraph {
             .unwrap_or_else(PoisonError::into_inner)
             .set_load(path.clone(), dependency_key, dependency_value.clone());
 
-        if let Some(cache) = &self.cache {
+        if let Some(cache) = &self.dependency_cache {
             cache.put(dependency_key, dependency_value, path);
         }
 
