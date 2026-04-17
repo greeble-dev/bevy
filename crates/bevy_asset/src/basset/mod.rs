@@ -12,7 +12,10 @@ use crate::{
             write_pack_file, PublishDependency, PublishInput, ReadablePackFile, StagedAsset,
             WritablePackFile,
         },
-        standalone::{read_standalone_asset, write_standalone_asset},
+        standalone::{
+            load_standalone_asset, read_standalone_asset, save_standalone_asset,
+            write_standalone_asset,
+        },
     },
     io::{AssetReaderError, AssetSourceId, AssetSources},
     meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
@@ -823,18 +826,14 @@ impl ActionSource for DevelopmentActionSource {
                 // up in a situation where the saver has been compiled out but we still
                 // want to read from the cache.
 
-                let action_key = dependency_graph.action_key(action, self).await;
-
-                if let Some(action_key) = action_key
+                if let Some((action_key, _)) = dependency_graph.action_key(action, self).await
                     && let Some(cached_standalone_asset) =
                         action_cache.get(&action_key, action).await
                 {
-                    return read_standalone_asset(
-                        &cached_standalone_asset,
-                        asset_server,
-                        dependency_key,
-                    )
-                    .await;
+                    let standalone_asset = read_standalone_asset(&cached_standalone_asset)?;
+
+                    return load_standalone_asset(&standalone_asset, asset_server, dependency_key)
+                        .await;
                 }
             }
 
@@ -886,10 +885,12 @@ impl ActionSource for DevelopmentActionSource {
                             .await
                             .expect("XXX TODO");
 
-                        let blob =
-                            write_standalone_asset(&asset, &*loader, saver, settings).await?;
+                        let standalone_asset =
+                            save_standalone_asset(&asset, &*loader, saver, settings).await?;
 
-                        action_cache.put(action_key, blob.into(), action);
+                        let standalone_asset_blob = write_standalone_asset(&standalone_asset)?;
+
+                        action_cache.put(action_key, standalone_asset_blob.into(), action);
                     } else {
                         let type_name = asset.asset_type_name();
                         debug!(?type_name, ?action, "Cache ineligible, no saver for type.");
@@ -1001,7 +1002,7 @@ impl ActionSource for DevelopmentActionSource {
         input: PublishInput,
         asset_server: &'a AssetServer,
         pack_path: &'a Path,
-    ) -> Option<BoxedFuture<'a, ()>> {
+    ) -> Option<BoxedFuture<'a, Result<(), BevyError>>> {
         Some(Box::pin(async move {
             let begin_time = Instant::now();
 
@@ -1012,7 +1013,7 @@ impl ActionSource for DevelopmentActionSource {
             // Assets that have already been published to `pack`.
             //
             // XXX TODO: Consider removing this and checking `pack` directly?
-            // Kinda depends on multithread approaches.
+            // Kinda depends on multithreading approaches.
             let mut done = HashSet::<PublishDependency>::new();
 
             // XXXX TODO: Consume rather than clone?
@@ -1022,9 +1023,9 @@ impl ActionSource for DevelopmentActionSource {
                 // XXX TODO: Clone is annoying, but not sure it's possible to avoid
                 // without doing a separate `contains` then `insert`?
                 //
-                // XXX TODO: Should we be checking done here or where we add stuff to
+                // XXX TODO: Should we be checking for done here or where we add stuff to
                 // the input stack? Note that the latter would mean we have to de-dupe
-                // `input`.
+                // before we initialise the input stack above.
                 if !done.insert(input_asset.clone()) {
                     continue;
                 }
@@ -1090,19 +1091,43 @@ impl ActionSource for DevelopmentActionSource {
                     //     );
                     // }
                     PublishDependency::Load(action) => {
-                        // XXX TODO: Can this handle actions that can't be saved?
+                        // XXX TODO: Can this read directly out of the action cache?
+                        //
+                        // Cases:
+                        //
+                        // - Dependency graph hit, action is cacheable, action cache hit - just pull from action and recurse loader dependencies
+                        // - Dependency graph hit, action is cacheable, action cache miss - load, recurse cached dependencies
+                        // - Dependency graph hit, action not cacheable - recurse cached dependencies
+                        // - Dependency graph miss - load, recurse dependencies
 
-                        // XXX TODO: Can this read directly out of the action cache? We're
-                        // mostly replicating what that's already done. Maybe the standalone
-                        // files can be organized in such a way that we can grab `meta_bytes`
-                        // and `action_bytes` directly. Or maybe there's better options for
-                        // copying the cache.
+                        // let action_function = self
+                        //     .action_function(action.params().type_id())
+                        //     .ok_or_else(|| {
+                        //         // XXX TODO: Clarify error?
+                        //         BevyError::from(format!(
+                        //             "Couldn't find action \"{}\")",
+                        //             action.params().type_name()
+                        //         ))
+                        //     })?;
 
-                        let loaded = asset_server
-                            .basset_action_source()
-                            .apply(action, asset_server)
-                            .await
-                            .expect("XXX TODO");
+                        // if action_function.cacheable()
+                        //     && let Some(action_cache) = &self.action_cache
+                        //     && let Some(dependency_graph) = &self.dependency_graph
+                        // {
+                        //     if let Some((action_key, _)) =
+                        //         dependency_graph.action_key(action, self).await
+                        //         && let Some(cached_standalone_asset) =
+                        //             action_cache.get(&action_key, action).await
+                        //     {
+                        //         let standalone_asset =
+                        //             read_standalone_asset(&cached_standalone_asset)?;
+                        //     }
+                        // } else {
+                        //     // get dependencies, loading if necessary
+                        //     // push dependencies to stack
+                        // }
+
+                        let loaded = self.apply(action, asset_server).await.expect("XXX TODO");
 
                         // XXX TODO: Decide if we try to support the original path.
                         let fake_path =
@@ -1110,7 +1135,12 @@ impl ActionSource for DevelopmentActionSource {
 
                         // XXX TODO: Duplicates where `load_action` writes to the cache.
                         let (saver, saver_settings) =
-                            self.saver(loaded.asset_type_name()).expect("XXX TODO");
+                            self.saver(loaded.asset_type_name()).ok_or_else(|| {
+                                format!(
+                                    "Couldn't find saver for asset type \"{}\".",
+                                    loaded.asset_type_name()
+                                )
+                            })?;
 
                         let loader = asset_server
                             .get_asset_loader_with_type_name(saver.loader_type_name())
@@ -1169,6 +1199,8 @@ impl ActionSource for DevelopmentActionSource {
                 "Publishing finished in {:.2}s",
                 begin_time.elapsed().as_secs_f32()
             );
+
+            Ok(())
         }))
     }
 }
@@ -1325,7 +1357,8 @@ pub trait ActionSource: Send + Sync + 'static {
         _input: PublishInput,
         _asset_server: &'a AssetServer,
         _pack_path: &'a Path,
-    ) -> Option<BoxedFuture<'a, ()>> {
+    ) -> Option<BoxedFuture<'a, Result<(), BevyError>>> // XXX TODO: More specific error type?
+    {
         todo!("XXX TODO: What should this do by default?")
     }
 }

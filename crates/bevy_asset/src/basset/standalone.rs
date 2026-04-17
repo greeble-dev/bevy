@@ -22,11 +22,13 @@ const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
 // style.
 const STANDALONE_VERSION: u16 = 1;
 
-pub async fn read_standalone_asset(
-    blob: &[u8],
-    asset_server: &AssetServer,
-    dependency_key: DependencyCacheKey,
-) -> Result<ErasedLoadedAsset, BevyError> {
+pub struct StandaloneAssetData {
+    meta: Vec<u8>,
+    asset: Vec<u8>,
+}
+
+// XXX TODO: More specific error type?
+pub(crate) fn read_standalone_asset(blob: &[u8]) -> Result<StandaloneAssetData, BevyError> {
     let mut blob = BlobReader::new(blob);
 
     let magic = blob.bytes(STANDALONE_MAGIC.len()).expect("XXX TODO");
@@ -41,10 +43,22 @@ pub async fn read_standalone_asset(
         return Err("XXX TODO".into());
     }
 
-    let meta_bytes = blob.bytes_sized().expect("XXX TODO");
-    let asset_bytes = blob.bytes_sized().expect("XXX TODO");
+    let meta = blob.bytes_sized().expect("XXX TODO");
+    let asset = blob.bytes_sized().expect("XXX TODO");
 
-    let minimal_meta = ron::de::from_bytes::<AssetMetaMinimal>(meta_bytes).expect("XXX TODO");
+    Ok(StandaloneAssetData {
+        meta: meta.into(),
+        asset: asset.into(),
+    })
+}
+
+// XXX TODO: More specific error type?
+pub(crate) async fn load_standalone_asset(
+    data: &StandaloneAssetData,
+    asset_server: &AssetServer,
+    dependency_key: DependencyCacheKey,
+) -> Result<ErasedLoadedAsset, BevyError> {
+    let minimal_meta = ron::de::from_bytes::<AssetMetaMinimal>(&data.meta).expect("XXX TODO");
 
     let loader_name = match &minimal_meta.asset {
         AssetActionMinimal::Load { loader } => loader.as_str(),
@@ -56,9 +70,9 @@ pub async fn read_standalone_asset(
         .await
         .expect("XXX TODO");
 
-    let meta = loader.deserialize_meta(meta_bytes).expect("XXX TODO");
+    let meta = loader.deserialize_meta(&data.meta).expect("XXX TODO");
 
-    let mut reader = SliceReader::new(asset_bytes);
+    let mut reader = SliceReader::new(&data.asset);
 
     // XXX TODO: What's the correct value here? If we're in an action apply
     // context then we shouldn't load dependencies, since we only need the
@@ -100,12 +114,13 @@ pub async fn read_standalone_asset(
     Ok(asset)
 }
 
-pub async fn write_standalone_asset(
+// XXX TODO: More specific error type?
+pub(crate) async fn save_standalone_asset(
     asset: &ErasedLoadedAsset,
     loader: &dyn ErasedAssetLoader,
     saver: &dyn ErasedAssetSaver,
     saver_settings: &dyn Settings,
-) -> Result<Box<[u8]>, BevyError> {
+) -> Result<StandaloneAssetData, BevyError> {
     let mut asset_bytes = Vec::<u8>::new();
 
     // XXX TODO: As with reading, need to decide if we try to support the original path.
@@ -124,14 +139,22 @@ pub async fn write_standalone_asset(
     // want processing, so we just need the equivalent of `AssetAction::Load`.
     let meta_bytes = loader.default_meta().serialize();
 
+    Ok(StandaloneAssetData {
+        meta: meta_bytes,
+        asset: asset_bytes,
+    })
+}
+
+// XXX TODO: Error unnecessary?
+pub(crate) fn write_standalone_asset(data: &StandaloneAssetData) -> Result<Box<[u8]>, BevyError> {
     let mut writer = Vec::<u8>::new();
     {
         let mut blob = BlobWriter::new(&mut writer);
 
         blob.bytes(STANDALONE_MAGIC);
         blob.u16(STANDALONE_VERSION);
-        blob.bytes_sized(&meta_bytes);
-        blob.bytes_sized(&asset_bytes);
+        blob.bytes_sized(&data.meta);
+        blob.bytes_sized(&data.asset);
     }
 
     Ok(writer.into())

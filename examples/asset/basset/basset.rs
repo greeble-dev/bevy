@@ -1082,8 +1082,11 @@ fn main() {
                 asset_server
                     .basset_action_source()
                     .publish(input, asset_server, &pack_file_path)
-                    .expect("XXX TODO"),
-            );
+                    .expect(
+                        "XXX TODO: This is just checking that publishing was actually implemented.",
+                    ),
+            )
+            .expect("XXX TODO");
 
             if args.dump_dependency_graph {
                 asset_server.basset_action_source().dump_dependency_graph();
