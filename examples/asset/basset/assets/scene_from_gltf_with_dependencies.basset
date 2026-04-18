@@ -1,13 +1,15 @@
-(root: (
-	params: {
-		"basset::action::AcmeSceneFromGltfParams": (
-			gltf: (
-				params: {
-					"bevy_asset::basset::action::LoadPathParams": (
-						path: "BoxTextured/BoxTextured.gltf",
-					)
-				}
+(
+	root: (
+		params: {
+			"basset::action::AcmeSceneFromGltfParams": (
+				gltf: (
+					params: {
+						"bevy_asset::basset::action::LoadPathParams": (
+							path: "BoxTextured/BoxTextured.gltf",
+						)
+					}
+				)
 			)
-		)
-	}
-))
+		}
+	)
+)

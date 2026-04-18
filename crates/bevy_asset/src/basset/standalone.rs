@@ -23,8 +23,8 @@ const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
 const STANDALONE_VERSION: u16 = 1;
 
 pub struct StandaloneAssetData {
-    meta: Vec<u8>,
-    asset: Vec<u8>,
+    pub meta: Vec<u8>,
+    pub asset: Vec<u8>,
 }
 
 // XXX TODO: More specific error type?
@@ -134,9 +134,6 @@ pub(crate) async fn save_standalone_asset(
     // with certain settings then we should preserve them here? There might also
     // be situations where a saver/loader pair are expecting certain settings?
     // Could get messy.
-    //
-    // XXX TODO: Consider using a custom meta rather than `AssetMeta` - we don't
-    // want processing, so we just need the equivalent of `AssetAction::Load`.
     let meta_bytes = loader.default_meta().serialize();
 
     Ok(StandaloneAssetData {

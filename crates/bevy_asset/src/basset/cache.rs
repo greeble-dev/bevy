@@ -536,7 +536,6 @@ impl DependencyCacheValue {
         &self.loader_dependees
     }
 
-    #[expect(unused, reason = "XXX TODO")]
     pub(crate) fn external_dependees<'a>(&'a self) -> &'a [RootAssetRef] {
         &self.external_dependees
     }

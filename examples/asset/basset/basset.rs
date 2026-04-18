@@ -50,6 +50,7 @@ mod action {
     pub struct JoinStrings;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
+    #[reflect(BassetActionParams)]
     pub struct JoinStringsParams {
         separator: String,
         strings: Vec<AssetRef<'static>>,
@@ -82,6 +83,7 @@ mod action {
     pub struct UppercaseString;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
+    #[reflect(BassetActionParams)]
     pub struct UppercaseStringParams {
         string: AssetRef<'static>,
     }
@@ -144,6 +146,7 @@ mod action {
     pub struct MeshletFromMesh;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
+    #[reflect(BassetActionParams)]
     pub struct MeshletFromMeshParams {
         mesh: AssetRef<'static>, // XXX TODO: Better if we had a typed asset ref?
         vertex_position_quantization_factor: Option<u8>,
@@ -180,8 +183,10 @@ mod action {
     pub struct ConvertAcmeSceneMeshesToMeshlets;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
+    #[reflect(BassetActionParams)]
     pub struct ConvertAcmeSceneMeshesToMeshletsParams {
         scene: AssetRef<'static>,
+        #[reflect(default)]
         vertex_position_quantization_factor: Option<u8>,
     }
 
@@ -976,11 +981,11 @@ fn main() {
             //     Transform::from_xyz(-1.0, 0.0, 0.0)
             //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             // ),
-            // (
-            //     "meshlet_scene.basset".into(),
-            //     Transform::from_xyz(1.0, 0.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
+            (
+                "meshlet_scene.basset".into(),
+                Transform::from_xyz(1.0, 0.0, 0.0)
+                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            ),
         ],
     };
 
@@ -1057,10 +1062,13 @@ fn main() {
             app.add_systems(Startup, setup)
                 .add_systems(Update, print)
                 .add_systems(Update, reload.run_if(on_timer(Duration::from_secs(2))))
-                .add_systems(Update, dump.run_if(on_timer(Duration::from_secs(4))))
-                .add_systems(Update, acme::tick_scene_spawners)
-                .insert_resource(args)
-                .run();
+                .add_systems(Update, acme::tick_scene_spawners);
+
+            if args.mode == ArgMode::Development {
+                app.add_systems(Update, dump.run_if(on_timer(Duration::from_secs(4))));
+            }
+
+            app.insert_resource(args).run();
         }
 
         ArgMode::Publish => {

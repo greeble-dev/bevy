@@ -93,7 +93,7 @@ impl Plugin for BassetPlugin {
 // XXX TODO: Maybe think more about the name. "root asset" does match other parts
 // of the asset system, but it's a bit ambiguous. E.g. publishing wants a list
 // of "root assets", but they're the roots of the publishing tree.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Reflect)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Reflect)]
 #[reflect(opaque)]
 #[reflect(Serialize, Deserialize)]
 pub struct RootAssetPath<'a> {
@@ -102,6 +102,10 @@ pub struct RootAssetPath<'a> {
 }
 
 impl<'a> RootAssetPath<'a> {
+    pub fn new(source: AssetSourceId<'a>, path: CowArc<'a, Path>) -> Self {
+        Self { source, path }
+    }
+
     pub fn without_label(value: AssetPath<'a>) -> RootAssetPath<'a> {
         Self {
             // XXX TODO: Avoid clones?
@@ -119,10 +123,19 @@ impl<'a> RootAssetPath<'a> {
     }
 }
 
-impl Display for RootAssetPath<'_> {
+impl<'a> Debug for RootAssetPath<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // XXX TODO: Avoid conversion?
-        Display::fmt(&AssetPath::from(self.clone()), f)
+        Display::fmt(self, f)
+    }
+}
+
+impl<'a> Display for RootAssetPath<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if let AssetSourceId::Name(name) = self.source() {
+            write!(f, "{name}://")?;
+        }
+        write!(f, "{}", self.path.display())?;
+        Ok(())
     }
 }
 
@@ -1001,165 +1014,189 @@ impl ActionSource for DevelopmentActionSource {
                     continue;
                 }
 
+                // XXX TODO: Prettier output, don't use `Debug`.
+                info!(?input_asset, "Publishing");
+
                 match &input_asset {
-                    // PublishDependency::Load(RootAssetRef::Path(path)) => {
-                    //     // XXX TODO: Try using dependency key to avoid this load - it's
-                    //     // only needed for discovering dependencies and getting the meta.
-                    //     // Can we try and reuse the dependency graph? Implies that
-                    //     // dependency graph should store the loader name?
-
-                    //     // XXX TODO: Settings parameter?
-                    //     let (loaded, loader) = load_path(asset_server, path, &None)
-                    //         .await
-                    //         .expect("XXX TODO");
-
-                    //     // XXX TODO: Duplicated in `RootAssetRef::Action` case?
-                    //     loaded.visit_dependencies(&mut |dependency| {
-                    //         if let Some(path) = match dependency {
-                    //             AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
-                    //             AssetDependency::Handle(handle) => handle.path().cloned(),
-                    //             AssetDependency::Path(path) => Some(path.clone()),
-                    //         } {
-                    //             // XXX TODO: Oh, this is awkward. We shouldn't assume
-                    //             // `PublishDependency::Load` here. Does `VisitAssetDependencies`
-                    //             // need to make a distinction? That will be ugly.
-                    //             input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
-                    //         };
-                    //     });
-
-                    //     input_stack.extend(
-                    //         loaded
-                    //             .loader_dependencies
-                    //             .keys()
-                    //             .cloned()
-                    //             .map(PublishDependency::from),
-                    //     );
-
-                    //     let asset_bytes = {
-                    //         let mut reader = asset_server
-                    //             .get_source(path.source())
-                    //             .expect("XXX TODO")
-                    //             .reader()
-                    //             .read(path.path())
-                    //             .await
-                    //             .expect("XXX TODO");
-                    //         let mut bytes = Vec::new();
-                    //         reader.read_to_end(&mut bytes).await.expect("XXX TODO");
-                    //         bytes.into()
-                    //     };
-
-                    //     // XXX TODO: Sort out loader settings? See above where we call `load_path`.
-                    //     let meta_bytes = loader.default_meta().serialize().into_boxed_slice();
-
-                    //     // XXX TODO: The action case somewhat duplicates this. Refactor?
-
-                    //     pack.paths.insert(
-                    //         ManifestPath::from(path),
-                    //         StagedAsset {
-                    //             asset_bytes,
-                    //             meta_bytes,
-                    //         },
-                    //     );
-                    // }
                     PublishDependency::Load(action) => {
-                        // XXX TODO: Can this read directly out of the action cache?
-                        //
-                        // Cases:
-                        //
-                        // - Dependency graph hit, action is cacheable, action cache hit - just pull from action and recurse loader dependencies
-                        // - Dependency graph hit, action is cacheable, action cache miss - load, recurse cached dependencies
-                        // - Dependency graph hit, action not cacheable - recurse cached dependencies
-                        // - Dependency graph miss - load, recurse dependencies
-
-                        // let action_function = self
-                        //     .action_function(action.params().type_id())
-                        //     .ok_or_else(|| {
-                        //         // XXX TODO: Clarify error?
-                        //         BevyError::from(format!(
-                        //             "Couldn't find action \"{}\")",
-                        //             action.params().type_name()
-                        //         ))
-                        //     })?;
-
-                        // if action_function.cacheable()
-                        //     && let Some(action_cache) = &self.action_cache
-                        //     && let Some(dependency_graph) = &self.dependency_graph
-                        // {
-                        //     if let Some((action_key, _)) =
-                        //         dependency_graph.action_key(action, self).await
-                        //         && let Some(cached_standalone_asset) =
-                        //             action_cache.get(&action_key, action).await
-                        //     {
-                        //         let standalone_asset =
-                        //             read_standalone_asset(&cached_standalone_asset)?;
-                        //     }
-                        // } else {
-                        //     // get dependencies, loading if necessary
-                        //     // push dependencies to stack
-                        // }
-
-                        let loaded = self.apply(action, asset_server).await.expect("XXX TODO");
-
-                        // XXX TODO: Decide if we try to support the original path.
-                        let fake_path =
-                            AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
-
-                        // XXX TODO: Duplicates where `load_action` writes to the cache.
-                        let (saver, saver_settings) =
-                            self.saver(loaded.asset_type_name()).ok_or_else(|| {
-                                format!(
-                                    "Couldn't find saver for asset type \"{}\".",
-                                    loaded.asset_type_name()
-                                )
+                        let action_function = self
+                            .action_function(action.params().type_id())
+                            .ok_or_else(|| {
+                                // XXX TODO: Clarify error?
+                                BevyError::from(format!(
+                                    "Couldn't find action \"{}\")",
+                                    action.params().type_name()
+                                ))
                             })?;
 
-                        let loader = asset_server
-                            .get_asset_loader_with_type_name(saver.loader_type_name())
-                            .await
-                            .expect("XXX TODO");
+                        // XXX TODO: Review all the code in here to avoid duplication.
+                        //
+                        // There's currently four cases:
+                        //
+                        // 1. Action cacheable, dependency and action cache hit.
+                        //     - Copy from action cache, add external dependencies to stack.
+                        // 2. Action cacheable, dependency or action cache miss.
+                        //     - Apply action and save, add external dependencies to stack.
+                        // 3. Action not cacheable, dependency cache hit.
+                        //     - Add loader and external dependencies to stack.
+                        // 4. Action not cacheable, dependency cache miss.
+                        //     - Apply action, add loader and external dependencies to stack.
+                        //
+                        // Some of the paths are similar. And some already do redundant work,
+                        // like the action cache miss repeats the action cache lookup.
 
-                        let meta_bytes = loader.default_meta().serialize();
+                        if action_function.cacheable() {
+                            if let Some(dependency_graph) = &self.dependency_graph
+                                && let Some((action_key, dependency_value)) =
+                                    dependency_graph.action_key(action).await
+                                && let Some(action_cache) = &self.action_cache
+                                && let Some(cached_standalone_asset) =
+                                    action_cache.get(&action_key, action).await
+                            {
+                                let standalone_asset =
+                                    read_standalone_asset(&cached_standalone_asset)?;
 
-                        let mut asset_bytes = Vec::<u8>::new();
-                        {
-                            saver
-                                .save(&mut asset_bytes, &loaded, saver_settings, fake_path)
-                                .await
-                                .expect("XXX TODO");
+                                pack.actions.insert(
+                                    Box::<str>::from(action.to_string()),
+                                    StagedAsset {
+                                        asset_bytes: standalone_asset.asset.into(),
+                                        meta_bytes: Some(standalone_asset.meta.into()),
+                                    },
+                                );
+
+                                for dependency in dependency_value.external_dependees() {
+                                    input_stack.push(PublishDependency::Load(dependency.clone()));
+                                }
+                            } else {
+                                // XXX TODO: This is duplicating some of the the action cache path that we've done above.
+                                // Need to skip that part, but we still want to populate the action cache.
+
+                                let loaded =
+                                    self.apply(action, asset_server).await.expect("XXX TODO");
+
+                                // XXX TODO: Decide if we try to support the original path.
+                                let fake_path = AssetPath::parse(
+                                    "ERROR - Standalone assets shouldn't use their path",
+                                );
+
+                                // XXX TODO: Duplicates where `load_action` writes to the cache.
+                                let (saver, saver_settings) =
+                                    self.saver(loaded.asset_type_name()).ok_or_else(|| {
+                                        format!(
+                                            "Couldn't find saver for asset type \"{}\".",
+                                            loaded.asset_type_name()
+                                        )
+                                    })?;
+
+                                let loader = asset_server
+                                    .get_asset_loader_with_type_name(saver.loader_type_name())
+                                    .await?;
+
+                                // XXX TODO: Review and check that we're ok with default settings.
+                                // Same decision made in `save_standalone_asset`.
+                                let meta_bytes =
+                                    loader.default_meta().serialize().into_boxed_slice();
+
+                                let mut asset_bytes = Vec::<u8>::new();
+                                saver
+                                    .save(&mut asset_bytes, &loaded, saver_settings, fake_path)
+                                    .await
+                                    .expect("XXX TODO");
+
+                                pack.actions.insert(
+                                    Box::<str>::from(action.to_string()),
+                                    StagedAsset {
+                                        asset_bytes: asset_bytes.into(),
+                                        meta_bytes: Some(meta_bytes),
+                                    },
+                                );
+
+                                loaded.visit_dependencies(&mut |dependency| {
+                                    if let Some(path) = match dependency {
+                                        AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
+                                        AssetDependency::Handle(handle) => handle.path().cloned(),
+                                        AssetDependency::Path(path) => Some(path.clone()),
+                                    } {
+                                        // XXX TODO: Similar to case above - shouldn't assume PublishDependency::Load.
+                                        input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
+                                    };
+                                });
+                            }
+                        } else {
+                            if let Some(dependency_graph) = &self.dependency_graph
+                                && let Some((_, dependency_value)) =
+                                    dependency_graph.action_key(action).await
+                            {
+                                for dependency in dependency_value.loader_dependees() {
+                                    input_stack.push(dependency.0.clone().into());
+                                }
+
+                                for dependency in dependency_value.external_dependees() {
+                                    input_stack.push(PublishDependency::Load(dependency.clone()));
+                                }
+                            } else {
+                                let loaded =
+                                    self.apply(action, asset_server).await.expect("XXX TODO");
+
+                                for dependency in loaded.loader_dependencies.keys() {
+                                    input_stack.push(dependency.clone().into());
+                                }
+
+                                loaded.visit_dependencies(&mut |dependency| {
+                                    if let Some(path) = match dependency {
+                                        AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
+                                        AssetDependency::Handle(handle) => handle.path().cloned(),
+                                        AssetDependency::Path(path) => Some(path.clone()),
+                                    } {
+                                        // XXX TODO: Similar to case above - shouldn't assume PublishDependency::Load.
+                                        input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
+                                    };
+                                });
+                            }
                         }
-
-                        pack.actions.insert(
-                            Box::<str>::from(action.to_string()),
-                            StagedAsset {
-                                asset_bytes: asset_bytes.into(),
-                                meta_bytes: meta_bytes.into(),
-                            },
-                        );
-
-                        loaded.visit_dependencies(&mut |dependency| {
-                            if let Some(path) = match dependency {
-                                AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
-                                AssetDependency::Handle(handle) => handle.path().cloned(),
-                                AssetDependency::Path(path) => Some(path.clone()),
-                            } {
-                                // XXX TODO: Similar to case above - shouldn't assume PublishDependency::Load.
-                                input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
-                            };
-                        });
 
                         // XXX TODO: We're not accounting for the standalone asset having
                         // loader dependencies. Not sure if we can work them out unless
                         // we do a fake load?
                     }
-                    PublishDependency::File(_path) => {
-                        // Should we check done so that we're not publishing the same
-                        // bytes as `PublishDependency::Load` and `PublishDependency::File`?
-                        todo!();
+                    PublishDependency::File(path) => {
+                        let reader = asset_server
+                            .get_source(path.source())
+                            .expect("XXX TODO")
+                            .reader();
+
+                        let mut asset_bytes = Vec::new();
+                        reader
+                            .read(path.path())
+                            .await
+                            .expect("XXX TODO")
+                            .read_to_end(&mut asset_bytes)
+                            .await
+                            .expect("XXX TODO");
+
+                        // XXX TODO: Should throw error if the error isn't `NotFound`?
+                        let meta_bytes =
+                            if let Ok(mut meta_reader) = reader.read_meta(path.path()).await {
+                                let mut meta_bytes = Vec::new();
+                                meta_reader
+                                    .read_to_end(&mut meta_bytes)
+                                    .await
+                                    .expect("XXX TODO");
+
+                                Some(meta_bytes)
+                            } else {
+                                None
+                            };
+
+                        pack.paths.insert(
+                            path.clone(),
+                            StagedAsset {
+                                asset_bytes: asset_bytes.into(),
+                                meta_bytes: meta_bytes.map(Vec::into_boxed_slice),
+                            },
+                        );
                     }
                 }
-
-                // XXX TODO: Prettier output, don't use `Debug`.
-                info!(?input_asset, "Publishing");
             }
 
             info!("Writing pack file {pack_path:?}");
@@ -1447,8 +1484,16 @@ impl ActionSource for PublishedActionSource {
                 return fallback_action_handler(action, asset_server, self).await;
             };
 
+            let Some(mut meta_reader) = readers.meta else {
+                // XXX TODO: Review this. Maybe consider having separate storage
+                // for actions so it's clear that a meta is required. Also a
+                // possibility that we don't need the full meta for actions,
+                // just the loader name?
+                return Err("Actions require a meta. XXX TODO: Improve".into());
+            };
+
             let mut meta_bytes = Vec::<u8>::new();
-            readers.meta.read_to_end(&mut meta_bytes).await?;
+            meta_reader.read_to_end(&mut meta_bytes).await?;
 
             let minimal_meta =
                 ron::de::from_bytes::<AssetMetaMinimal>(&meta_bytes).expect("XXX TODO");

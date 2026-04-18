@@ -13,11 +13,13 @@ use crate::{
     AssetPath, AssetRef, AssetServer, LoaderDependency,
 };
 use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
-// XXX TODO: Try and replace `async_fs` with `AssetSource`.
+// XXX TODO: Try and replace `async_fs` with `AssetSource`?
 use async_fs::File;
+use atomicow::CowArc;
 use bevy_ecs::error::BevyError;
 use bevy_platform::collections::{HashMap, HashSet};
 use core::{
+    fmt::Debug,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -27,7 +29,7 @@ use std::{
     format,
     path::{Path, PathBuf},
 };
-use tracing::error;
+use tracing::{debug, error};
 
 // XXX TODO: Document. Currently duplicates `LoaderDependency` - should pick one?
 // XXX TODO: Decide if we use `RootAssetRef` or `AssetRef`. The labels don't matter
@@ -53,52 +55,25 @@ pub struct PublishInput {
 }
 
 pub(crate) struct StagedAsset {
-    pub(crate) meta_bytes: Box<[u8]>,
+    pub(crate) meta_bytes: Option<Box<[u8]>>,
     pub(crate) asset_bytes: Box<[u8]>,
-}
-
-// XXX TODO: Is this duplicating `RootAssetPath`? Maybe justified if we don't
-// need `CowArc`.
-#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct ManifestPath {
-    pub(crate) source: Option<Box<str>>,
-    pub(crate) path: Box<Path>,
-}
-
-impl<'a> From<&RootAssetPath<'a>> for ManifestPath {
-    fn from(value: &RootAssetPath) -> Self {
-        ManifestPath::new(value.source(), value.path())
-    }
-}
-
-impl ManifestPath {
-    pub(crate) fn new(source: &AssetSourceId, path: &Path) -> Self {
-        Self {
-            source: source.as_str().map(Box::<str>::from),
-            path: path.into(),
-        }
-    }
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(crate) struct ReadableManifest {
-    pub(crate) paths: HashMap<ManifestPath, MetaAndAssetPackLocation>,
-    pub(crate) actions: HashMap<Box<str>, MetaAndAssetPackLocation>,
+    pub(crate) paths: HashMap<RootAssetPath<'static>, AssetPackLocation>,
+    pub(crate) actions: HashMap<Box<str>, AssetPackLocation>,
 }
 
 impl ReadableManifest {
-    pub(crate) fn path(
-        &self,
-        source: &AssetSourceId,
-        path: &Path,
-    ) -> Option<MetaAndAssetPackLocation> {
+    pub(crate) fn path(&self, source: &AssetSourceId, path: &Path) -> Option<AssetPackLocation> {
         self.paths
-            // XXX TODO: Avoid allocations hidden in `ManifestPath::new`.
-            .get(&ManifestPath::new(source, path))
+            // XXX TODO: Can we look this up without cloning the source?
+            .get(&RootAssetPath::new(source.clone(), CowArc::Borrowed(path)))
             .cloned()
     }
 
-    pub(crate) fn action(&self, action: &str) -> Option<MetaAndAssetPackLocation> {
+    pub(crate) fn action(&self, action: &str) -> Option<AssetPackLocation> {
         self.actions.get(action).cloned()
     }
 }
@@ -110,8 +85,8 @@ pub(crate) struct PackLocation {
 }
 
 #[derive(Copy, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct MetaAndAssetPackLocation {
-    pub(crate) meta: PackLocation,
+pub(crate) struct AssetPackLocation {
+    pub(crate) meta: Option<PackLocation>,
     pub(crate) asset: PackLocation,
 }
 
@@ -120,7 +95,7 @@ struct PublishedAssetReader {
     pub(crate) pack_file: Arc<ReadablePackFile>,
 }
 
-// XXX TODO: Duplicated from crate::io. Refactor? Or try to avoid in the first
+// XXX TODO: Duplicated from `bevy_asset::io::EmptyPathStream`. Refactor? Or try to avoid in the first
 // place - it's only used to stub out `PublishedAssetReader::read_directory`.
 struct EmptyPathStream;
 
@@ -177,14 +152,14 @@ impl<'a> ReadableStorage {
     }
 }
 
-// XXX TODO: Review `pub`.
+// XXX TODO: Review `pub(crate)`.
 pub struct ReadablePackFile {
     pub(crate) manifest: ReadableManifest,
     pub(crate) storage: ReadableStorage,
 }
 
 pub(crate) struct MetaAndAssetReader<'a> {
-    pub(crate) meta: SliceReader<'a>,
+    pub(crate) meta: Option<SliceReader<'a>>,
     pub(crate) asset: SliceReader<'a>,
 }
 
@@ -194,6 +169,8 @@ impl<'a> ReadablePackFile {
         source: &AssetSourceId,
         path: &Path,
     ) -> Result<SliceReader<'a>, AssetReaderError> {
+        debug!("Read file meta: {path:?}");
+
         let location = self
             .manifest
             .path(source, path)
@@ -201,7 +178,11 @@ impl<'a> ReadablePackFile {
             // need to catch and add more content higher up the chain?
             .ok_or_else(|| AssetReaderError::NotFound(path.into()))?;
 
-        self.storage.read(location.meta)
+        if let Some(location) = location.meta {
+            self.storage.read(location)
+        } else {
+            Err(AssetReaderError::NotFound(path.into()))
+        }
     }
 
     // XXX TODO: Very similar to `ReadablePackFile::path_meta`. Refactor?
@@ -210,6 +191,8 @@ impl<'a> ReadablePackFile {
         source: &AssetSourceId,
         path: &Path,
     ) -> Result<SliceReader<'a>, AssetReaderError> {
+        debug!("Read file asset: {path:?}");
+
         let location = self
             .manifest
             .path(source, path)
@@ -222,15 +205,22 @@ impl<'a> ReadablePackFile {
         &'a self,
         action: &str,
     ) -> Result<MetaAndAssetReader<'a>, AssetReaderError> {
+        debug!("Read action: {action:?}");
+
         let location = self
             .manifest
             .action(action)
             .ok_or_else(|| AssetReaderError::NotFound(action.into()))?;
 
-        Ok(MetaAndAssetReader {
-            meta: self.storage.read(location.meta)?,
-            asset: self.storage.read(location.asset)?,
-        })
+        let meta = if let Some(meta_location) = location.meta {
+            Some(self.storage.read(meta_location)?)
+        } else {
+            None
+        };
+
+        let asset = self.storage.read(location.asset)?;
+
+        Ok(MetaAndAssetReader { meta, asset })
     }
 }
 
@@ -241,7 +231,7 @@ pub async fn read_pack_file(path: &Path) -> ReadablePackFile {
         .await
         .expect("XXX TODO");
 
-    // XXX TODO: Avoid full load. Need `BlobReader` or an alternative to support
+    // XXX TODO: Avoid full load? Need `BlobReader` or an alternative to support
     // reading from `Read`.
     let mut bytes = Vec::<u8>::new();
     AsyncReadExt::read_to_end(&mut file, &mut bytes)
@@ -260,26 +250,82 @@ pub async fn read_pack_file(path: &Path) -> ReadablePackFile {
     // XXX TODO: Error handling.
     assert_eq!(version, PACK_VERSION);
 
-    // XXX TODO: Read version.
-
     let manifest_bytes = blob.bytes_sized().expect("XXX TODO");
     let storage_bytes = blob.bytes_sized().expect("XXX TODO");
 
     let manifest = ron::de::from_bytes::<ReadableManifest>(manifest_bytes).expect("XXX TODO");
 
-    // XXX TODO: Surely there's one function to convert to boxed slice?
-    let storage = storage_bytes.to_vec().into_boxed_slice();
+    // XXX TODO: Surely there's one function that can convert slice to boxed slice?
+    let storage = ReadableStorage(storage_bytes.to_vec().into_boxed_slice());
 
-    ReadablePackFile {
-        manifest,
-        storage: ReadableStorage(storage),
-    }
+    ReadablePackFile { manifest, storage }
 }
 
 #[derive(Default)]
 pub(crate) struct WritablePackFile {
-    pub(crate) paths: HashMap<ManifestPath, StagedAsset>,
+    pub(crate) paths: HashMap<RootAssetPath<'static>, StagedAsset>,
     pub(crate) actions: HashMap<Box<str>, StagedAsset>,
+}
+
+struct StorageBuilder {
+    files: Vec<StagedAsset>,
+    length: usize,
+}
+
+impl StorageBuilder {
+    fn new() -> Self {
+        StorageBuilder {
+            files: Vec::new(),
+            length: 0,
+        }
+    }
+
+    fn add(&mut self, asset: StagedAsset) -> AssetPackLocation {
+        let meta_location = if let Some(meta_bytes) = &asset.meta_bytes {
+            let meta_offset = self.length;
+            self.length += meta_bytes.len();
+
+            Some(PackLocation {
+                offset: meta_offset,
+                length: meta_bytes.len(),
+            })
+        } else {
+            None
+        };
+
+        let asset_offset = self.length;
+        self.length += asset.asset_bytes.len();
+
+        let asset_location = PackLocation {
+            offset: asset_offset,
+            length: asset.asset_bytes.len(),
+        };
+
+        self.files.push(asset);
+
+        AssetPackLocation {
+            meta: meta_location,
+            asset: asset_location,
+        }
+    }
+
+    fn finish(self) -> Box<[u8]> {
+        // XXX TODO: Could maybe add some verification here if we keep a copy
+        // of the `AssetPackLocation` returned by `add`? Not sure if worth it.
+
+        let mut result = Vec::with_capacity(self.length);
+
+        for file in self.files {
+            if let Some(meta_bytes) = &file.meta_bytes {
+                result.extend_from_slice(meta_bytes);
+            }
+            result.extend_from_slice(&file.asset_bytes);
+        }
+
+        assert_eq!(result.len(), self.length);
+
+        result.into()
+    }
 }
 
 pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) {
@@ -287,84 +333,20 @@ pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) {
     // same folder will likely be accessed together. Not sure if there's anything
     // sensible we can do for actions though.
 
-    // Predict the storage length so that we can allocate it in one chunk.
-    //
-    // XXX TODO: Could consider writing directly to the file instead of memory?
-
-    // XXX TODO: Avoid implicit panic in `sum`?
-    let path_storage_length = pack
-        .paths
-        .iter()
-        .map(|(_, file)| file.meta_bytes.len() + file.asset_bytes.len())
-        .sum::<usize>();
-
-    // XXX TODO: Reduce duplication of path version.
-    let action_storage_length = pack
-        .actions
-        .iter()
-        .map(|(_, file)| file.meta_bytes.len() + file.asset_bytes.len())
-        .sum::<usize>();
-
-    let storage_length = path_storage_length + action_storage_length;
-
-    let mut storage_bytes = Vec::<u8>::with_capacity(storage_length);
+    let mut storage_builder = StorageBuilder::new();
     let mut manifest = ReadableManifest::default();
 
-    // XXX TODO: More efficient if we drain?
     for (path, file) in pack.paths {
-        let meta_location = PackLocation {
-            offset: storage_bytes.len(),
-            length: file.meta_bytes.len(),
-        };
-
-        // XXX TODO: Review if `extend_from_slice` is best.
-        storage_bytes.extend_from_slice(&file.meta_bytes);
-
-        let asset_location = PackLocation {
-            offset: storage_bytes.len(),
-            length: file.asset_bytes.len(),
-        };
-
-        // XXX TODO: Review if `extend_from_slice` is best.
-        storage_bytes.extend_from_slice(&file.asset_bytes);
-
-        manifest.paths.insert(
-            path,
-            MetaAndAssetPackLocation {
-                meta: meta_location,
-                asset: asset_location,
-            },
-        );
+        debug!("Writing path \"{path}\"");
+        manifest.paths.insert(path, storage_builder.add(file));
     }
 
-    // XXX TODO: Reduce duplication of path case?
     for (action, file) in pack.actions {
-        let meta_location = PackLocation {
-            offset: storage_bytes.len(),
-            length: file.meta_bytes.len(),
-        };
-
-        // XXX TODO: Review if `extend_from_slice` is best.
-        storage_bytes.extend_from_slice(&file.meta_bytes);
-
-        let asset_location = PackLocation {
-            offset: storage_bytes.len(),
-            length: file.asset_bytes.len(),
-        };
-
-        // XXX TODO: Review if `extend_from_slice` is best.
-        storage_bytes.extend_from_slice(&file.asset_bytes);
-
-        manifest.actions.insert(
-            action,
-            MetaAndAssetPackLocation {
-                meta: meta_location,
-                asset: asset_location,
-            },
-        );
+        debug!("Writing action \"{action}\"");
+        manifest.actions.insert(action, storage_builder.add(file));
     }
 
-    assert_eq!(storage_length, storage_bytes.len());
+    let storage = storage_builder.finish();
 
     let manifest_bytes = ron::ser::to_string(&manifest)
         .expect("XXX TODO")
@@ -379,7 +361,7 @@ pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) {
         blob.bytes(PACK_MAGIC);
         blob.u16(PACK_VERSION);
         blob.bytes_sized(&manifest_bytes);
-        blob.bytes_sized(&storage_bytes);
+        blob.bytes_sized(&storage);
     }
 
     // XXX TODO: This pattern of creating the folder and using a temp file is
@@ -389,19 +371,21 @@ pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) {
         .expect("TODO");
 
     let temp_path = path.with_extension("tmp");
-    {
-        let mut temp_file = async_fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path)
-            .await
-            .expect("XXX TODO");
 
-        temp_file.write_all(&file_bytes).await.expect("XXX TODO");
+    let mut temp_file = async_fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
+        .await
+        .expect("XXX TODO");
 
-        // XXX TODO: Is this necessary?
-        temp_file.sync_all().await.expect("XXX TODO");
-    }
+    temp_file.write_all(&file_bytes).await.expect("XXX TODO");
+
+    // XXX TODO: Is it necessary to make sure writes are synced before renaming?
+    // Seems unlikely.
+    temp_file.sync_all().await.expect("XXX TODO");
+
+    drop(temp_file);
 
     async_fs::rename(temp_path, path).await.expect("XXX TODO");
 }
