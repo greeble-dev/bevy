@@ -8,6 +8,12 @@ fn main() {
         .add_plugins(DefaultPlugins)
         // `InputFocus` must be set for accessibility to recognize the button.
         .init_resource::<InputFocus>()
+        .add_systems(
+            Startup,
+            |requested: Res<bevy::a11y::AccessibilityRequested>| {
+                requested.set(true);
+            },
+        )
         .add_systems(Startup, setup)
         .add_systems(Update, button_system)
         .run();
@@ -91,6 +97,11 @@ fn button(asset_server: &AssetServer) -> impl Bundle {
                 align_items: AlignItems::Center,
                 border_radius: BorderRadius::MAX,
                 ..default()
+            },
+            UiTransform {
+                translation: default(),
+                scale: 2. * Vec2::ONE,
+                rotation: Rot2::degrees(45.)
             },
             BorderColor::all(Color::WHITE),
             BackgroundColor(Color::BLACK),

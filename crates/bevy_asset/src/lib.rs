@@ -287,8 +287,8 @@ pub struct AssetPlugin {
 pub enum UnapprovedPathMode {
     /// Unapproved asset loading is allowed. This is strongly discouraged.
     Allow,
-    /// Fails to load any asset that is unapproved, unless an override method is used, like
-    /// [`AssetServer::load_override`].
+    /// Fails to load any asset that is unapproved, unless [`LoadBuilder::override_unapproved`] is
+    /// used.
     Deny,
     /// Fails to load any asset that is unapproved.
     #[default]
@@ -785,8 +785,11 @@ impl AssetApp for App {
 
             type_registry.register::<A>();
             type_registry.register::<Handle<A>>();
+            type_registry.register::<HandleTemplate<A>>();
             type_registry.register_type_data::<A, ReflectAsset>();
             type_registry.register_type_data::<Handle<A>, ReflectHandle>();
+            type_registry
+                .register_type_conversion::<String, HandleTemplate<A>, _>(|s| Ok(s.into()));
         }
 
         self
@@ -824,7 +827,7 @@ mod tests {
         loader::{AssetLoader, LoadContext},
         Asset, AssetApp, AssetEvent, AssetId, AssetLoadError, AssetLoadFailedEvent, AssetPath,
         AssetPlugin, AssetRef, AssetServer, Assets, InvalidGenerationError, LoadState, LoadedAsset,
-        UnapprovedPathMode, UntypedHandle, WriteDefaultMetaError,
+        UnapprovedPathMode, UntypedHandle, VisitAssetDependencies, WriteDefaultMetaError,
     };
     use alloc::{
         boxed::Box,
@@ -847,6 +850,7 @@ mod tests {
         sync::Mutex,
     };
     use bevy_reflect::{Reflect, TypePath};
+    use bevy_tasks::block_on;
     use core::{any::TypeId, time::Duration};
     use futures_lite::AsyncReadExt;
     use serde::{Deserialize, Serialize};
@@ -2124,6 +2128,12 @@ mod tests {
     #[derive(Asset, TypePath)]
     pub struct TestAsset;
 
+    // Test that `VisitAssetDependencies` can be derived without deriving
+    // `Asset`, and that the type can be used as a `#[dependency]` within an
+    // asset.
+    #[derive(VisitAssetDependencies)]
+    pub struct TestNonAssetType(#[dependency] Handle<TestAsset>);
+
     #[derive(Asset, TypePath)]
     #[expect(
         dead_code,
@@ -2146,6 +2156,8 @@ mod tests {
             map_handles: HashMap<String, Handle<TestAsset>>,
             #[dependency]
             untyped_map_handles: HashMap<String, UntypedHandle>,
+            #[dependency]
+            non_asset_type: TestNonAssetType,
         },
         StructStyle(#[dependency] TestAsset),
         Empty,
@@ -2173,6 +2185,8 @@ mod tests {
         map_handles: HashMap<String, Handle<TestAsset>>,
         #[dependency]
         untyped_map_handles: HashMap<String, UntypedHandle>,
+        #[dependency]
+        non_asset_type: TestNonAssetType,
     }
 
     #[expect(
@@ -2223,7 +2237,10 @@ mod tests {
 
         let asset_server = app.world().resource::<AssetServer>().clone();
         assert_eq!(
-            asset_server.load_override::<CoolText>("../a.cool.ron"),
+            asset_server
+                .load_builder()
+                .override_unapproved()
+                .load::<CoolText>("../a.cool.ron"),
             Handle::default()
         );
     }
@@ -2246,7 +2263,10 @@ mod tests {
         let mut app = unapproved_path_setup(UnapprovedPathMode::Deny);
 
         let asset_server = app.world().resource::<AssetServer>().clone();
-        let handle = asset_server.load_override::<CoolText>("../a.cool.ron");
+        let handle = asset_server
+            .load_builder()
+            .override_unapproved()
+            .load::<CoolText>("../a.cool.ron");
         assert_ne!(handle, Handle::default());
 
         // Make sure this asset actually loads.
@@ -2638,10 +2658,10 @@ mod tests {
         // Load the test asset twice but with different settings.
 
         fn load(asset_server: &AssetServer, path: &'static str, value: u8) -> Handle<U8Asset> {
-            asset_server.load_with_settings::<U8Asset, U8LoaderSettings>(
-                path,
-                move |s: &mut U8LoaderSettings| s.0 = value,
-            )
+            asset_server
+                .load_builder()
+                .with_settings(move |s: &mut U8LoaderSettings| s.0 = value)
+                .load::<U8Asset>(path)
         }
 
         let handle_1 = load(asset_server, "test.u8", 1);
@@ -2898,8 +2918,7 @@ mod tests {
         source.insert_asset_text(Path::new(ASSET_PATH), "blah");
 
         let asset_server = app.world().resource::<AssetServer>().clone();
-        bevy_tasks::block_on(asset_server.write_default_loader_meta_file_for_path(ASSET_PATH))
-            .unwrap();
+        block_on(asset_server.write_default_loader_meta_file_for_path(ASSET_PATH)).unwrap();
 
         assert_eq!(
             read_meta_as_string(&source, Path::new(ASSET_PATH)),
@@ -2926,7 +2945,7 @@ mod tests {
 
         let asset_server = app.world().resource::<AssetServer>().clone();
         assert!(matches!(
-            bevy_tasks::block_on(asset_server.write_default_loader_meta_file_for_path(ASSET_PATH)),
+            block_on(asset_server.write_default_loader_meta_file_for_path(ASSET_PATH)),
             Err(WriteDefaultMetaError::MetaAlreadyExists)
         ));
 
@@ -3179,5 +3198,77 @@ mod tests {
             "loaderless",
             TestLoadState::Failed(TestAssetLoadError::MissingAssetLoader),
         );
+    }
+
+    #[test]
+    fn load_empty_path_returns_default() {
+        let mut app = create_app().0;
+
+        // Not necessary but better to make things more realistic to ensure we hit the right error
+        // case.
+        app.init_asset::<TestAsset>()
+            .register_asset_loader(TrivialLoader);
+
+        const TYPE_ID: TypeId = TypeId::of::<TestAsset>();
+
+        fn boring_settings(_: &mut ()) {}
+
+        let asset_server = app.world().resource::<AssetServer>().clone();
+
+        for path in ["", "no_path://#WithALabel"] {
+            // TODO: We have way too many "load" variants. We **need** to simplify this.
+            assert_eq!(asset_server.load(path), Handle::<TestAsset>::default());
+            assert_eq!(
+                asset_server.load_builder().with_guard(()).load(path),
+                Handle::<TestAsset>::default()
+            );
+            assert_eq!(
+                asset_server
+                    .load_builder()
+                    .with_guard(())
+                    .override_unapproved()
+                    .load(path),
+                Handle::<TestAsset>::default()
+            );
+            assert_eq!(
+                asset_server
+                    .load_builder()
+                    .with_guard(())
+                    .with_settings(boring_settings)
+                    .load(path),
+                Handle::<TestAsset>::default()
+            );
+            assert_eq!(
+                asset_server.load_builder().load_erased(TYPE_ID, path),
+                Handle::<TestAsset>::default()
+            );
+            assert_eq!(
+                asset_server.load_builder().override_unapproved().load(path),
+                Handle::<TestAsset>::default()
+            );
+            assert_eq!(
+                asset_server.load_builder().load_untyped(path),
+                Handle::default()
+            );
+            assert!(matches!(
+                block_on(asset_server.load_builder().load_untyped_async(path)),
+                Err(AssetLoadError::EmptyPath(reported_path)) if AssetPath::from(path) == reported_path
+            ));
+            assert_eq!(
+                asset_server
+                    .load_builder()
+                    .with_settings(|_: &mut ()| {})
+                    .load(path),
+                Handle::<TestAsset>::default()
+            );
+            assert_eq!(
+                asset_server
+                    .load_builder()
+                    .with_settings(|_: &mut ()| {})
+                    .override_unapproved()
+                    .load(path),
+                Handle::<TestAsset>::default()
+            );
+        }
     }
 }
