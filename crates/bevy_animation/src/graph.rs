@@ -821,7 +821,9 @@ impl TryFrom<AnimationGraph> for SerializedAnimationGraph {
                 node_type: match node.node_type {
                     AnimationNodeType::Clip(ref clip) => match clip.path() {
                         Some(path) => {
-                            // XXX TODO: Review. Added `path().unwrap()`.
+                            // XXX TODO: Review. `AssetRef` doesn't support regular
+                            // serialization, so we're temporarily assuming that animations
+                            // only come from an `AssetPath`.
                             SerializedAnimationNodeType::Clip(path.temporary_path_workaround())
                         }
                         None => return Err(NonPathHandleError),
