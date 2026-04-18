@@ -163,7 +163,7 @@ impl AssetLoader for CoolTextLoader {
                     *settings = settings_override.clone();
                 })
                 .immediate()
-                .load::<Text>(AssetPath::from(path))
+                .load::<Text>(&path)
                 .await?;
             base_text.push_str(&loaded.get().0);
         }
