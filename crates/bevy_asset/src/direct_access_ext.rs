@@ -50,6 +50,7 @@ impl DirectAssetAccessExt for World {
     fn load_builder(&self) -> LoadBuilder<'_> {
         self.resource::<AssetServer>().load_builder()
     }
+
     /// Load an asset with settings, similarly to [`AssetServer::load_with_settings`].
     ///
     /// # Panics

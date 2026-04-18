@@ -529,11 +529,7 @@ mod acme {
             })
             .collect::<Vec<_>>();
 
-        loop {
-            let Some((node, transform)) = stack.pop() else {
-                break;
-            };
-
+        while let Some((node, transform)) = stack.pop() {
             if let Some(mesh) = node
                 .mesh
                 .as_ref()
@@ -711,7 +707,7 @@ fn setup(
         asset_paths
             .regular
             .iter()
-            .map(|(type_id, path)| asset_server.load_erased(*type_id, path))
+            .map(|(type_id, path)| asset_server.load_builder().load_erased(*type_id, path))
             .collect(),
     ));
 

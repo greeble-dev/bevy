@@ -89,6 +89,7 @@ pub struct StrongHandle {
     /// Modifies asset meta. This is stored on the handle because it is:
     /// 1. configuration tied to the lifetime of a specific asset load
     /// 2. configuration that must be repeatable when the asset is hot-reloaded
+    // XXX TODO: Superseded by `LoadPath::loader_settings` in the path above. Remove?
     pub(crate) meta_transform: Option<MetaTransform>,
     pub(crate) drop_sender: Sender<DropEvent>,
 }

@@ -2,13 +2,13 @@
 //! [`LoadContext::loader`].
 
 use crate::{
-    io::Reader, Asset, AssetLoadError, AssetRef, ErasedAssetLoader, ErasedLoadedAsset, Handle,
-    LoadContext, LoadDirectError, LoadedAsset, LoadedUntypedAsset, UntypedHandle,
+    io::Reader, meta::Settings, Asset, AssetLoadError, AssetRef, ErasedAssetLoader,
+    ErasedLoadedAsset, Handle, LoadContext, LoadDirectError, LoadedAsset, LoadedUntypedAsset,
+    UntypedHandle,
 };
-use alloc::{borrow::ToOwned, boxed::Box, sync::Arc};
+use alloc::{borrow::ToOwned, boxed::Box, string::String, sync::Arc};
 use core::any::TypeId;
-use std::path::Path;
-use tracing::error;
+use serde::Serialize;
 
 // Utility type for handling the sources of reader references
 enum ReaderRef<'a> {
@@ -117,6 +117,8 @@ impl ReaderRef<'_> {
 /// [`LoadTransformAndSave`]: crate::processor::LoadTransformAndSave
 pub struct NestedLoader<'ctx, 'builder, T, M> {
     load_context: &'builder mut LoadContext<'ctx>,
+    // XXX TODO: Heinous. See `AssetRef::with_settings`.
+    settings: Option<String>,
     typing: T,
     mode: M,
 }
@@ -167,6 +169,7 @@ impl<'ctx, 'builder> NestedLoader<'ctx, 'builder, StaticTyped, Deferred> {
     pub(crate) fn new(load_context: &'builder mut LoadContext<'ctx>) -> Self {
         NestedLoader {
             load_context,
+            settings: None,
             typing: StaticTyped(()),
             mode: Deferred(()),
         }
@@ -174,6 +177,26 @@ impl<'ctx, 'builder> NestedLoader<'ctx, 'builder, StaticTyped, Deferred> {
 }
 
 impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'builder, T, M> {
+    /// Configure the settings used to load the asset.
+    ///
+    /// If the settings type `S` does not match the settings expected by `A`'s asset loader, an error will be printed to the log
+    /// and the asset load will fail.
+    #[must_use]
+    pub fn with_settings<S: Settings + Serialize + Default>(
+        mut self,
+        settings: impl Fn(&mut S) + Send + Sync + 'static,
+    ) -> Self {
+        assert!(self.settings.is_none());
+
+        let mut settings_value = S::default();
+        settings(&mut settings_value);
+
+        let settings_ron = ron::ser::to_string(&settings_value).expect("XXX TODO");
+
+        self.settings = Some(settings_ron);
+        self
+    }
+
     /// When [`load`]ing, you must pass in the asset type as a type parameter
     /// statically.
     ///
@@ -187,6 +210,7 @@ impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'bui
     pub fn with_static_type(self) -> NestedLoader<'ctx, 'builder, StaticTyped, M> {
         NestedLoader {
             load_context: self.load_context,
+            settings: self.settings,
             typing: StaticTyped(()),
             mode: self.mode,
         }
@@ -203,6 +227,7 @@ impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'bui
     ) -> NestedLoader<'ctx, 'builder, DynamicTyped, M> {
         NestedLoader {
             load_context: self.load_context,
+            settings: self.settings,
             typing: DynamicTyped { asset_type_id },
             mode: self.mode,
         }
@@ -216,6 +241,7 @@ impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'bui
     pub fn with_unknown_type(self) -> NestedLoader<'ctx, 'builder, UnknownTyped, M> {
         NestedLoader {
             load_context: self.load_context,
+            settings: self.settings,
             typing: UnknownTyped(()),
             mode: self.mode,
         }
@@ -230,6 +256,7 @@ impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'bui
     pub fn deferred(self) -> NestedLoader<'ctx, 'builder, T, Deferred> {
         NestedLoader {
             load_context: self.load_context,
+            settings: self.settings,
             typing: self.typing,
             mode: Deferred(()),
         }
@@ -246,6 +273,7 @@ impl<'ctx, 'builder, T: sealed::Typing, M: sealed::Mode> NestedLoader<'ctx, 'bui
     pub fn immediate<'c>(self) -> NestedLoader<'ctx, 'builder, T, Immediate<'builder, 'c>> {
         NestedLoader {
             load_context: self.load_context,
+            settings: self.settings,
             typing: self.typing,
             mode: Immediate { reader: None },
         }
@@ -268,12 +296,18 @@ impl NestedLoader<'_, '_, StaticTyped, Deferred> {
     /// [`with_unknown_type`]: Self::with_unknown_type
     pub fn load<'c, A: Asset>(self, path: impl Into<AssetRef<'c>>) -> Handle<A> {
         let path = path.into().to_owned();
-        if path.path() == Path::new("") {
-            error!("Attempted to load an asset with an empty path \"{path}\"!");
-            return Handle::default();
-        }
+        // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
+        // if path.path() == Path::new("") {
+        //     error!("Attempted to load an asset with an empty path \"{path}\"!");
+        //     return Handle::default();
+        // }
         let handle = if self.load_context.should_load_dependencies {
-            self.load_context.asset_server.load(path.clone())
+            self.load_context.asset_server.load_with_meta_transform(
+                path.clone(),
+                self.settings,
+                (),
+                true,
+            )
         } else {
             self.load_context
                 .asset_server
@@ -297,10 +331,11 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
     /// [`with_dynamic_type`]: Self::with_dynamic_type
     pub fn load<'p>(self, path: impl Into<AssetRef<'p>>) -> UntypedHandle {
         let path = path.into().to_owned();
-        if path.path() == Path::new("") {
-            error!("Attempted to load an asset with an empty path \"{path}\"!");
-            return UntypedHandle::default_for_type(self.typing.asset_type_id);
-        }
+        // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
+        // if path.path() == Path::new("") {
+        //     error!("Attempted to load an asset with an empty path \"{path}\"!");
+        //     return UntypedHandle::default_for_type(self.typing.asset_type_id);
+        // }
         let handle = if self.load_context.should_load_dependencies {
             self.load_context
                 .asset_server
@@ -308,7 +343,7 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
                     path,
                     self.typing.asset_type_id,
                     None,
-                    self.meta_transform,
+                    self.settings,
                     (),
                     false,
                 )
@@ -319,7 +354,8 @@ impl NestedLoader<'_, '_, DynamicTyped, Deferred> {
                     path,
                     self.typing.asset_type_id,
                     None,
-                    self.meta_transform,
+                    // XXX TODO: Review. Meta transform parameter was replaced with `None`.
+                    None,
                 )
         };
         // `load_with_meta_transform_erased` and `get_or_create_path_handle_erased` always returns a
@@ -337,14 +373,21 @@ impl NestedLoader<'_, '_, UnknownTyped, Deferred> {
     /// This will infer the asset type from metadata.
     pub fn load<'p>(self, path: impl Into<AssetRef<'p>>) -> Handle<LoadedUntypedAsset> {
         let path = path.into().to_owned();
-        if path.path() == Path::new("") {
-            error!("Attempted to load an asset with an empty path \"{path}\"!");
-            return Handle::default();
-        }
+        // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
+        // if path.path() == Path::new("") {
+        //     error!("Attempted to load an asset with an empty path \"{path}\"!");
+        //     return Handle::default();
+        // }
         let handle = if self.load_context.should_load_dependencies {
             self.load_context
                 .asset_server
-                .load_unknown_type_with_meta_transform(path, self.meta_transform, (), false)
+                .load_unknown_type_with_meta_transform(
+                    path.temporary_path_workaround(),
+                    // XXX TODO: Review. Meta transform parameter was replaced with `None`.
+                    None,
+                    (),
+                    false,
+                )
         } else {
             self.load_context
                 .asset_server
@@ -376,10 +419,11 @@ impl<'builder, 'reader, T> NestedLoader<'_, '_, T, Immediate<'builder, 'reader>>
         // XXX TODO: Support `AssetRef`.
         let path = &path.temporary_path_workaround();
 
-        if path.path() == Path::new("") {
-            error!("Attempted to load an asset with an empty path \"{path}\"!");
-            return Err(LoadDirectError::EmptyPath(path.clone_owned()));
-        }
+        // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
+        // if path.path() == Path::new("") {
+        //     error!("Attempted to load an asset with an empty path \"{path}\"!");
+        //     return Err(LoadDirectError::EmptyPath(path.clone_owned()));
+        // }
         if path.label().is_some() {
             return Err(LoadDirectError::RequestedSubasset(path.clone()));
         }

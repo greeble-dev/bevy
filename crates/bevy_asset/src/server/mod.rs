@@ -408,11 +408,7 @@ impl AssetServer {
     /// Same as [`load`](Self::load), but the type of the asset to load is specified by the runtime
     /// `type_id`.
     #[deprecated(note = "Use `asset_server.load_builder().load_erased(type_id, path)` instead")]
-    pub fn load_erased<'a>(
-        &self,
-        type_id: TypeId,
-        path: impl Into<AssetPath<'a>>,
-    ) -> UntypedHandle {
+    pub fn load_erased<'a>(&self, type_id: TypeId, path: impl Into<AssetRef<'a>>) -> UntypedHandle {
         self.load_builder().load_erased(type_id, path.into())
     }
 
@@ -554,8 +550,9 @@ impl AssetServer {
 
     pub(crate) fn load_with_meta_transform<'a, A: Asset, G: Send + Sync + 'static>(
         &self,
-        path: impl Into<AssetPath<'a>>,
-        meta_transform: Option<MetaTransform>,
+        path: impl Into<AssetRef<'a>>,
+        // XXX TODO: Heinous workaround to support settings on `AssetRef`. See `AssetRef::with_settings`.
+        settings: Option<String>,
         guard: G,
         override_unapproved: bool,
     ) -> Handle<A> {
@@ -563,7 +560,7 @@ impl AssetServer {
             path,
             TypeId::of::<A>(),
             Some(type_name::<A>()),
-            meta_transform,
+            settings,
             guard,
             override_unapproved,
         )
@@ -575,15 +572,22 @@ impl AssetServer {
         path: impl Into<AssetRef<'a>>,
         type_id: TypeId,
         type_name: Option<&str>,
-        meta_transform: Option<MetaTransform>,
+        // XXX TODO: Heinous workaround to support settings on `AssetRef`. See `AssetRef::with_settings`.
+        settings: Option<String>,
         guard: G,
         override_unapproved: bool,
     ) -> UntypedHandle {
-        let path = path.into().into_owned();
-        if path.path() == Path::new("") {
-            error!("Attempted to load an asset with an empty path \"{path}\"!");
-            return UntypedHandle::default_for_type(type_id);
+        let mut path = path.into().into_owned();
+
+        if let Some(settings) = settings {
+            path = path.with_settings(settings);
         }
+
+        // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
+        // if path.path() == Path::new("") {
+        //     error!("Attempted to load an asset with an empty path \"{path}\"!");
+        //     return UntypedHandle::default_for_type(type_id);
+        // }
 
         if path.is_unapproved() {
             match (&self.data.unapproved_path_mode, override_unapproved) {
@@ -604,7 +608,7 @@ impl AssetServer {
             type_id,
             type_name,
             HandleLoadingMode::Request,
-            meta_transform,
+            None,
         );
 
         if should_load {
@@ -658,7 +662,7 @@ impl AssetServer {
     #[must_use = "not using the returned strong handle may result in the unexpected release of the asset"]
     pub async fn load_untyped_async<'a>(
         &self,
-        path: impl Into<AssetRef<'a>>,
+        path: impl Into<AssetPath<'a>>, // XXX TODO: Support `AssetRef`?
     ) -> Result<UntypedHandle, AssetLoadError> {
         self.load_builder().load_untyped_async(path.into()).await
     }
@@ -1081,7 +1085,7 @@ impl AssetServer {
     pub fn load_folder<'a>(&self, path: impl Into<AssetPath<'a>>) -> Handle<LoadedFolder> {
         let path = path.into().into_owned();
         let (handle, should_load) = self.write_infos().get_or_create_path_handle(
-            path.clone(),
+            path.clone().into(),
             HandleLoadingMode::Request,
             None,
         );
@@ -1848,7 +1852,8 @@ pub struct LoadBuilder<'a> {
     asset_server: &'a AssetServer,
     /// A function to modify the meta for an asset loader. In practice, this just mutates the loader
     /// settings of a load.
-    meta_transform: Option<MetaTransform>,
+    // XXX TODO: Changed to a serialized RON of the settings. See `AssetRef::with_settings`.
+    settings: Option<String>,
     /// Whether unapproved paths are allowed to be loaded.
     override_unapproved: bool,
     /// A "guard" that is held until the load has fully completed.
@@ -1861,7 +1866,7 @@ impl<'a> LoadBuilder<'a> {
     fn new(asset_server: &'a AssetServer) -> Self {
         Self {
             asset_server,
-            meta_transform: None,
+            settings: None,
             override_unapproved: false,
             guard: None,
         }
@@ -1875,19 +1880,25 @@ impl<'a> LoadBuilder<'a> {
     /// Repeatedly calling this method will "chain" the operations (matching the order of these
     /// calls).
     #[must_use = "the load doesn't start until LoadBuilder has been consumed"]
-    pub fn with_settings<S: Settings>(
+    pub fn with_settings<S: Settings + Serialize + Default>(
         mut self,
         settings: impl Fn(&mut S) + Send + Sync + 'static,
     ) -> Self {
-        let new_transform = loader_settings_meta_transform(settings);
-        if let Some(prev_transform) = self.meta_transform.take() {
-            self.meta_transform = Some(Box::new(move |meta| {
-                prev_transform(meta);
-                new_transform(meta);
-            }));
-        } else {
-            self.meta_transform = Some(new_transform);
-        }
+        // XXX TODO: The previous code allowed chaining multiple `with_settings`
+        // calls. We can't easily support that since we're storing the whole
+        // settings struct rather than mutating it. But is that really much of a
+        // regression? Not sure what the use case is for chaining settings.
+        assert!(self.settings.is_none());
+
+        let mut settings_value = S::default();
+        settings(&mut settings_value);
+
+        // XXX TODO: This whole dance is pretty heinous due to all the serialized
+        // RON. Would go away if we changed `AssetRef` to store the action params
+        // as a `Box<dyn>` rather than RON. See also `AssetRef::with_settings`.
+        let settings_ron = ron::ser::to_string(&settings_value).expect("XXX TODO");
+
+        self.settings = Some(settings_ron);
         self
     }
 
@@ -1928,7 +1939,7 @@ impl<'a> LoadBuilder<'a> {
     /// This matches the behavior of [`AssetServer::load`], but supporting all other features of the
     /// builder. See its docs for more details.
     #[must_use = "not using the returned strong handle may result in the unexpected release of the asset"]
-    pub fn load<'b, A: Asset>(self, asset_path: impl Into<AssetPath<'b>>) -> Handle<A> {
+    pub fn load<'b, A: Asset>(self, asset_path: impl Into<AssetRef<'b>>) -> Handle<A> {
         self.load_typed_internal(TypeId::of::<A>(), Some(type_name::<A>()), asset_path.into())
             .typed_unchecked()
     }
@@ -1939,7 +1950,7 @@ impl<'a> LoadBuilder<'a> {
     pub fn load_erased<'b>(
         self,
         type_id: TypeId,
-        asset_path: impl Into<AssetPath<'b>>,
+        asset_path: impl Into<AssetRef<'b>>,
     ) -> UntypedHandle {
         self.load_typed_internal(type_id, None, asset_path.into())
     }
@@ -1972,9 +1983,13 @@ impl<'a> LoadBuilder<'a> {
         self,
         asset_path: impl Into<AssetPath<'b>>,
     ) -> Handle<LoadedUntypedAsset> {
+        // XXX TODO: Support settings? Needs `load_unknown_type` to support `AssetRef`.
+        assert!(self.settings.is_none());
+
         self.asset_server.load_unknown_type_with_meta_transform(
             asset_path,
-            self.meta_transform,
+            // XXX TODO: Removed `meta_transform` parameter, see previous comment.
+            None,
             self.guard,
             self.override_unapproved,
         )
@@ -2001,7 +2016,7 @@ impl<'a> LoadBuilder<'a> {
         self.asset_server.write_infos().stats.started_load_tasks += 1;
 
         self.asset_server
-            .load_internal(None, path, false, None)
+            .load_internal(None, path.into(), false, None)
             .await
             .map(|h| h.expect("handle must be returned, since we didn't pass in an input handle"))
     }
@@ -2012,13 +2027,13 @@ impl<'a> LoadBuilder<'a> {
         self,
         type_id: TypeId,
         type_name: Option<&str>,
-        asset_path: AssetPath<'_>,
+        asset_path: AssetRef<'_>,
     ) -> UntypedHandle {
         self.asset_server.load_with_meta_transform_erased(
             asset_path,
             type_id,
             type_name,
-            self.meta_transform,
+            self.settings,
             self.guard,
             self.override_unapproved,
         )

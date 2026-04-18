@@ -4,7 +4,6 @@ use crate::{
         ReflectBassetActionParams,
     },
     io::AssetSourceId,
-    meta::Settings,
 };
 use alloc::{
     borrow::ToOwned,
@@ -603,21 +602,8 @@ impl<'a> AssetPath<'a> {
         false
     }
 
-    /// XXX TODO: Review and document. Interface is awkward for backwards
-    /// compatibility.
-    pub fn with_settings<S: Settings + Serialize + Default>(
-        self,
-        settings: impl Fn(&mut S) + Send + Sync + 'static,
-    ) -> AssetRef<'a> {
-        let mut settings_value = S::default();
-        settings(&mut settings_value);
-
-        // XXX TODO: This whole dance is pretty heinous due to all the serialized
-        // RON. Would go away if we changed `AssetRef` to store the action params
-        // as a `Box<dyn>` rather than RON.
-
-        let settings_ron = ron::ser::to_string(&settings_value).expect("XXX TODO");
-
+    // XXX TODO: See `AssetRef::with_settings`.
+    pub fn with_settings(self, settings_ron: String) -> AssetRef<'a> {
         let params_value = LoadPathParams {
             path: self.without_label().to_string(),
             loader_settings: Some(settings_ron),
@@ -840,7 +826,7 @@ impl<'a> AssetRef<'a> {
     // work through where it's used and consider alternatives.
     pub fn temporary_path_workaround(&self) -> AssetPath<'static> {
         if let Some(params) = self.params.0.downcast_ref::<LoadPathParams>() {
-            // XXX TODO: Should fail if `params.settings` is set?
+            // XXX TODO: Should fail if `LoadPathParams::loader_settings` is set?
 
             let path = AssetPath::parse(&params.path).clone_owned();
 
@@ -852,6 +838,39 @@ impl<'a> AssetRef<'a> {
         } else {
             todo!("This is a temporary workaround")
         }
+    }
+
+    // XXX TODO: Converts the action back to an `AssetPath` if possible,
+    // return `None` if not. This is for temporary backwards compatibility. Need to
+    // work through where it's used and consider alternatives.
+    pub fn try_temporary_path_workaround(&self) -> Option<AssetPath<'static>> {
+        if let Some(params) = self.params.0.downcast_ref::<LoadPathParams>() {
+            // XXX TODO: Should fail if `LoadPathParams::loader_settings` is set?
+
+            let path = AssetPath::parse(&params.path).clone_owned();
+
+            if let Some(label) = &self.label {
+                Some(path.with_label(label.clone_owned()))
+            } else {
+                Some(path)
+            }
+        } else {
+            None
+        }
+    }
+
+    // XXX TODO: This is a temporary hack for backwards compatibility. Previously,
+    // settings were applied via meta transforms. Now, we make a `LoadPath` action
+    // with the settings. That doesn't fit well with things like `LoadBuilder::with_settings`
+    // because they don't have access to the `AssetRef`. So we do this awkward dance
+    // where they serialize the settings and then try to apply them to the `AssetRef`
+    // later. This only works if the action is `LoadPath`.
+    pub fn with_settings(self, settings: String) -> Self {
+        let without_settings = self
+            .try_temporary_path_workaround()
+            .expect("XXX TODO: Can't change settings on a non-LoadPath AssetRef");
+
+        without_settings.with_settings(settings)
     }
 }
 
