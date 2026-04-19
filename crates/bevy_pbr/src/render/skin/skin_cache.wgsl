@@ -77,6 +77,8 @@ struct UnskinnedVertex {
 // If there are no morph targets, this will be a dummy buffer.
 @group(0) @binding(7) var<storage> morph_descriptors: array<MorphDescriptor>;
 
+// The workgroup size must match `SKIN_CACHE_WORKGROUP_SIZE` in
+// `bevy_pbr/src/render/skin/cache.rs`.
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let vertex_id = global_id.x;
