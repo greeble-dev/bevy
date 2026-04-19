@@ -83,16 +83,25 @@ pub struct SkinCachePlugin;
 impl Plugin for SkinCachePlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "skin_cache.wgsl");
+    }
 
+    fn finish(&self, app: &mut App) {
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
+
+        let render_device = render_app.world().resource::<RenderDevice>();
+        if render_device.limits().max_storage_buffers_per_shader_stage == 0 {
+            return;
+        }
 
         render_app
             .init_resource::<CachedSkinEntities>()
             .init_resource::<CachedSkinBindGroups>()
             .init_resource::<SkinCachePipelineIds>()
             .init_resource::<SpecializedComputePipelines<SkinCachePipeline>>()
+            .init_resource::<SkinCachePipeline>()
+            .init_resource::<CachedSkinBuffers>()
             .add_systems(
                 Render,
                 prepare_skin_cache_buffers
@@ -121,16 +130,6 @@ impl Plugin for SkinCachePlugin {
                     .before(schedule::camera_driver)
                     .after(render_resource::update_sparse_buffers),
             );
-    }
-
-    fn finish(&self, app: &mut App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-
-        render_app
-            .init_resource::<SkinCachePipeline>()
-            .init_resource::<CachedSkinBuffers>();
     }
 }
 
@@ -340,7 +339,10 @@ impl CachedSkinBuffers {
         self.mesh_instance_to_cached_skin_location.get(&main_entity)
     }
 
-    /// Returns the dummy buffer if there's no buffer for the given vertex slab.
+    /// Returns the skin caching buffer for the given key.
+    ///
+    /// If skin caching isn't supported, returns `None`. If it is supported, but
+    /// there's no skin caching buffer for the key, returns the dummy buffer.
     pub fn buffers_for_key_or_dummy(&'_ self, key: CachedSkinBindGroupKey) -> SkinCacheBuffers<'_> {
         let Some(skinned_vertex_buffer_data) = self.skinned_vertex_buffer_data.get(&key) else {
             return SkinCacheBuffers::new(

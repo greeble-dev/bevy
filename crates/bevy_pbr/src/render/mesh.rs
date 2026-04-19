@@ -1494,7 +1494,7 @@ impl RenderMeshInstanceGpuBuilder {
         render_lightmaps: &RenderLightmaps,
         skin_uniforms: &SkinUniforms,
         morph_indices: &MorphIndices,
-        cached_skin_buffers: &CachedSkinBuffers,
+        maybe_cached_skin_buffers: Option<&CachedSkinBuffers>,
         timestamp: FrameCount,
     ) -> Option<RenderMeshInstanceGpuPrepared> {
         // Look up the material index. If we couldn't fetch the material index,
@@ -1533,10 +1533,12 @@ impl RenderMeshInstanceGpuBuilder {
             None => u32::MAX,
         };
 
-        let (cached_skin_offset, prev_cached_skin_offset) = match cached_skin_buffers
-            .mesh_instance_to_cached_skin_location
-            .get(&entity)
-        {
+        let (cached_skin_offset, prev_cached_skin_offset) = match maybe_cached_skin_buffers
+            .and_then(|cached_skin_buffers| {
+                cached_skin_buffers
+                    .mesh_instance_to_cached_skin_location
+                    .get(&entity)
+            }) {
             Some(cached_skin_location) => (
                 cached_skin_location.current,
                 match cached_skin_location.prev {
@@ -2535,7 +2537,7 @@ pub fn collect_meshes_for_gpu_building(
     render_lightmaps: Res<RenderLightmaps>,
     skin_uniforms: Res<SkinUniforms>,
     morph_indices: Res<MorphIndices>,
-    cached_skin_buffers: Res<CachedSkinBuffers>,
+    maybe_cached_skin_buffers: Option<Res<CachedSkinBuffers>>,
     frame_count: Res<FrameCount>,
     mut meshes_to_reextract_next_frame: ResMut<MeshesToReextractNextFrame>,
 ) {
@@ -2585,7 +2587,7 @@ pub fn collect_meshes_for_gpu_building(
         let previous_input_buffer = &*previous_input_buffer;
         let mesh_culling_data_buffer = &*mesh_culling_data_buffer;
         let morph_indices = &*morph_indices;
-        let cached_skin_buffers = &*cached_skin_buffers;
+        let maybe_cached_skin_buffers = maybe_cached_skin_buffers.as_deref();
 
         // Spawn workers on the taskpool to prepare and update meshes in parallel.
         ComputeTaskPool::get().scope(|scope| {
@@ -2617,7 +2619,7 @@ pub fn collect_meshes_for_gpu_building(
                                         render_lightmaps,
                                         skin_uniforms,
                                         morph_indices,
-                                        cached_skin_buffers,
+                                        maybe_cached_skin_buffers,
                                         frame_count,
                                     ) {
                                         Some(prepared) => {
@@ -2658,7 +2660,7 @@ pub fn collect_meshes_for_gpu_building(
                                     render_lightmaps,
                                     skin_uniforms,
                                     morph_indices,
-                                    cached_skin_buffers,
+                                    maybe_cached_skin_buffers,
                                     frame_count,
                                 ) else {
                                     reextract_tx.send(entity).ok();
@@ -2933,7 +2935,7 @@ impl GetBatchData for MeshPipeline {
         SRes<MeshAllocator>,
         SRes<SkinUniforms>,
         SRes<MorphIndices>,
-        SRes<CachedSkinBuffers>,
+        Option<SRes<CachedSkinBuffers>>,
     );
     type BatchSetCompareData = MeshBatchSetCompareData;
     type BatchCompareData = AssetId<Mesh>;
@@ -2948,7 +2950,7 @@ impl GetBatchData for MeshPipeline {
             mesh_allocator,
             skin_uniforms,
             morph_indices,
-            cached_skin_buffers,
+            maybe_cached_skin_buffers,
         ): &SystemParamItem<Self::Param>,
         (_entity, main_entity): (Entity, MainEntity),
     ) -> Option<(
@@ -2973,7 +2975,9 @@ impl GetBatchData for MeshPipeline {
 
         let current_skin_index = skin_uniforms.skin_index(main_entity);
         let morph_descriptor_index = morph_indices.morph_descriptor_index(main_entity);
-        let cached_skin_location = cached_skin_buffers.cached_skin_location(main_entity);
+        let maybe_cached_skin_location = maybe_cached_skin_buffers
+            .as_deref()
+            .and_then(|cached_skin_buffers| cached_skin_buffers.cached_skin_location(main_entity));
         let material_bind_group_index = mesh_instance.material_bindings_index();
 
         Some((
@@ -2984,7 +2988,7 @@ impl GetBatchData for MeshPipeline {
                 maybe_lightmap.map(|lightmap| (lightmap.slot_index, lightmap.uv_rect)),
                 current_skin_index,
                 morph_descriptor_index,
-                cached_skin_location,
+                maybe_cached_skin_location,
                 Some(mesh_instance.tag()),
             ),
             mesh_instance.should_batch().then_some((
@@ -3044,7 +3048,7 @@ impl GetFullBatchData for MeshPipeline {
             mesh_allocator,
             skin_uniforms,
             morph_indices,
-            cached_skin_buffers,
+            maybe_cached_skin_buffers,
         ): &SystemParamItem<Self::Param>,
         main_entity: MainEntity,
     ) -> Option<Self::BufferData> {
@@ -3064,7 +3068,9 @@ impl GetFullBatchData for MeshPipeline {
 
         let current_skin_index = skin_uniforms.skin_index(main_entity);
         let morph_descriptor_index = morph_indices.morph_descriptor_index(main_entity);
-        let cached_skin_location = cached_skin_buffers.cached_skin_location(main_entity);
+        let maybe_cached_skin_location = maybe_cached_skin_buffers
+            .as_deref()
+            .and_then(|cached_skin_buffers| cached_skin_buffers.cached_skin_location(main_entity));
 
         Some(MeshUniform::new(
             &mesh_instance.transforms,
@@ -3073,7 +3079,7 @@ impl GetFullBatchData for MeshPipeline {
             maybe_lightmap.map(|lightmap| (lightmap.slot_index, lightmap.uv_rect)),
             current_skin_index,
             morph_descriptor_index,
-            cached_skin_location,
+            maybe_cached_skin_location,
             Some(mesh_instance.tag()),
         ))
     }
@@ -4006,7 +4012,7 @@ pub fn prepare_mesh_bind_groups(
     mesh_allocator: Res<MeshAllocator>,
     render_morph_target_allocator: Res<RenderMorphTargetAllocator>,
     mut render_lightmaps: ResMut<RenderLightmaps>,
-    cached_skin_buffers: Res<CachedSkinBuffers>,
+    maybe_cached_skin_buffers: Option<Res<CachedSkinBuffers>>,
 ) {
     // CPU mesh preprocessing path.
     if let Some(cpu_batched_instance_buffer) = cpu_batched_instance_buffer
@@ -4025,7 +4031,7 @@ pub fn prepare_mesh_bind_groups(
             &weights_uniform,
             &mesh_allocator,
             &render_morph_target_allocator,
-            &cached_skin_buffers,
+            maybe_cached_skin_buffers.as_deref(),
             &mut render_lightmaps,
         );
 
@@ -4059,7 +4065,7 @@ pub fn prepare_mesh_bind_groups(
                 &weights_uniform,
                 &mesh_allocator,
                 &render_morph_target_allocator,
-                &cached_skin_buffers,
+                maybe_cached_skin_buffers.as_deref(),
                 &mut render_lightmaps,
             );
 
@@ -4083,7 +4089,7 @@ fn prepare_mesh_bind_groups_for_phase(
     weights_uniform: &MorphUniforms,
     mesh_allocator: &MeshAllocator,
     render_morph_target_allocator: &RenderMorphTargetAllocator,
-    cached_skin_buffers: &CachedSkinBuffers,
+    maybe_cached_skin_buffers: Option<&CachedSkinBuffers>,
     render_lightmaps: &mut RenderLightmaps,
 ) -> MeshPhaseBindGroups {
     let layouts = &mesh_pipeline.mesh_layouts;
@@ -4098,8 +4104,9 @@ fn prepare_mesh_bind_groups_for_phase(
     // (the latter being for motion vector computation).
     let (skin, prev_skin) = (&skins_uniform.current_buffer, &skins_uniform.prev_buffer);
     for slab_id in mesh_allocator.vertex_slabs() {
-        let skin_cache_buffers = cached_skin_buffers
-            .buffers_for_key_or_dummy(CachedSkinBindGroupKey::new(slab_id, None));
+        let maybe_skin_cache_buffers = maybe_cached_skin_buffers.map(|cached_skin_buffers| {
+            cached_skin_buffers.buffers_for_key_or_dummy(CachedSkinBindGroupKey::new(slab_id, None))
+        });
         groups.skinned.insert(
             slab_id,
             MeshBindGroupPair {
@@ -4109,14 +4116,16 @@ fn prepare_mesh_bind_groups_for_phase(
                     &model,
                     skin,
                     prev_skin,
-                    Some(skin_cache_buffers),
+                    maybe_skin_cache_buffers,
                 ),
                 no_motion_vectors: layouts.skinned(
                     render_device,
                     pipeline_cache,
                     &model,
                     skin,
-                    Some(skin_cache_buffers.current),
+                    maybe_skin_cache_buffers
+                        .as_ref()
+                        .map(|skin_cache_buffers| skin_cache_buffers.current),
                 ),
             },
         );
@@ -4125,10 +4134,15 @@ fn prepare_mesh_bind_groups_for_phase(
     // Create the morphed bind groups just like we did for the skinned bind
     // group.
     if weights_uniform.current_buffer.buffer().is_some() {
-        match (render_morph_target_allocator, &mut groups.morph_targets) {
+        match (
+            render_morph_target_allocator,
+            &mut groups.morph_targets,
+            maybe_cached_skin_buffers,
+        ) {
             (
                 RenderMorphTargetAllocator::Image { mesh_id_to_image },
                 &mut MeshMorphTargetBindGroups::Uniform(ref mut morph_targets),
+                None,
             ) => {
                 prepare_mesh_morph_target_bind_groups_for_phase_using_uniforms(
                     &model,
@@ -4146,6 +4160,7 @@ fn prepare_mesh_bind_groups_for_phase(
             (
                 &RenderMorphTargetAllocator::Storage,
                 &mut MeshMorphTargetBindGroups::Storage(ref mut morph_target_storage_bind_groups),
+                Some(cached_skin_buffers),
             ) => {
                 prepare_mesh_morph_target_bind_groups_for_phase_using_storage(
                     &model,

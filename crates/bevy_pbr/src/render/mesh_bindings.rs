@@ -81,8 +81,12 @@ mod layout_entry {
     pub(super) fn morph_descriptors() -> BindGroupLayoutEntryBuilder {
         storage_buffer_read_only::<GpuMorphDescriptor>(false)
     }
-    pub(super) fn skin_cache() -> BindGroupLayoutEntryBuilder {
-        storage_buffer_read_only::<GpuCachedSkinnedVertex>(false)
+    pub(super) fn skin_cache(limits: &WgpuLimits) -> Option<BindGroupLayoutEntryBuilder> {
+        if limits.max_storage_buffers_per_shader_stage > 0 {
+            Some(storage_buffer_read_only::<GpuCachedSkinnedVertex>(false))
+        } else {
+            None
+        }
     }
     pub(super) fn lightmaps_texture_view() -> BindGroupLayoutEntryBuilder {
         texture_2d(TextureSampleType::Float { filterable: true }).visibility(ShaderStages::FRAGMENT)
@@ -273,138 +277,141 @@ impl MeshLayouts {
 
     /// Creates the layout for skinned meshes.
     fn skinned_layout(render_device: &RenderDevice) -> BindGroupLayoutDescriptor {
-        BindGroupLayoutDescriptor::new(
-            "skinned_mesh_layout",
-            &BindGroupLayoutEntries::with_indices(
-                ShaderStages::VERTEX,
-                (
-                    (0, layout_entry::model(&render_device.limits())),
-                    // The current frame's joint matrix buffer.
-                    (1, layout_entry::skinning(&render_device.limits())),
-                    // The skin cache buffer.
-                    (9, layout_entry::skin_cache()),
-                ),
+        let mut bind_group_layout_entries = DynamicBindGroupLayoutEntries::new_with_indices(
+            ShaderStages::VERTEX,
+            (
+                (0, layout_entry::model(&render_device.limits())),
+                // The current frame's joint matrix buffer.
+                (1, layout_entry::skinning(&render_device.limits())),
             ),
-        )
+        );
+        if let Some(skin_cache_layout_entry) = layout_entry::skin_cache(&render_device.limits()) {
+            // The skin cache buffer.
+            bind_group_layout_entries =
+                bind_group_layout_entries.extend_with_indices(((9, skin_cache_layout_entry),));
+        }
+        BindGroupLayoutDescriptor::new("skinned_mesh_layout", &bind_group_layout_entries)
     }
 
     /// Creates the layout for skinned meshes with the infrastructure to compute
     /// motion vectors.
     fn skinned_motion_layout(render_device: &RenderDevice) -> BindGroupLayoutDescriptor {
-        BindGroupLayoutDescriptor::new(
-            "skinned_motion_mesh_layout",
-            &BindGroupLayoutEntries::with_indices(
-                ShaderStages::VERTEX,
-                (
-                    (0, layout_entry::model(&render_device.limits())),
-                    // The current frame's joint matrix buffer.
-                    (1, layout_entry::skinning(&render_device.limits())),
-                    // The previous frame's joint matrix buffer.
-                    (6, layout_entry::skinning(&render_device.limits())),
-                    // The skin cache buffer.
-                    (9, layout_entry::skin_cache()),
-                    // The previous frame's skin cache buffer.
-                    (10, layout_entry::skin_cache()),
-                ),
+        let limits = render_device.limits();
+        let mut bind_group_layout_entries = DynamicBindGroupLayoutEntries::new_with_indices(
+            ShaderStages::VERTEX,
+            (
+                (0, layout_entry::model(&limits)),
+                // The current frame's joint matrix buffer.
+                (1, layout_entry::skinning(&limits)),
+                // The previous frame's joint matrix buffer.
+                (6, layout_entry::skinning(&limits)),
             ),
-        )
+        );
+        if let Some(skin_cache_layout_entry) = layout_entry::skin_cache(&render_device.limits()) {
+            bind_group_layout_entries = bind_group_layout_entries.extend_with_indices((
+                // The skin cache buffer.
+                (9, skin_cache_layout_entry),
+                // The previous frame's skin cache buffer.
+                (10, skin_cache_layout_entry),
+            ));
+        }
+        BindGroupLayoutDescriptor::new("skinned_motion_mesh_layout", &bind_group_layout_entries)
     }
 
     /// Creates the layout for meshes with morph targets.
     fn morphed_layout(render_device: &RenderDevice) -> BindGroupLayoutDescriptor {
         let limits = render_device.limits();
-
-        let mut entries: ArrayVec<BindGroupLayoutEntry, 5> = ArrayVec::new();
-
-        entries.extend(
-            [
+        let mut bind_group_layout_entries = DynamicBindGroupLayoutEntries::new_with_indices(
+            ShaderStages::VERTEX,
+            (
                 (0, layout_entry::model(&limits)),
                 // The current frame's morph weight buffer.
                 (2, layout_entry::weights(&limits)),
                 (3, layout_entry::targets(&limits)),
-                // The skin cache buffer.
-                (9, layout_entry::skin_cache()),
-            ]
-            .iter()
-            .map(|(binding, entry)| entry.build(*binding, ShaderStages::VERTEX)),
+            ),
         );
-
         if !skin::skins_use_uniform_buffers(&render_device.limits()) {
-            entries.push(layout_entry::morph_descriptors().build(8, ShaderStages::VERTEX));
+            bind_group_layout_entries = bind_group_layout_entries.extend_with_indices((
+                // The morph descriptors buffer.
+                (8, layout_entry::morph_descriptors()),
+            ));
         }
-
-        BindGroupLayoutDescriptor::new("morphed_mesh_layout", &entries)
+        if let Some(skin_cache_layout_entry) = layout_entry::skin_cache(&render_device.limits()) {
+            bind_group_layout_entries = bind_group_layout_entries.extend_with_indices((
+                // The skin cache buffer.
+                (9, skin_cache_layout_entry),
+            ));
+        }
+        BindGroupLayoutDescriptor::new("morphed_mesh_layout", &bind_group_layout_entries)
     }
 
     /// Creates the layout for meshes with morph targets and the infrastructure
     /// to compute motion vectors.
     fn morphed_motion_layout(render_device: &RenderDevice) -> BindGroupLayoutDescriptor {
         let limits = render_device.limits();
-
-        let mut entries: ArrayVec<BindGroupLayoutEntry, 7> = ArrayVec::new();
-
-        entries.extend(
-            [
+        let mut bind_group_layout_entries = DynamicBindGroupLayoutEntries::new_with_indices(
+            ShaderStages::VERTEX,
+            (
                 (0, layout_entry::model(&limits)),
                 // The current frame's morph weight buffer.
                 (2, layout_entry::weights(&limits)),
                 (3, layout_entry::targets(&limits)),
                 // The previous frame's morph weight buffer.
                 (7, layout_entry::weights(&limits)),
-                // The skin cache buffer.
-                (9, layout_entry::skin_cache()),
-                // The previous frame's skin cache buffer.
-                (10, layout_entry::skin_cache()),
-            ]
-            .iter()
-            .map(|(binding, entry)| entry.build(*binding, ShaderStages::VERTEX)),
+            ),
         );
-
         if !skin::skins_use_uniform_buffers(&render_device.limits()) {
-            entries.push(layout_entry::morph_descriptors().build(8, ShaderStages::VERTEX));
+            bind_group_layout_entries = bind_group_layout_entries.extend_with_indices((
+                // The morph descriptors buffer.
+                (8, layout_entry::morph_descriptors()),
+            ));
         }
-
-        BindGroupLayoutDescriptor::new("morphed_motion_layout", &entries)
+        if let Some(skin_cache_layout_entry) = layout_entry::skin_cache(&render_device.limits()) {
+            bind_group_layout_entries = bind_group_layout_entries.extend_with_indices((
+                // The skin cache buffer.
+                (9, skin_cache_layout_entry),
+                // The previous frame's skin cache buffer.
+                (10, skin_cache_layout_entry),
+            ));
+        }
+        BindGroupLayoutDescriptor::new("morphed_motion_layout", &bind_group_layout_entries)
     }
 
     /// Creates the bind group layout for meshes with both skins and morph
     /// targets.
     fn morphed_skinned_layout(render_device: &RenderDevice) -> BindGroupLayoutDescriptor {
         let limits = render_device.limits();
-
-        let mut entries: ArrayVec<BindGroupLayoutEntry, 6> = ArrayVec::new();
-
-        entries.extend(
-            [
+        let mut bind_group_layout_entries = DynamicBindGroupLayoutEntries::new_with_indices(
+            ShaderStages::VERTEX,
+            (
                 (0, layout_entry::model(&limits)),
                 // The current frame's joint matrix buffer.
                 (1, layout_entry::skinning(&limits)),
                 // The current frame's morph weight buffer.
                 (2, layout_entry::weights(&limits)),
                 (3, layout_entry::targets(&limits)),
-                // The skin cache buffer.
-                (9, layout_entry::skin_cache()),
-            ]
-            .iter()
-            .map(|(binding, entry)| entry.build(*binding, ShaderStages::VERTEX)),
+            ),
         );
-
         if !skin::skins_use_uniform_buffers(&render_device.limits()) {
-            entries.push(layout_entry::morph_descriptors().build(8, ShaderStages::VERTEX));
+            bind_group_layout_entries = bind_group_layout_entries
+                .extend_with_indices(((8, layout_entry::morph_descriptors()),));
         }
-
-        BindGroupLayoutDescriptor::new("morphed_skinned_mesh_layout", &entries)
+        if let Some(skin_cache_layout_entry) = layout_entry::skin_cache(&render_device.limits()) {
+            bind_group_layout_entries = bind_group_layout_entries.extend_with_indices((
+                // The skin cache buffer.
+                (9, skin_cache_layout_entry),
+            ));
+        }
+        BindGroupLayoutDescriptor::new("morphed_skinned_mesh_layout", &bind_group_layout_entries)
     }
 
     /// Creates the bind group layout for meshes with both skins and morph
     /// targets, in addition to the infrastructure to compute motion vectors.
     fn morphed_skinned_motion_layout(render_device: &RenderDevice) -> BindGroupLayoutDescriptor {
         let limits = render_device.limits();
-
-        let mut entries: ArrayVec<BindGroupLayoutEntry, 9> = ArrayVec::new();
-
-        entries.extend(
-            [
+        let mut bind_group_layout_entries = DynamicBindGroupLayoutEntries::new_with_indices(
+            ShaderStages::VERTEX,
+            (
                 (0, layout_entry::model(&limits)),
                 // The current frame's joint matrix buffer.
                 (1, layout_entry::skinning(&limits)),
@@ -415,20 +422,24 @@ impl MeshLayouts {
                 (6, layout_entry::skinning(&limits)),
                 // The previous frame's morph weight buffer.
                 (7, layout_entry::weights(&limits)),
-                // The skin cache buffer.
-                (9, layout_entry::skin_cache()),
-                // The previous frame's skin cache buffer.
-                (10, layout_entry::skin_cache()),
-            ]
-            .iter()
-            .map(|(binding, entry)| entry.build(*binding, ShaderStages::VERTEX)),
+            ),
         );
-
         if !skin::skins_use_uniform_buffers(&render_device.limits()) {
-            entries.push(layout_entry::morph_descriptors().build(8, ShaderStages::VERTEX));
+            bind_group_layout_entries = bind_group_layout_entries
+                .extend_with_indices(((8, layout_entry::morph_descriptors()),));
         }
-
-        BindGroupLayoutDescriptor::new("morphed_skinned_motion_mesh_layout", &entries)
+        if let Some(skin_cache_layout_entry) = layout_entry::skin_cache(&render_device.limits()) {
+            bind_group_layout_entries = bind_group_layout_entries.extend_with_indices((
+                // The skin cache buffer.
+                (9, skin_cache_layout_entry),
+                // The previous frame's skin cache buffer.
+                (10, skin_cache_layout_entry),
+            ));
+        }
+        BindGroupLayoutDescriptor::new(
+            "morphed_skinned_motion_mesh_layout",
+            &bind_group_layout_entries,
+        )
     }
 
     fn lightmapped_layout(

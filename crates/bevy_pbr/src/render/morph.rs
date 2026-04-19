@@ -256,7 +256,7 @@ pub fn extract_morphs(
     query: Extract<Query<(Entity, &ViewVisibility, &MeshMorphWeights, Has<CacheSkin>)>>,
     weights_query: Extract<Query<&MorphWeights>>,
     render_device: Res<RenderDevice>,
-    mut cached_skin_entities: ResMut<CachedSkinEntities>,
+    mut maybe_cached_skin_entities: Option<ResMut<CachedSkinEntities>>,
 ) {
     // Borrow check workaround.
     let (morph_indices, uniform) = (morph_indices.into_inner(), uniform.into_inner());
@@ -281,7 +281,9 @@ pub fn extract_morphs(
     };
 
     uniform.prepare_for_new_frame();
-    cached_skin_entities.morphs.clear();
+    if let Some(ref mut cached_skin_entities) = maybe_cached_skin_entities {
+        cached_skin_entities.morphs.clear();
+    }
 
     // Loop over each entity with morph targets.
     for (entity, view_visibility, mesh_weights, skin_is_cached) in &query {
@@ -297,7 +299,9 @@ pub fn extract_morphs(
             continue;
         };
 
-        if skin_is_cached {
+        if let Some(ref mut cached_skin_entities) = maybe_cached_skin_entities
+            && skin_is_cached
+        {
             cached_skin_entities.morphs.insert(entity.into());
         }
 
