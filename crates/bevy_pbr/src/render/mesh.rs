@@ -1,5 +1,5 @@
 use crate::contact_shadows::ViewContactShadowsUniformOffset;
-use crate::skin::cache::{CachedSkinBindGroupKey, CachedSkinBuffers, CachedSkinLocation};
+use crate::skin::cache::{CachedSkinBindGroupKey, GlobalSkinCacheBuffers, CachedSkinLocation};
 use crate::{
     material_bind_groups::MaterialBindGroupSlot, resources::write_atmosphere_buffer,
     skin::skin_uniforms_from_world,
@@ -1496,7 +1496,7 @@ impl RenderMeshInstanceGpuBuilder {
         render_lightmaps: &RenderLightmaps,
         skin_uniforms: &SkinUniforms,
         morph_indices: &MorphIndices,
-        maybe_cached_skin_buffers: Option<&CachedSkinBuffers>,
+        maybe_cached_skin_buffers: Option<&GlobalSkinCacheBuffers>,
         timestamp: FrameCount,
     ) -> Option<RenderMeshInstanceGpuPrepared> {
         // Look up the material index. If we couldn't fetch the material index,
@@ -2539,7 +2539,7 @@ pub fn collect_meshes_for_gpu_building(
     render_lightmaps: Res<RenderLightmaps>,
     skin_uniforms: Res<SkinUniforms>,
     morph_indices: Res<MorphIndices>,
-    maybe_cached_skin_buffers: Option<Res<CachedSkinBuffers>>,
+    maybe_cached_skin_buffers: Option<Res<GlobalSkinCacheBuffers>>,
     frame_count: Res<FrameCount>,
     mut meshes_to_reextract_next_frame: ResMut<MeshesToReextractNextFrame>,
 ) {
@@ -2937,7 +2937,7 @@ impl GetBatchData for MeshPipeline {
         SRes<MeshAllocator>,
         SRes<SkinUniforms>,
         SRes<MorphIndices>,
-        Option<SRes<CachedSkinBuffers>>,
+        Option<SRes<GlobalSkinCacheBuffers>>,
     );
     type BatchSetCompareData = MeshBatchSetCompareData;
     type BatchCompareData = AssetId<Mesh>;
@@ -4034,7 +4034,7 @@ pub fn prepare_mesh_bind_groups(
     mesh_allocator: Res<MeshAllocator>,
     render_morph_target_allocator: Res<RenderMorphTargetAllocator>,
     mut render_lightmaps: ResMut<RenderLightmaps>,
-    maybe_cached_skin_buffers: Option<Res<CachedSkinBuffers>>,
+    maybe_cached_skin_buffers: Option<Res<GlobalSkinCacheBuffers>>,
 ) {
     // CPU mesh preprocessing path.
     if let Some(cpu_batched_instance_buffer) = cpu_batched_instance_buffer
@@ -4111,7 +4111,7 @@ fn prepare_mesh_bind_groups_for_phase(
     weights_uniform: &MorphUniforms,
     mesh_allocator: &MeshAllocator,
     render_morph_target_allocator: &RenderMorphTargetAllocator,
-    maybe_cached_skin_buffers: Option<&CachedSkinBuffers>,
+    maybe_cached_skin_buffers: Option<&GlobalSkinCacheBuffers>,
     render_lightmaps: &mut RenderLightmaps,
 ) -> MeshPhaseBindGroups {
     let layouts = &mesh_pipeline.mesh_layouts;
@@ -4320,7 +4320,7 @@ fn prepare_mesh_morph_target_bind_groups_for_phase_using_storage(
     skins_uniform: &SkinUniforms,
     weights_uniform: &MorphUniforms,
     mesh_allocator: &MeshAllocator,
-    cached_skin_buffers: &CachedSkinBuffers,
+    cached_skin_buffers: &GlobalSkinCacheBuffers,
     morph_target_storage_bind_groups: &mut HashMap<
         MeshMorphTargetStorageKey,
         MeshMorphTargetStorageBindGroups,

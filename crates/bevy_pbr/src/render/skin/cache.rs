@@ -101,7 +101,7 @@ impl Plugin for SkinCachePlugin {
             .init_resource::<SkinCachePipelineIds>()
             .init_resource::<SpecializedComputePipelines<SkinCachePipeline>>()
             .init_resource::<SkinCachePipeline>()
-            .init_resource::<CachedSkinBuffers>()
+            .init_resource::<GlobalSkinCacheBuffers>()
             .add_systems(
                 Render,
                 prepare_skin_cache_buffers
@@ -138,7 +138,7 @@ impl Plugin for SkinCachePlugin {
 fn skin_cache(
     pipeline_cache: Res<PipelineCache>,
     cached_skin_bind_groups: Res<CachedSkinBindGroups>,
-    cached_skin_buffers: Res<CachedSkinBuffers>,
+    cached_skin_buffers: Res<GlobalSkinCacheBuffers>,
     skin_cache_pipeline_ids: Res<SkinCachePipelineIds>,
     mut render_context: RenderContext,
 ) {
@@ -221,7 +221,7 @@ pub struct CachedSkinEntities {
 /// A resource, part of the render world, that stores the GPU buffers associated
 /// with skin caching.
 #[derive(Resource)]
-pub struct CachedSkinBuffers {
+pub struct GlobalSkinCacheBuffers {
     /// Maps from a bind group key to the task data for that dispatch.
     ///
     /// We have one dispatch per bind group key. The bind group key consists of
@@ -295,11 +295,11 @@ pub struct CachedSkinLocation {
     pub prev: Option<NonMaxU32>,
 }
 
-impl FromWorld for CachedSkinBuffers {
-    fn from_world(world: &mut World) -> CachedSkinBuffers {
+impl FromWorld for GlobalSkinCacheBuffers {
+    fn from_world(world: &mut World) -> GlobalSkinCacheBuffers {
         let render_device = world.resource::<RenderDevice>();
 
-        CachedSkinBuffers {
+        GlobalSkinCacheBuffers {
             skinned_vertex_buffer_data: HashMap::default(),
             mesh_instance_to_cached_skin_location: MainEntityHashMap::default(),
 
@@ -332,7 +332,7 @@ impl FromWorld for CachedSkinBuffers {
     }
 }
 
-impl CachedSkinBuffers {
+impl GlobalSkinCacheBuffers {
     /// Returns the position of the cached skin within the current and previous
     /// cached skin buffers for the given entity, if applicable.
     pub fn cached_skin_location(&self, main_entity: MainEntity) -> Option<&CachedSkinLocation> {
@@ -341,8 +341,7 @@ impl CachedSkinBuffers {
 
     /// Returns the skin caching buffer for the given key.
     ///
-    /// If skin caching isn't supported, returns `None`. If it is supported, but
-    /// there's no skin caching buffer for the key, returns the dummy buffer.
+    /// If there's no skin caching buffer for the key, returns the dummy buffer.
     pub fn buffers_for_key_or_dummy(&'_ self, key: CachedSkinBindGroupKey) -> SkinCacheBuffers<'_> {
         let Some(skinned_vertex_buffer_data) = self.skinned_vertex_buffer_data.get(&key) else {
             return SkinCacheBuffers::new(
@@ -597,7 +596,7 @@ pub struct GpuCachedSkinnedVertex {
 /// skinned/morphed via the skin caching shader and otherwise prepares the
 /// buffers.
 pub fn prepare_skin_cache_buffers(
-    cached_skin_buffers: ResMut<CachedSkinBuffers>,
+    cached_skin_buffers: ResMut<GlobalSkinCacheBuffers>,
     cached_skin_entities: Res<CachedSkinEntities>,
     mesh_allocator: Res<MeshAllocator>,
     render_mesh_instances: Res<RenderMeshInstances>,
@@ -716,7 +715,7 @@ pub fn prepare_skin_cache_buffers(
 }
 
 pub fn write_skin_cache_buffers(
-    mut cached_skin_buffers: ResMut<CachedSkinBuffers>,
+    mut cached_skin_buffers: ResMut<GlobalSkinCacheBuffers>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
 ) {
@@ -744,7 +743,7 @@ pub fn write_skin_cache_buffers(
 pub fn prepare_skin_cache_bind_groups(
     mut cached_skin_bind_groups: ResMut<CachedSkinBindGroups>,
     batched_instance_buffers: Res<BatchedInstanceBuffers<MeshUniform, MeshInputUniform>>,
-    cached_skin_buffers: ResMut<CachedSkinBuffers>,
+    cached_skin_buffers: ResMut<GlobalSkinCacheBuffers>,
     pipeline_cache: Res<PipelineCache>,
     skin_cache_pipeline: Res<SkinCachePipeline>,
     mesh_allocator: Res<MeshAllocator>,
