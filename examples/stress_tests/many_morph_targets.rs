@@ -419,8 +419,8 @@ fn set_weights(
     }
 }
 
-/// Adds `CacheSkin` components to morphed meshes if skin caching was requested
-/// on the command line.
+/// Adds [`CacheSkin`] components to morphed meshes if skin caching was
+/// requested on the command line.
 fn mark_skins_as_cached(
     mut commands: Commands,
     query: Query<Entity, (With<MeshMorphWeights>, Without<CacheSkin>)>,

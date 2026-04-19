@@ -152,8 +152,8 @@ fn setup_camera_and_environment(
     ));
 }
 
-/// Adds `CacheSkin` components to skinned meshes if skin caching was requested
-/// on the command line.
+/// Adds [`CacheSkin`] components to skinned meshes if skin caching was
+/// requested on the command line.
 fn mark_skins_as_cached(
     mut commands: Commands,
     skinned_meshes: Query<Entity, (With<SkinnedMesh>, Without<CacheSkin>)>,
