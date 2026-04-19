@@ -476,11 +476,15 @@ impl<T> BassetActionParams for T
 where
     T: Send + Sync + 'static + Hash + PartialEq + Reflect + Debug,
 {
+    // XXX TODO: This can cause ambiguities if both `Hash` and `BassetActionParams`
+    // are in scope. Should rename?
     fn hash(&self) -> u64 {
         // XXX TODO: Should we include the type name of `T` as well?
         FixedHasher.hash_one(self)
     }
 
+    // XXX TODO: This can cause ambiguities if both `Eq` and `BassetActionParams`
+    // are in scope. Should rename?
     fn eq(&self, other: &dyn BassetActionParams) -> bool {
         if let Some(downcast) = other.downcast_ref::<T>() {
             self == downcast

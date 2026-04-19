@@ -44,6 +44,8 @@ use core::{marker::PhantomData, ops::Deref, result::Result};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
+use crate::action::MeshletFromMeshParams;
+
 mod action {
     use super::*;
 
@@ -148,14 +150,33 @@ mod action {
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetActionParams)]
     pub struct MeshletFromMeshParams {
-        mesh: AssetRef<'static>, // XXX TODO: Better if we had a typed asset ref?
-        vertex_position_quantization_factor: Option<u8>,
+        pub mesh: AssetRef<'static>, // XXX TODO: Better if we had a typed asset ref?
+        pub vertex_position_quantization_factor: Option<u8>,
     }
 
     impl MeshletFromMeshParams {
+        pub fn new(mesh: impl Into<AssetRef<'static>>) -> Self {
+            Self {
+                mesh: mesh.into(),
+                ..Default::default()
+            }
+        }
+
         fn vertex_position_quantization_factor(&self) -> u8 {
             self.vertex_position_quantization_factor
                 .unwrap_or(MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR)
+        }
+    }
+
+    // XXX TODO: This makes it nicer to use in BSN, since we can do
+    // `MeshletMesh3d(MeshletFromMeshParams::new(...)) without an `AssetRef::new`
+    // inbetween. But it's a pain to set this up for every type of params.
+    // Tried a generic `impl<P: BassetActionParams> From<P> for AssetRef<'static>`,
+    // but that conflicts with other traits. Maybe try again and see if something
+    // can be made to work.
+    impl From<MeshletFromMeshParams> for AssetRef<'static> {
+        fn from(value: MeshletFromMeshParams) -> Self {
+            AssetRef::new(value)
         }
     }
 
@@ -209,14 +230,11 @@ mod action {
             for entity in &mut scene.entities {
                 if let Some(mesh) = entity.mesh.take() {
                     entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
-                        asset: AssetRef::new(
-                            MeshletFromMeshParams {
-                                mesh: mesh.asset,
-                                vertex_position_quantization_factor: params
-                                    .vertex_position_quantization_factor,
-                            },
-                            None,
-                        ),
+                        asset: AssetRef::new(MeshletFromMeshParams {
+                            mesh: mesh.asset,
+                            vertex_position_quantization_factor: params
+                                .vertex_position_quantization_factor,
+                        }),
                     });
                 }
             }
@@ -514,6 +532,10 @@ mod acme {
 
         let gltf = asset.get::<Gltf>().expect("XXX TODO");
 
+        for material in &gltf.materials {
+            std::dbg!(material);
+        }
+
         // Add all the root nodes to the stack.
         let mut stack = gltf
             .nodes
@@ -750,6 +772,55 @@ fn setup(
     ));
 }
 
+fn setup_bsn(world: &mut World) {
+    // let mesh = world
+    //     .resource_mut::<Assets<Mesh>>()
+    //     .add(Cuboid::new(1.0, 1.0, 1.0));
+    // let material = world
+    //     .resource_mut::<Assets<StandardMaterial>>()
+    //     .add(Color::WHITE);
+
+    // world
+    //     .spawn_scene(bsn! {
+    //         Mesh3d(Clone::clone(&mesh))
+    //         MeshMaterial3d<StandardMaterial>(Clone::clone(&material))
+    //         Transform::IDENTITY
+    //     })
+    //     .expect("XXX TODO");
+
+    // world
+    //     .spawn_scene(bsn! {
+    //         Mesh3d("Duck.glb#Mesh0/Primitive0")
+    //         MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
+    //         Transform::from_scale(Vec3::splat(0.01))
+    //     })
+    //     .expect("XXX TODO");
+
+    use bevy::pbr::experimental::meshlet::MeshletMesh3d;
+
+    // let material = world
+    //     .resource_mut::<Assets<MeshletDebugMaterial>>()
+    //     .add(MeshletDebugMaterial::default());
+
+    // world
+    //     .spawn_scene(bsn! {
+    //         MeshletMesh3d(AssetRef::new(
+    //             MeshletFromMeshParams::new("Duck.glb#Mesh0/Primitive0".into())
+    //         ))
+    //         MeshMaterial3d<MeshletDebugMaterial>(Clone::clone(&material))
+    //         Transform::from_scale(Vec3::splat(0.01))
+    //     })
+    //     .expect("XXX TODO");
+
+    world
+        .spawn_scene(bsn! {
+            MeshletMesh3d(MeshletFromMeshParams::new("Duck.glb#Mesh0/Primitive0"))
+            MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
+            Transform::from_scale(Vec3::splat(0.01))
+        })
+        .expect("XXX TODO");
+}
+
 fn print_events<T: Asset + std::fmt::Debug>(
     asset_server: &AssetServer,
     assets: &Assets<T>,
@@ -899,7 +970,7 @@ fn test_serialization() {
             .expect("XXX TODO"));
 
         let b = dbg!(ser::to_string(&ReflectSerializer::new(
-            &AssetRef::new(
+            &AssetRef::new_with_label(
                 LoadPathParams {
                     path: "asdf.txt".into(),
                     ..Default::default()
@@ -967,21 +1038,21 @@ fn main() {
             // ),
         ],
         scenes: vec![
-            (
-                "scene_from_gltf_with_dependencies.basset".into(),
-                Transform::from_xyz(-1.0, 1.0, 0.0)
-                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            ),
+            // (
+            //     "scene_from_gltf_with_dependencies.basset".into(),
+            //     Transform::from_xyz(-1.0, 1.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
             // (
             //     "scene_from_gltf.basset".into(),
             //     Transform::from_xyz(-1.0, 0.0, 0.0)
             //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             // ),
-            (
-                "meshlet_scene.basset".into(),
-                Transform::from_xyz(1.0, 0.0, 0.0)
-                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            ),
+            // (
+            //     "meshlet_scene.basset".into(),
+            //     Transform::from_xyz(1.0, 0.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
         ],
     };
 
@@ -1056,6 +1127,7 @@ fn main() {
     match args.mode {
         ArgMode::Development | ArgMode::Published => {
             app.add_systems(Startup, setup)
+                .add_systems(Startup, setup_bsn)
                 .add_systems(Update, print)
                 .add_systems(Update, reload.run_if(on_timer(Duration::from_secs(2))))
                 .add_systems(Update, acme::tick_scene_spawners);

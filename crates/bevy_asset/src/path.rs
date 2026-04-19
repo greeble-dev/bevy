@@ -609,7 +609,7 @@ impl<'a> AssetPath<'a> {
             loader_settings: Some(settings_ron),
         };
 
-        AssetRef::new(params_value, self.label)
+        AssetRef::new_with_label(params_value, self.label)
     }
 }
 
@@ -758,12 +758,19 @@ pub struct AssetRef<'a> {
 }
 
 impl<'a> AssetRef<'a> {
-    // XXX TODO: The common case is for label to be none. Should consider refactoring
-    // to make that simpler? Maybe have a separate `from_params`?
-    //
     // XXX TODO: If there ever a situation were someone might want to pass in
     // an `Arc` params directly?
-    pub fn new<P: BassetActionParams>(params: P, label: Option<CowArc<'a, str>>) -> Self {
+    pub fn new<P: BassetActionParams>(params: P) -> Self {
+        AssetRef {
+            params: ErasedBassetActionParams::new(Arc::new(params)),
+            label: None,
+        }
+    }
+
+    pub fn new_with_label<P: BassetActionParams>(
+        params: P,
+        label: Option<CowArc<'a, str>>,
+    ) -> Self {
         AssetRef {
             params: ErasedBassetActionParams::new(Arc::new(params)),
             label,
@@ -1050,7 +1057,7 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
 
 impl<'a> From<AssetPath<'a>> for AssetRef<'a> {
     fn from(value: AssetPath<'a>) -> Self {
-        Self::new(
+        Self::new_with_label(
             LoadPathParams {
                 path: value.without_label().to_string(),
                 loader_settings: None,
