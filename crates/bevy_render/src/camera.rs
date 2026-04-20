@@ -1033,6 +1033,10 @@ pub struct DirtyWireframeSpecializations(pub DirtySpecializations);
 /// Clears out the [`DirtySpecializations`] resource in preparation for a new
 /// frame.
 pub fn clear_dirty_specializations(mut dirty_specializations: ResMut<DirtySpecializations>) {
+    std::dbg!(
+        "clear dirty_specializations",
+        &dirty_specializations.changed_renderables
+    );
     dirty_specializations.changed_renderables.clear();
     dirty_specializations.removed_renderables.clear();
     dirty_specializations.views.clear();

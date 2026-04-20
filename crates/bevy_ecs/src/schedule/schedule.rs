@@ -561,6 +561,10 @@ impl Schedule {
         #[cfg(feature = "trace")]
         let _span = info_span!("schedule", name = ?self.label).entered();
 
+        if std::format!("{:?}", self.label) == "ExtractSchedule" {
+            std::dbg!("begin extraction");
+        }
+
         world.check_change_ticks();
         self.initialize(world).unwrap_or_else(|e| {
             panic!(
@@ -589,6 +593,10 @@ impl Schedule {
                 skip_systems.as_ref(),
                 error_handler,
             );
+        }
+
+        if std::format!("{:?}", self.label) == "ExtractSchedule" {
+            std::dbg!("end extraction");
         }
     }
 

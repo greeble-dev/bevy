@@ -360,9 +360,19 @@ fn keyboard_animation_control(
 /// requested on the command line.
 fn mark_skins_as_cached(
     mut commands: Commands,
-    skinned_meshes: Query<Entity, (With<SkinnedMesh>, Without<CacheSkin>)>,
+    skinned_meshes1: Query<Entity, (With<SkinnedMesh>, Without<CacheSkin>)>,
+    skinned_meshes2: Query<Entity, (With<SkinnedMesh>, With<CacheSkin>)>,
+    time: Res<Time<Virtual>>,
 ) {
-    for entity in &skinned_meshes {
-        commands.entity(entity).insert(CacheSkin);
+    if ((time.elapsed_secs() * 0.2) as u32).is_multiple_of(2) {
+        std::dbg!("add CacheSkin");
+        for entity in &skinned_meshes1 {
+            commands.entity(entity).insert(CacheSkin);
+        }
+    } else {
+        std::dbg!("remove CacheSkin");
+        for entity in &skinned_meshes2 {
+            commands.entity(entity).remove::<CacheSkin>();
+        }
     }
 }

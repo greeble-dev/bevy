@@ -97,7 +97,9 @@ use crate::{
 use bevy_core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy_core_pipeline::prepass::{DeferredPrepass, DepthPrepass, NormalPrepass};
 use bevy_core_pipeline::tonemapping::{DebandDither, Tonemapping};
-use bevy_render::camera::{DirtySpecializations, ExtractedCamera, TemporalJitter};
+use bevy_render::camera::{
+    DirtySpecializationSystems, DirtySpecializations, ExtractedCamera, TemporalJitter,
+};
 use bevy_render::prelude::Msaa;
 use bevy_render::sync_world::{MainEntity, MainEntityHashMap};
 use bevy_render::view::{
@@ -201,7 +203,9 @@ impl Plugin for MeshRenderPlugin {
                 .add_systems(
                     ExtractSchedule,
                     (
-                        (extract_skins, extract_morphs).chain(),
+                        (extract_skins, extract_morphs)
+                            .chain()
+                            .after(DirtySpecializationSystems::CheckForRemovals),
                         gpu_preprocessing::clear_batched_gpu_instance_buffers::<MeshPipeline>
                             .before(MeshExtractionSystems),
                     ),

@@ -5,6 +5,7 @@ use bevy_camera::visibility::ViewVisibility;
 use bevy_ecs::prelude::*;
 use bevy_math::Mat4;
 use bevy_mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
+use bevy_render::camera::DirtySpecializations;
 use bevy_render::render_resource::{Buffer, BufferDescriptor};
 use bevy_render::settings::WgpuLimits;
 use bevy_render::sync_world::{MainEntity, MainEntityHashMap};
@@ -293,6 +294,7 @@ pub fn extract_skins(
     joints: Extract<Query<&GlobalTransform>>,
     mut removed_skinned_meshes_query: Extract<RemovedComponents<SkinnedMesh>>,
     mut removed_cache_skin_query: Extract<RemovedComponents<CacheSkin>>,
+    mut dirty_specializations: ResMut<DirtySpecializations>,
 ) {
     let skin_uniforms = skin_uniforms.into_inner();
 
@@ -306,6 +308,7 @@ pub fn extract_skins(
         &skinned_mesh_inverse_bindposes,
         &joints,
         &mut removed_cache_skin_query,
+        &mut dirty_specializations,
     );
 
     // Extract the transforms for all joints from the scene, and write them into
@@ -354,6 +357,7 @@ fn add_or_delete_skins(
     skinned_mesh_inverse_bindposes: &Assets<SkinnedMeshInverseBindposes>,
     joints: &Query<&GlobalTransform>,
     removed_cache_skin_query: &mut RemovedComponents<CacheSkin>,
+    dirty_specializations: &mut DirtySpecializations,
 ) {
     // Find every skinned mesh that changed one of (1) visibility; (2) joint
     // entities (part of `SkinnedMesh`); (3) the associated
@@ -380,6 +384,12 @@ fn add_or_delete_skins(
         if !(*skinned_mesh_view_visibility).get() {
             continue;
         }
+
+        std::dbg!("dirty skin");
+
+        dirty_specializations
+            .changed_renderables
+            .insert(skinned_mesh_entity);
 
         // Initialize the skin.
         add_skin(

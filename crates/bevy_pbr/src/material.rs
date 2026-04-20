@@ -1158,6 +1158,8 @@ pub fn queue_material_meshes(
             continue;
         };
 
+        std::dbg!("queue dirty_specializations");
+
         // First, remove meshes that need to be respecialized, and those that were removed, from the bins.
         for &main_entity in dirty_specializations
             .iter_to_dequeue(view.retained_view_entity, render_visible_mesh_entities)
