@@ -3172,7 +3172,7 @@ bitflags::bitflags! {
         const INVERT_CULLING                    = 1 << 22;
         const PREPASS_READS_MATERIAL            = 1 << 23;
         const SKIN_CACHE                        = 1 << 24;
-        const LAST_FLAG                         = Self::PREPASS_READS_MATERIAL.bits();
+        const LAST_FLAG                         = Self::SKIN_CACHE.bits();
 
         const ALL_PREPASS_BITS                  = Self::DEPTH_PREPASS.bits()
                                                 | Self::NORMAL_PREPASS.bits()
