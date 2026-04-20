@@ -1,5 +1,5 @@
 use crate::contact_shadows::ViewContactShadowsUniformOffset;
-use crate::skin::cache::{CachedSkinBindGroupKey, GlobalSkinCacheBuffers, CachedSkinLocation};
+use crate::skin::cache::{CachedSkinBindGroupKey, CachedSkinLocation, GlobalSkinCacheBuffers};
 use crate::{
     material_bind_groups::MaterialBindGroupSlot, resources::write_atmosphere_buffer,
     skin::skin_uniforms_from_world,
