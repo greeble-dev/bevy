@@ -3174,4 +3174,74 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn simple_asset_load_example() {
+        let dir = Dir::default();
+        let (mut app, gate) = create_app_with_gate(dir.clone());
+
+        dir.insert_asset_text(Path::new("1.txt"), "");
+        dir.insert_asset_text(Path::new("2.txt"), "");
+        dir.insert_asset_text(Path::new("3.txt"), "");
+
+        app.init_asset::<TestAsset>()
+            .register_asset_loader(TrivialLoader);
+
+        #[derive(Asset, TypePath, Clone)]
+        struct MyAsset {
+            #[dependency]
+            asset_1: Handle<TestAsset>,
+            #[dependency]
+            asset_2: Handle<TestAsset>,
+            #[dependency]
+            asset_3: Handle<TestAsset>,
+        }
+
+        app.init_asset::<MyAsset>();
+
+        let asset_server = app.world().resource::<AssetServer>().clone();
+
+        let asset = MyAsset {
+            asset_1: asset_server.load("1.txt"),
+            asset_2: asset_server.load("2.txt"),
+            asset_3: asset_server.load("3.txt"),
+        };
+
+        let asset_1_handle = asset.asset_1.clone();
+        let asset_2_handle = asset.asset_2.clone();
+        let asset_3_handle = asset.asset_3.clone();
+
+        let asset_handle = asset_server.add(asset);
+
+        app.update();
+
+        assert!(asset_server.load_state(&asset_handle).is_loaded());
+        assert!(asset_server
+            .dependency_load_state(&asset_handle)
+            .is_loading());
+
+        gate.open(Path::new("1.txt"));
+
+        run_app_until(&mut app, |_| {
+            asset_server.is_loaded(&asset_1_handle).then_some(())
+        });
+
+        assert!(asset_server.load_state(&asset_handle).is_loaded());
+        assert!(asset_server
+            .dependency_load_state(&asset_handle)
+            .is_loading());
+
+        gate.open(Path::new("2.txt"));
+        gate.open(Path::new("3.txt"));
+
+        run_app_until(&mut app, |_| {
+            (asset_server.is_loaded(&asset_2_handle) && asset_server.is_loaded(&asset_3_handle))
+                .then_some(())
+        });
+
+        assert!(asset_server.load_state(&asset_handle).is_loaded());
+        assert!(asset_server
+            .dependency_load_state(&asset_handle)
+            .is_loaded());
+    }
 }
