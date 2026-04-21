@@ -667,6 +667,8 @@ pub trait AssetApp {
     fn set_default_asset_processor<P: Process>(&mut self, extension: &str) -> &mut Self;
     /// Initializes the given loader in the [`App`]'s [`AssetServer`].
     fn init_asset_loader<L: AssetLoader + FromWorld>(&mut self) -> &mut Self;
+    /// XXX TODO: Document.
+    fn init_poly_asset_loader<L: PolyAssetLoader + FromWorld>(&mut self) -> &mut Self;
     /// Initializes the given [`Asset`] in the [`App`] by:
     /// * Registering the [`Asset`] in the [`AssetServer`]
     /// * Initializing the [`AssetEvent`] resource for the [`Asset`]
@@ -739,6 +741,11 @@ impl AssetApp for App {
     fn init_asset_loader<L: AssetLoader + FromWorld>(&mut self) -> &mut Self {
         let loader = L::from_world(self.world_mut());
         self.register_asset_loader(loader)
+    }
+
+    fn init_poly_asset_loader<L: PolyAssetLoader + FromWorld>(&mut self) -> &mut Self {
+        let loader = L::from_world(self.world_mut());
+        self.register_poly_asset_loader(loader)
     }
 
     fn init_asset<A: Asset>(&mut self) -> &mut Self {

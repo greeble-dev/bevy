@@ -30,7 +30,7 @@ use bevy_asset::{
     saver::{AssetSaver, ErasedAssetSaver},
     AssetRef, ErasedLoadedAsset, LoadContext, LoadedAsset,
 };
-use bevy_ecs::{error::BevyError, reflect::AppTypeRegistry};
+use bevy_ecs::{error::BevyError, reflect::AppTypeRegistry, world::FromWorld};
 use bevy_platform::{
     collections::{HashMap, HashSet},
     hash::FixedHasher,
@@ -78,13 +78,7 @@ pub struct BassetPlugin;
 
 impl Plugin for BassetPlugin {
     fn build(&self, app: &mut App) {
-        app.register_poly_asset_loader(BassetLoader(
-            app.world()
-                .get_resource::<AppTypeRegistry>()
-                .expect("XXX TODO")
-                .deref()
-                .clone(),
-        ));
+        app.init_poly_asset_loader::<BassetLoader>();
     }
 }
 
@@ -1231,7 +1225,14 @@ struct BassetFileSerializable {
 // XXX TODO: Could be avoided if `LoadContext` or `AssetServer` exposed the
 // type registry. Is that a step too far?
 #[derive(TypePath)]
-struct BassetLoader(TypeRegistryArc);
+struct BassetLoader(AppTypeRegistry);
+
+impl FromWorld for BassetLoader {
+    fn from_world(world: &mut bevy_ecs::world::World) -> Self {
+        // XXX TODO: Is this ok to panic?
+        BassetLoader(world.resource::<AppTypeRegistry>().clone())
+    }
+}
 
 impl PolyAssetLoader for BassetLoader {
     type Settings = ();

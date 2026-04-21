@@ -44,8 +44,6 @@ use core::{marker::PhantomData, ops::Deref, result::Result};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
-use crate::action::MeshletFromMeshParams;
-
 mod action {
     use super::*;
 
@@ -772,7 +770,7 @@ fn setup(
     ));
 }
 
-fn setup_bsn(world: &mut World) {
+fn setup_bsn(_world: &mut World) {
     // let mesh = world
     //     .resource_mut::<Assets<Mesh>>()
     //     .add(Cuboid::new(1.0, 1.0, 1.0));
@@ -796,7 +794,7 @@ fn setup_bsn(world: &mut World) {
     //     })
     //     .expect("XXX TODO");
 
-    use bevy::pbr::experimental::meshlet::MeshletMesh3d;
+    // use bevy::pbr::experimental::meshlet::MeshletMesh3d;
 
     // let material = world
     //     .resource_mut::<Assets<MeshletDebugMaterial>>()
@@ -812,13 +810,13 @@ fn setup_bsn(world: &mut World) {
     //     })
     //     .expect("XXX TODO");
 
-    world
-        .spawn_scene(bsn! {
-            MeshletMesh3d(MeshletFromMeshParams::new("Duck.glb#Mesh0/Primitive0"))
-            MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
-            Transform::from_scale(Vec3::splat(0.01))
-        })
-        .expect("XXX TODO");
+    // world
+    //     .spawn_scene(bsn! {
+    //         MeshletMesh3d(MeshletFromMeshParams::new("Duck.glb#Mesh0/Primitive0"))
+    //         MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
+    //         Transform::from_scale(Vec3::splat(0.01))
+    //     })
+    //     .expect("XXX TODO");
 }
 
 fn print_events<T: Asset + std::fmt::Debug>(
@@ -1038,21 +1036,21 @@ fn main() {
             // ),
         ],
         scenes: vec![
-            // (
-            //     "scene_from_gltf_with_dependencies.basset".into(),
-            //     Transform::from_xyz(-1.0, 1.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
+            (
+                "scene_from_gltf_with_dependencies.basset".into(),
+                Transform::from_xyz(-1.0, 1.0, 0.0)
+                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            ),
             // (
             //     "scene_from_gltf.basset".into(),
             //     Transform::from_xyz(-1.0, 0.0, 0.0)
             //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             // ),
-            // (
-            //     "meshlet_scene.basset".into(),
-            //     Transform::from_xyz(1.0, 0.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
+            (
+                "meshlet_scene.basset".into(),
+                Transform::from_xyz(1.0, 0.0, 0.0)
+                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            ),
         ],
     };
 
