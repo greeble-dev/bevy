@@ -1,13 +1,13 @@
 (
 	root: (
-		params: {
-			"basset::action::ConvertAcmeSceneMeshesToMeshletsParams": (
+		action: {
+			"basset::action::ConvertAcmeSceneMeshesToMeshlets": (
 				scene: (
-					params: {
-						"basset::action::AcmeSceneFromGltfParams": (
+					action: {
+						"basset::action::AcmeSceneFromGltf": (
 							gltf: (
-								params: {
-									"bevy_asset::basset::action::LoadPathParams": (
+								action: {
+									"bevy_asset::basset::action::LoadPath": (
 										path: "Duck.glb",
 									)
 								}

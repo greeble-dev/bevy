@@ -29,7 +29,7 @@ use bevy::{
 // XXX TODO: Should be in `use bevy` above?
 use bevy_asset::{
     basset::{
-        action::LoadPathParams,
+        action::LoadPath,
         publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
     },
     io::{AssetSourceId, Writer},
@@ -45,7 +45,7 @@ use core::{marker::PhantomData, ops::Deref, result::Result};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
-use crate::action::MeshletFromMeshParams;
+use crate::action::MeshletFromMesh;
 
 mod action {
     use super::*;
@@ -53,30 +53,30 @@ mod action {
     pub struct JoinStringsFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetActionParams)]
-    pub struct JoinStringsParams {
+    #[reflect(BassetAction)]
+    pub struct JoinStrings {
         separator: String,
         strings: Vec<AssetRef<'static>>,
     }
 
     impl BassetActionFunction for JoinStringsFunction {
-        type Params = JoinStringsParams;
+        type Action = JoinStrings;
         type Error = BevyError;
 
         async fn apply(
             &self,
             mut context: ApplyContext<'_>,
-            params: &Self::Params,
+            action: &Self::Action,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             let mut strings = Vec::new();
 
-            for path in &params.strings {
+            for path in &action.strings {
                 strings.push(context.load_dependee::<demo::StringAsset>(path).await?.0);
             }
 
             let joined = strings
                 .into_iter()
-                .reduce(|l, r| l + &params.separator + &r)
+                .reduce(|l, r| l + &action.separator + &r)
                 .unwrap_or("".to_owned());
 
             Ok(context.finish(demo::StringAsset(joined)).await)
@@ -86,23 +86,23 @@ mod action {
     pub struct UppercaseStringFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetActionParams)]
-    pub struct UppercaseStringParams {
+    #[reflect(BassetAction)]
+    pub struct UppercaseString {
         string: AssetRef<'static>,
     }
 
     impl BassetActionFunction for UppercaseStringFunction {
-        type Params = UppercaseStringParams;
+        type Action = UppercaseString;
         type Error = BevyError;
 
         async fn apply(
             &self,
             mut context: ApplyContext<'_>,
-            params: &Self::Params,
+            action: &Self::Action,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             let string = demo::StringAsset(
                 context
-                    .load_dependee::<demo::StringAsset>(&params.string)
+                    .load_dependee::<demo::StringAsset>(&action.string)
                     .await?
                     .0
                     .to_uppercase(),
@@ -117,8 +117,8 @@ mod action {
     pub struct AcmeSceneFromGltfFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetActionParams)]
-    pub struct AcmeSceneFromGltfParams {
+    #[reflect(BassetAction)]
+    pub struct AcmeSceneFromGltf {
         gltf: AssetRef<'static>,
         // XXX TODO: Would be nice to support selecting a scene. but that's
         // awkward to do - we'd have to dig around `Gltf::scenes` and extract
@@ -128,15 +128,15 @@ mod action {
     }
 
     impl BassetActionFunction for AcmeSceneFromGltfFunction {
-        type Params = AcmeSceneFromGltfParams;
+        type Action = AcmeSceneFromGltf;
         type Error = BevyError;
 
         async fn apply(
             &self,
             mut context: ApplyContext<'_>,
-            params: &Self::Params,
+            action: &Self::Action,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
-            let gltf = context.erased_load_dependee(&params.gltf).await?;
+            let gltf = context.erased_load_dependee(&action.gltf).await?;
 
             let scene = acme::from_gltf(&gltf);
 
@@ -149,13 +149,13 @@ mod action {
     pub struct MeshletFromMeshFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetActionParams)]
-    pub struct MeshletFromMeshParams {
+    #[reflect(BassetAction)]
+    pub struct MeshletFromMesh {
         pub mesh: AssetRef<'static>, // XXX TODO: Better if we had a typed asset ref?
         pub vertex_position_quantization_factor: Option<u8>,
     }
 
-    impl MeshletFromMeshParams {
+    impl MeshletFromMesh {
         pub fn new(mesh: impl Into<AssetRef<'static>>) -> Self {
             Self {
                 mesh: mesh.into(),
@@ -170,33 +170,33 @@ mod action {
     }
 
     // XXX TODO: This makes it nicer to use in BSN, since we can do
-    // `MeshletMesh3d(MeshletFromMeshParams::new(...)) without an `AssetRef::new`
-    // inbetween. But it's a pain to set this up for every type of params.
-    // Tried a generic `impl<P: BassetActionParams> From<P> for AssetRef<'static>`,
+    // `MeshletMesh3d(MeshletFromMesh::new(...)) without an `AssetRef::new`
+    // inbetween. But it's a pain to set this up for every type of action.
+    // Tried a generic `impl<P: BassetAction> From<P> for AssetRef<'static>`,
     // but that conflicts with other traits. Maybe try again and see if something
     // can be made to work.
-    impl From<MeshletFromMeshParams> for AssetRef<'static> {
-        fn from(value: MeshletFromMeshParams) -> Self {
+    impl From<MeshletFromMesh> for AssetRef<'static> {
+        fn from(value: MeshletFromMesh) -> Self {
             AssetRef::new(value)
         }
     }
 
     impl BassetActionFunction for MeshletFromMeshFunction {
-        type Params = MeshletFromMeshParams;
+        type Action = MeshletFromMesh;
         type Error = BevyError;
 
         async fn apply(
             &self,
             mut context: ApplyContext<'_>,
-            params: &Self::Params,
+            action: &Self::Action,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             // TODO: Should we check if `MeshletPlugin` is registered so we can
             // return a sensible error?
 
-            let mesh = context.load_dependee::<Mesh>(&params.mesh).await?;
+            let mesh = context.load_dependee::<Mesh>(&action.mesh).await?;
 
             let meshlet =
-                MeshletMesh::from_mesh(&mesh, params.vertex_position_quantization_factor())?;
+                MeshletMesh::from_mesh(&mesh, action.vertex_position_quantization_factor())?;
 
             Ok(context.finish(meshlet).await)
         }
@@ -205,35 +205,35 @@ mod action {
     pub struct ConvertAcmeSceneMeshesToMeshletsFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetActionParams)]
-    pub struct ConvertAcmeSceneMeshesToMeshletsParams {
+    #[reflect(BassetAction)]
+    pub struct ConvertAcmeSceneMeshesToMeshlets {
         scene: AssetRef<'static>,
         #[reflect(default)]
         vertex_position_quantization_factor: Option<u8>,
     }
 
     impl BassetActionFunction for ConvertAcmeSceneMeshesToMeshletsFunction {
-        type Params = ConvertAcmeSceneMeshesToMeshletsParams;
+        type Action = ConvertAcmeSceneMeshesToMeshlets;
         type Error = BevyError;
 
         async fn apply(
             &self,
             mut context: ApplyContext<'_>,
-            params: &Self::Params,
+            action: &Self::Action,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             // TODO: Should we check if `MeshletPlugin` is registered so we can
             // return a sensible error?
 
             let mut scene = context
-                .load_dependee::<acme::AcmeScene>(&params.scene)
+                .load_dependee::<acme::AcmeScene>(&action.scene)
                 .await?;
 
             for entity in &mut scene.entities {
                 if let Some(mesh) = entity.mesh.take() {
                     entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
-                        asset: AssetRef::new(MeshletFromMeshParams {
+                        asset: AssetRef::new(MeshletFromMesh {
                             mesh: mesh.asset,
-                            vertex_position_quantization_factor: params
+                            vertex_position_quantization_factor: action
                                 .vertex_position_quantization_factor,
                         }),
                     });
@@ -745,7 +745,7 @@ const INLINE_JOIN_STRINGS_RON: &str = r#"
     strings: [
         Action((
             name: "basset::action::UppercaseString",
-            params: (
+            action: (
                 string: Path("hello.string"),
             )
         )),
@@ -943,7 +943,7 @@ struct Args {
 fn test_serialization() {
     let mut registry = TypeRegistry::default();
     registry.register::<AssetRef<'static>>();
-    registry.register::<LoadPathParams>();
+    registry.register::<LoadPath>();
 
     {
         use ron::{de, ser};
@@ -962,7 +962,7 @@ fn test_serialization() {
 
         let b = dbg!(ser::to_string(&ReflectSerializer::new(
             &AssetRef::new_with_label(
-                LoadPathParams {
+                LoadPath {
                     path: "asdf.txt".into(),
                     ..Default::default()
                 },
@@ -1046,7 +1046,7 @@ fn main() {
             ),
         ],
         bsns: vec![Box::new(bsn! {
-            MeshletMesh3d(MeshletFromMeshParams::new("Duck.glb#Mesh0/Primitive0"))
+            MeshletMesh3d(MeshletFromMesh::new("Duck.glb#Mesh0/Primitive0"))
             MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
             template_value(Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01)))
         })],

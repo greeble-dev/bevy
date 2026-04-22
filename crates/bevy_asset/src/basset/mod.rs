@@ -2,7 +2,7 @@
 
 use crate::{
     basset::{
-        action::{LoadPath, LoadPathParams},
+        action::{LoadPath, LoadPathFunction},
         cache::{
             ActionCacheKey, CacheLoaderDependency, DependencyCacheKey, DependencyCacheValue,
             MemoryAndFileCache,
@@ -178,30 +178,30 @@ impl<'a> TryFrom<AssetPath<'a>> for RootAssetPath<'a> {
 #[reflect(opaque)]
 #[reflect(SerializeWithRegistry, DeserializeWithRegistry)]
 pub struct RootAssetRef {
-    params: ErasedBassetActionParams,
+    action: ErasedBassetAction,
 }
 
 impl RootAssetRef {
-    pub fn new<P: BassetActionParams>(params: P) -> Self {
+    pub fn new<P: BassetAction>(action: P) -> Self {
         Self {
-            params: ErasedBassetActionParams::new(Arc::new(params)),
+            action: ErasedBassetAction::new(Arc::new(action)),
         }
     }
 
     pub fn without_label(value: AssetRef<'_>) -> Self {
         Self {
-            params: value.params().clone(),
+            action: value.action().clone(),
         }
     }
 
-    fn params(&self) -> &ErasedBassetActionParams {
-        &self.params
+    fn action(&self) -> &ErasedBassetAction {
+        &self.action
     }
 }
 
 impl Display for RootAssetRef {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{:?}", self.params)
+        write!(f, "{:?}", self.action)
     }
 }
 
@@ -213,8 +213,8 @@ impl SerializeWithRegistry for RootAssetRef {
         let mut s = serializer.serialize_struct("AssetRef", 3)?;
 
         s.serialize_field(
-            "params",
-            &ReflectSerializer::new((*self.params.0).as_partial_reflect(), registry),
+            "action",
+            &ReflectSerializer::new((*self.action.0).as_partial_reflect(), registry),
         )?;
 
         s.end()
@@ -242,30 +242,30 @@ impl<'de> DeserializeWithRegistry<'de> for RootAssetRef {
             where
                 V: SeqAccess<'de>,
             {
-                let params_dyn = seq
+                let action_dyn = seq
                     .next_element_seed(ReflectDeserializer::new(self.registry))?
                     .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
 
-                // XXX TODO: Do we need `params_dyn.get_represented_type_info()" if we already know the type?
-                let params_registration = self
+                // XXX TODO: Do we need `action_dyn.get_represented_type_info()" if we already know the type?
+                let action_registration = self
                     .registry
-                    .get_with_type_path(params_dyn.get_represented_type_info().unwrap().type_path())
+                    .get_with_type_path(action_dyn.get_represented_type_info().unwrap().type_path())
                     .expect("XXX TODO?");
 
-                let params_concrete = params_registration
+                let action_concrete = action_registration
                     .data::<ReflectFromReflect>()
                     .unwrap()
-                    .from_reflect(&*params_dyn)
+                    .from_reflect(&*action_dyn)
                     .unwrap();
 
-                let params = params_registration
-                    .data::<ReflectBassetActionParams>()
+                let action = action_registration
+                    .data::<ReflectBassetAction>()
                     .expect("XXX TODO?")
-                    .get_boxed(params_concrete)
+                    .get_boxed(action_concrete)
                     .expect("XXX TODO?");
 
                 Ok(RootAssetRef {
-                    params: ErasedBassetActionParams(params.into()),
+                    action: ErasedBassetAction(action.into()),
                 })
             }
 
@@ -276,57 +276,57 @@ impl<'de> DeserializeWithRegistry<'de> for RootAssetRef {
                 #[derive(Deserialize)]
                 #[serde(field_identifier, rename_all = "lowercase")]
                 enum Field {
-                    Params,
+                    Action,
                 }
 
-                let mut params = None;
+                let mut action = None;
 
                 while let Some(key) = map.next_key()? {
                     match key {
-                        Field::Params => {
-                            if params.is_some() {
-                                return Err(serde::de::Error::duplicate_field("params"));
+                        Field::Action => {
+                            if action.is_some() {
+                                return Err(serde::de::Error::duplicate_field("action"));
                             }
 
-                            let params_dyn =
+                            let action_dyn =
                                 map.next_value_seed(ReflectDeserializer::new(self.registry))?;
 
                             // XXX TODO: Duplicates a bunch of `visit_seq`. Refactor?
-                            let params_registration = self
+                            let action_registration = self
                                 .registry
                                 .get_with_type_path(
-                                    params_dyn.get_represented_type_info().unwrap().type_path(),
+                                    action_dyn.get_represented_type_info().unwrap().type_path(),
                                 )
                                 .expect("XXX TODO?");
 
-                            let params_concrete = params_registration
+                            let action_concrete = action_registration
                                 .data::<ReflectFromReflect>()
                                 .unwrap()
-                                .from_reflect(&*params_dyn)
+                                .from_reflect(&*action_dyn)
                                 .unwrap();
 
-                            params = Some(
-                                params_registration
-                                    .data::<ReflectBassetActionParams>()
+                            action = Some(
+                                action_registration
+                                    .data::<ReflectBassetAction>()
                                     .expect("XXX TODO?")
-                                    .get_boxed(params_concrete)
+                                    .get_boxed(action_concrete)
                                     .expect("XXX TODO?"),
                             );
                         }
                     }
                 }
 
-                let params = params.ok_or_else(|| serde::de::Error::missing_field("params"))?;
+                let action = action.ok_or_else(|| serde::de::Error::missing_field("action"))?;
 
                 Ok(RootAssetRef {
-                    params: ErasedBassetActionParams(params.into()),
+                    action: ErasedBassetAction(action.into()),
                 })
             }
         }
 
         deserializer.deserialize_struct(
             "RootAssetRef",
-            &["params"],
+            &["action"],
             RootAssetRefVisitor { registry },
         )
     }
@@ -335,7 +335,7 @@ impl<'de> DeserializeWithRegistry<'de> for RootAssetRef {
 impl From<RootAssetRef> for AssetRef<'_> {
     fn from(value: RootAssetRef) -> Self {
         Self {
-            params: value.params,
+            action: value.action,
             label: None,
         }
     }
@@ -355,7 +355,7 @@ impl TryFrom<AssetRef<'_>> for RootAssetRef {
 
 impl From<RootAssetPath<'_>> for RootAssetRef {
     fn from(value: RootAssetPath) -> Self {
-        RootAssetRef::new(LoadPathParams {
+        RootAssetRef::new(LoadPath {
             path: value.to_string(),
             ..Default::default()
         })
@@ -444,44 +444,44 @@ impl ApplyContext<'_> {
 
 // XXX TODO: Review `Debug` bound.
 #[reflect_trait]
-pub trait BassetActionParams: Downcast + Send + Sync + 'static + Reflect + Debug {
+pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {
     // XXX TODO: `PartialReflect` exposes some utilities for `hash` and `eq`. Can
     // they replace our implementation? See `PartialReflect::reflect_hash`. One
     // worry is that I don't think we can enforce that at compile-time, so we'd
     // need a runtime error. Also annoying to do `#[reflect(Hash, etc)]`.
     fn hash(&self) -> u64;
-    fn eq(&self, other: &dyn BassetActionParams) -> bool;
+    fn eq(&self, other: &dyn BassetAction) -> bool;
     fn type_name(&self) -> &'static str;
 }
 
 // XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
-impl_downcast!(BassetActionParams);
+impl_downcast!(BassetAction);
 
 // XXX TODO: Document? See bevy_reflect where it does `impl TypePath for dyn Enemy`.
-impl TypePath for dyn BassetActionParams {
+impl TypePath for dyn BassetAction {
     fn type_path() -> &'static str {
-        "dyn bevy_asset::basset::BassetActionParams"
+        "dyn bevy_asset::basset::BassetAction"
     }
 
     fn short_type_path() -> &'static str {
-        "dyn BassetActionParams"
+        "dyn BassetAction"
     }
 }
 
-impl<T> BassetActionParams for T
+impl<T> BassetAction for T
 where
     T: Send + Sync + 'static + Hash + PartialEq + Reflect + Debug,
 {
-    // XXX TODO: This can cause ambiguities if both `Hash` and `BassetActionParams`
+    // XXX TODO: This can cause ambiguities if both `Hash` and `BassetAction`
     // are in scope. Should rename?
     fn hash(&self) -> u64 {
         // XXX TODO: Should we include the type name of `T` as well?
         FixedHasher.hash_one(self)
     }
 
-    // XXX TODO: This can cause ambiguities if both `Eq` and `BassetActionParams`
+    // XXX TODO: This can cause ambiguities if both `Eq` and `BassetAction`
     // are in scope. Should rename?
-    fn eq(&self, other: &dyn BassetActionParams) -> bool {
+    fn eq(&self, other: &dyn BassetAction) -> bool {
         if let Some(downcast) = other.downcast_ref::<T>() {
             self == downcast
         } else {
@@ -496,11 +496,11 @@ where
 
 // XXX TODO: Decide if member should be pub?
 #[derive(Clone)]
-pub struct ErasedBassetActionParams(pub Arc<dyn BassetActionParams>);
+pub struct ErasedBassetAction(pub Arc<dyn BassetAction>);
 
-impl ErasedBassetActionParams {
-    pub fn new(params: Arc<dyn BassetActionParams>) -> Self {
-        Self(params)
+impl ErasedBassetAction {
+    pub fn new(action: Arc<dyn BassetAction>) -> Self {
+        Self(action)
     }
 
     pub fn type_id(&self) -> TypeId {
@@ -512,36 +512,36 @@ impl ErasedBassetActionParams {
     }
 }
 
-impl Hash for ErasedBassetActionParams {
+impl Hash for ErasedBassetAction {
     fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_u64(self.0.hash());
     }
 }
 
-impl PartialEq for ErasedBassetActionParams {
+impl PartialEq for ErasedBassetAction {
     fn eq(&self, other: &Self) -> bool {
         self.0.eq(&*other.0)
     }
 }
 
-impl Eq for ErasedBassetActionParams {}
+impl Eq for ErasedBassetAction {}
 
 // XXX TODO: Can't we automatically derive this since we've implemented `Ord`?
-impl PartialOrd for ErasedBassetActionParams {
+impl PartialOrd for ErasedBassetAction {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for ErasedBassetActionParams {
+impl Ord for ErasedBassetAction {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         // XXX TODO: Decide if this is good enough or if we need a proper Ord.
-        // Making clients implement `Ord` for all params is gonna suck though.
+        // Making clients implement `Ord` for all actions is gonna suck though.
         self.0.hash().cmp(&other.0.hash())
     }
 }
 
-impl Debug for ErasedBassetActionParams {
+impl Debug for ErasedBassetAction {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         self.0.fmt(f)
     }
@@ -552,7 +552,7 @@ impl Debug for ErasedBassetActionParams {
 /// An action that takes a parameter struct of a known type and returns an
 /// `ErasedLoadedAsset`.
 pub trait BassetActionFunction: Send + Sync + 'static {
-    type Params: BassetActionParams;
+    type Action: BassetAction;
 
     /// XXX TODO: Document.
     type Error: Into<BevyError>;
@@ -565,7 +565,7 @@ pub trait BassetActionFunction: Send + Sync + 'static {
     fn apply(
         &self,
         context: ApplyContext<'_>,
-        params: &Self::Params,
+        action: &Self::Action,
     ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, Self::Error>>;
 
     /// XXX TODO: Consider name. It implies publishable as well?
@@ -578,9 +578,9 @@ pub trait ErasedBassetActionFunction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
         context: ApplyContext<'a>,
-        // XXX TODO: Could consider taking `&' dyn BassetActionParams`? More general,
-        // but also more risk if we need something from `ErasedBassetActionParams` like a debug type name.
-        params: &'a ErasedBassetActionParams,
+        // XXX TODO: Could consider taking `&' dyn BassetAction`? More general,
+        // but also more risk if we need something from `ErasedBassetAction` like a debug type name.
+        action: &'a ErasedBassetAction,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 
     fn cacheable(&self) -> bool;
@@ -593,12 +593,12 @@ where
     fn apply<'a>(
         &'a self,
         context: ApplyContext<'a>,
-        params: &'a ErasedBassetActionParams,
+        action: &'a ErasedBassetAction,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         Box::pin(async move {
-            let params = params.0.downcast_ref::<T::Params>().expect("XXX TODO");
+            let action = action.0.downcast_ref::<T::Action>().expect("XXX TODO");
 
-            T::apply(self, context, params).await.map_err(Into::into)
+            T::apply(self, context, action).await.map_err(Into::into)
         })
     }
 
@@ -612,13 +612,13 @@ pub struct DevelopmentActionSourceSettings {
     validate_dependency_cache: bool,
     validate_action_cache: bool,
     // XXX TODO: Better to use `TypeId` or type name?
-    action_params_type_id_to_action_function: HashMap<TypeId, Box<dyn ErasedBassetActionFunction>>,
+    action_type_id_to_action_function: HashMap<TypeId, Box<dyn ErasedBassetActionFunction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
 }
 
 impl Default for DevelopmentActionSourceSettings {
     fn default() -> Self {
-        let mut action_params_type_id_to_action_function =
+        let mut action_type_id_to_action_function =
             HashMap::<TypeId, Box<dyn ErasedBassetActionFunction>>::new();
 
         // XXX TODO: Review if we should be automatically adding `LoadPath`
@@ -627,14 +627,14 @@ impl Default for DevelopmentActionSourceSettings {
         // It's likely the `LoadPath` will be the most common action, so making
         // `DevelopmentActionSource::action_function` check for `LoadPath` before
         // the hash lookup might pay off.
-        action_params_type_id_to_action_function
-            .insert(TypeId::of::<LoadPathParams>(), Box::new(LoadPath));
+        action_type_id_to_action_function
+            .insert(TypeId::of::<LoadPath>(), Box::new(LoadPathFunction));
 
         Self {
             file_cache_path: Default::default(),
             validate_dependency_cache: Default::default(),
             validate_action_cache: Default::default(),
-            action_params_type_id_to_action_function,
+            action_type_id_to_action_function,
             asset_type_name_to_saver: Default::default(),
         }
     }
@@ -657,8 +657,8 @@ impl DevelopmentActionSourceSettings {
     }
 
     pub fn with_action<T: BassetActionFunction>(mut self, action: T) -> Self {
-        self.action_params_type_id_to_action_function
-            .insert(TypeId::of::<T::Params>(), Box::new(action));
+        self.action_type_id_to_action_function
+            .insert(TypeId::of::<T::Action>(), Box::new(action));
 
         self
     }
@@ -745,13 +745,13 @@ impl DevelopmentActionSource {
         }
     }
 
-    // XXX TODO: Clarify that this is mapping the `BassetActionParams` type name to action.
+    // XXX TODO: Clarify that this is mapping the `BassetAction` type name to action.
     pub(crate) fn action_function<'a>(
         &'a self,
         type_id: TypeId,
     ) -> Option<&'a dyn ErasedBassetActionFunction> {
         self.settings
-            .action_params_type_id_to_action_function
+            .action_type_id_to_action_function
             .get(&type_id)
             .map(move |a| &**a)
     }
@@ -775,12 +775,12 @@ impl ActionSource for DevelopmentActionSource {
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         Box::pin(async move {
             let action_function =
-                self.action_function(action.params().type_id())
+                self.action_function(action.action().type_id())
                     .ok_or_else(|| {
                         // XXX TODO: Clarify error?
                         BevyError::from(format!(
                             "Couldn't find action \"{}\")",
-                            action.params().type_name()
+                            action.action().type_name()
                         ))
                     })?;
 
@@ -820,7 +820,7 @@ impl ActionSource for DevelopmentActionSource {
             let apply_context = ApplyContext::new(asset_server, dependency_key);
 
             let asset = action_function
-                .apply(apply_context, action.params())
+                .apply(apply_context, action.action())
                 .await?;
 
             // XXX TODO: Review logging. Bit spammy right now.
@@ -1020,12 +1020,12 @@ impl ActionSource for DevelopmentActionSource {
                 match &input_asset {
                     PublishDependency::Load(action) => {
                         let action_function = self
-                            .action_function(action.params().type_id())
+                            .action_function(action.action().type_id())
                             .ok_or_else(|| {
                                 // XXX TODO: Clarify error?
                                 BevyError::from(format!(
                                     "Couldn't find action \"{}\")",
-                                    action.params().type_name()
+                                    action.action().type_name()
                                 ))
                             })?;
 
@@ -1390,7 +1390,7 @@ async fn fallback_action_handler(
     action_source: &dyn ActionSource,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     // XXX TODO: Check if there's a better way to handle this.
-    if action.params.type_id() == TypeId::of::<LoadPathParams>() {
+    if action.action.type_id() == TypeId::of::<LoadPath>() {
         // XXX TODO: Is there ever a situation where the dependency key will be found
         // here? `fallback_action_handler` is currently only used by minimal and
         // published action sources, which don't support dependency keys.
@@ -1406,9 +1406,9 @@ async fn fallback_action_handler(
         };
 
         ErasedBassetActionFunction::apply(
-            &LoadPath,
+            &LoadPathFunction,
             ApplyContext::new(asset_server, dependency_key),
-            &action.params,
+            &action.action,
         )
         .await
     } else {
@@ -1552,13 +1552,11 @@ pub mod action {
     use super::*;
     use alloc::string::String;
 
-    // XXX TODO: Consider renaming to `LoadWithSettings` and making the `settings`
-    // member non-optional? Not sure if we have any use case outside of `load_with_settings.`
-    pub struct LoadPath;
+    pub struct LoadPathFunction;
 
     #[derive(Reflect, Default, Hash, PartialEq, Debug)]
-    #[reflect(BassetActionParams)]
-    pub struct LoadPathParams {
+    #[reflect(BassetAction)]
+    pub struct LoadPath {
         // XXX TODO: Should be `RootAssetPath`? Avoiding for now to simplify lifetimes and defaults.
         pub path: String,
         // XXX TODO: Currently the settings are simply serialized RON, which means we're
@@ -1574,18 +1572,18 @@ pub mod action {
         //loader_name: Option<String>,
     }
 
-    impl BassetActionFunction for LoadPath {
-        type Params = LoadPathParams;
+    impl BassetActionFunction for LoadPathFunction {
+        type Action = LoadPath;
         type Error = BevyError;
 
         async fn apply(
             &self,
             context: ApplyContext<'_>,
-            params: &Self::Params,
+            action: &Self::Action,
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             // XXX TODO: Try to avoid clones? But will mean changing lifetimes
             // of `BassetAction::apply`.
-            let path = AssetPath::parse(&params.path).into_owned();
+            let path = AssetPath::parse(&action.path).into_owned();
 
             // XXX TODO: Selecting a subasset should be done by the `RootAssetRef::label`,
             // not here. How do we make this more robust?
@@ -1598,7 +1596,7 @@ pub mod action {
                 .await
                 .map_err(Into::<BevyError>::into)?;
 
-            if let Some(override_settings) = &params.loader_settings {
+            if let Some(override_settings) = &action.loader_settings {
                 meta = loader.meta_from_settings(override_settings.as_bytes())?;
             }
 

@@ -1,8 +1,5 @@
 use crate::{
-    basset::{
-        action::LoadPathParams, BassetActionParams, ErasedBassetActionParams,
-        ReflectBassetActionParams,
-    },
+    basset::{action::LoadPath, BassetAction, ErasedBassetAction, ReflectBassetAction},
     io::AssetSourceId,
 };
 use alloc::{
@@ -604,12 +601,13 @@ impl<'a> AssetPath<'a> {
 
     // XXX TODO: See `AssetRef::with_settings`.
     pub fn with_settings(self, settings_ron: String) -> AssetRef<'a> {
-        let params_value = LoadPathParams {
-            path: self.without_label().to_string(),
-            loader_settings: Some(settings_ron),
-        };
-
-        AssetRef::new_with_label(params_value, self.label)
+        AssetRef::new_with_label(
+            LoadPath {
+                path: self.without_label().to_string(),
+                loader_settings: Some(settings_ron),
+            },
+            self.label,
+        )
     }
 }
 
@@ -753,33 +751,30 @@ pub(crate) fn normalize_path(path: &Path) -> PathBuf {
 #[reflect(opaque)]
 #[reflect(SerializeWithRegistry, DeserializeWithRegistry)]
 pub struct AssetRef<'a> {
-    pub(crate) params: ErasedBassetActionParams,
+    pub(crate) action: ErasedBassetAction,
     pub(crate) label: Option<CowArc<'a, str>>,
 }
 
 impl<'a> AssetRef<'a> {
     // XXX TODO: If there ever a situation were someone might want to pass in
-    // an `Arc` params directly?
-    pub fn new<P: BassetActionParams>(params: P) -> Self {
+    // an `Arc` action directly?
+    pub fn new<P: BassetAction>(action: P) -> Self {
         AssetRef {
-            params: ErasedBassetActionParams::new(Arc::new(params)),
+            action: ErasedBassetAction::new(Arc::new(action)),
             label: None,
         }
     }
 
-    pub fn new_with_label<P: BassetActionParams>(
-        params: P,
-        label: Option<CowArc<'a, str>>,
-    ) -> Self {
+    pub fn new_with_label<P: BassetAction>(action: P, label: Option<CowArc<'a, str>>) -> Self {
         AssetRef {
-            params: ErasedBassetActionParams::new(Arc::new(params)),
+            action: ErasedBassetAction::new(Arc::new(action)),
             label,
         }
     }
 
     pub fn into_owned(self) -> AssetRef<'static> {
         AssetRef {
-            params: self.params.clone(),
+            action: self.action.clone(),
             label: self.label.map(CowArc::into_owned),
         }
     }
@@ -788,8 +783,8 @@ impl<'a> AssetRef<'a> {
         self.clone().into_owned()
     }
 
-    pub fn params(&self) -> &ErasedBassetActionParams {
-        &self.params
+    pub fn action(&self) -> &ErasedBassetAction {
+        &self.action
     }
 
     pub fn label(&self) -> Option<&str> {
@@ -802,7 +797,7 @@ impl<'a> AssetRef<'a> {
 
     pub fn without_label(&self) -> AssetRef<'a> {
         Self {
-            params: self.params.clone(),
+            action: self.action.clone(),
             label: None,
         }
     }
@@ -817,7 +812,7 @@ impl<'a> AssetRef<'a> {
 
     pub fn with_label(self, label: impl Into<CowArc<'a, str>>) -> AssetRef<'a> {
         Self {
-            params: self.params,
+            action: self.action,
             label: Some(label.into()),
         }
     }
@@ -832,10 +827,10 @@ impl<'a> AssetRef<'a> {
     // panicking if not. This is for temporary backwards compatibility. Need to
     // work through where it's used and consider alternatives.
     pub fn temporary_path_workaround(&self) -> AssetPath<'static> {
-        if let Some(params) = self.params.0.downcast_ref::<LoadPathParams>() {
-            // XXX TODO: Should fail if `LoadPathParams::loader_settings` is set?
+        if let Some(action) = self.action.0.downcast_ref::<LoadPath>() {
+            // XXX TODO: Should fail if `LoadPath::loader_settings` is set?
 
-            let path = AssetPath::parse(&params.path).clone_owned();
+            let path = AssetPath::parse(&action.path).clone_owned();
 
             if let Some(label) = &self.label {
                 path.with_label(label.clone_owned())
@@ -851,10 +846,10 @@ impl<'a> AssetRef<'a> {
     // return `None` if not. This is for temporary backwards compatibility. Need to
     // work through where it's used and consider alternatives.
     pub fn try_temporary_path_workaround(&self) -> Option<AssetPath<'static>> {
-        if let Some(params) = self.params.0.downcast_ref::<LoadPathParams>() {
-            // XXX TODO: Should fail if `LoadPathParams::loader_settings` is set?
+        if let Some(action) = self.action.0.downcast_ref::<LoadPath>() {
+            // XXX TODO: Should fail if `LoadPath::loader_settings` is set?
 
-            let path = AssetPath::parse(&params.path).clone_owned();
+            let path = AssetPath::parse(&action.path).clone_owned();
 
             if let Some(label) = &self.label {
                 Some(path.with_label(label.clone_owned()))
@@ -896,9 +891,9 @@ impl Display for AssetRef<'_> {
             // as a sequence. Is that a problem? Putting the label first is clearer for
             // display, but we want it to be optional for serialization. Maybe sequence
             // serialization can be tweaked?
-            write!(f, "(label: {:?}, params: {:?})", label, self.params)
+            write!(f, "(label: {:?}, action: {:?})", label, self.action)
         } else {
-            write!(f, "{:?}", self.params)
+            write!(f, "{:?}", self.action)
         }
     }
 }
@@ -920,8 +915,8 @@ impl SerializeWithRegistry for AssetRef<'_> {
         let mut s = serializer.serialize_struct("AssetRef", 3)?;
 
         s.serialize_field(
-            "params",
-            &ReflectSerializer::new((*self.params.0).as_partial_reflect(), registry),
+            "action",
+            &ReflectSerializer::new((*self.action.0).as_partial_reflect(), registry),
         )?;
         s.serialize_field("label", &self.label.as_ref().map(ToString::to_string))?;
 
@@ -950,26 +945,26 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
             where
                 V: SeqAccess<'de>,
             {
-                let params_dyn = seq
+                let action_dyn = seq
                     .next_element_seed(ReflectDeserializer::new(self.registry))?
                     .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
 
-                // XXX TODO: Do we need `params_dyn.get_represented_type_info()" if we already know the type?
-                let params_registration = self
+                // XXX TODO: Do we need `action_dyn.get_represented_type_info()" if we already know the type?
+                let action_registration = self
                     .registry
-                    .get_with_type_path(params_dyn.get_represented_type_info().unwrap().type_path())
+                    .get_with_type_path(action_dyn.get_represented_type_info().unwrap().type_path())
                     .expect("XXX TODO?");
 
-                let params_concrete = params_registration
+                let action_concrete = action_registration
                     .data::<ReflectFromReflect>()
                     .unwrap()
-                    .from_reflect(&*params_dyn)
+                    .from_reflect(&*action_dyn)
                     .unwrap();
 
-                let params = params_registration
-                    .data::<ReflectBassetActionParams>()
+                let action = action_registration
+                    .data::<ReflectBassetAction>()
                     .expect("XXX TODO?")
-                    .get_boxed(params_concrete)
+                    .get_boxed(action_concrete)
                     .expect("XXX TODO?");
 
                 let label = seq
@@ -977,7 +972,7 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
                     .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
 
                 Ok(AssetRef {
-                    params: ErasedBassetActionParams(params.into()),
+                    action: ErasedBassetAction(action.into()),
                     label: label.map(CowArc::from),
                 })
             }
@@ -989,42 +984,42 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
                 #[derive(Deserialize)]
                 #[serde(field_identifier, rename_all = "lowercase")]
                 enum Field {
-                    Params,
+                    Action,
                     Label,
                 }
 
-                let mut params = None;
+                let mut action = None;
                 let mut label = None;
 
                 while let Some(key) = map.next_key()? {
                     match key {
-                        Field::Params => {
-                            if params.is_some() {
-                                return Err(serde::de::Error::duplicate_field("params"));
+                        Field::Action => {
+                            if action.is_some() {
+                                return Err(serde::de::Error::duplicate_field("action"));
                             }
 
-                            let params_dyn =
+                            let action_dyn =
                                 map.next_value_seed(ReflectDeserializer::new(self.registry))?;
 
                             // XXX TODO: Duplicates a bunch of `visit_seq`. Refactor?
-                            let params_registration = self
+                            let action_registration = self
                                 .registry
                                 .get_with_type_path(
-                                    params_dyn.get_represented_type_info().unwrap().type_path(),
+                                    action_dyn.get_represented_type_info().unwrap().type_path(),
                                 )
                                 .expect("XXX TODO?");
 
-                            let params_concrete = params_registration
+                            let action_concrete = action_registration
                                 .data::<ReflectFromReflect>()
                                 .expect("XXX TODO?")
-                                .from_reflect(&*params_dyn)
+                                .from_reflect(&*action_dyn)
                                 .expect("XXX TODO? This has happened due to missing members, but not sure how we can print a meaningful error?");
 
-                            params = Some(
-                                params_registration
-                                    .data::<ReflectBassetActionParams>()
-                                    .expect("XXX TODO: Missing \"#[reflect(BassetActionParams)]\"")
-                                    .get_boxed(params_concrete)
+                            action = Some(
+                                action_registration
+                                    .data::<ReflectBassetAction>()
+                                    .expect("XXX TODO: Missing \"#[reflect(BassetAction)]\"")
+                                    .get_boxed(action_concrete)
                                     .expect("XXX TODO?"),
                             );
                         }
@@ -1037,11 +1032,11 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
                     }
                 }
 
-                let params = params.ok_or_else(|| serde::de::Error::missing_field("params"))?;
+                let action = action.ok_or_else(|| serde::de::Error::missing_field("action"))?;
                 let label = label.flatten();
 
                 Ok(AssetRef {
-                    params: ErasedBassetActionParams(params.into()),
+                    action: ErasedBassetAction(action.into()),
                     label: label.map(CowArc::from),
                 })
             }
@@ -1049,7 +1044,7 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
 
         deserializer.deserialize_struct(
             "AssetRef",
-            &["params", "label"],
+            &["action", "label"],
             AssetRefVisitor { registry },
         )
     }
@@ -1058,7 +1053,7 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
 impl<'a> From<AssetPath<'a>> for AssetRef<'a> {
     fn from(value: AssetPath<'a>) -> Self {
         Self::new_with_label(
-            LoadPathParams {
+            LoadPath {
                 path: value.without_label().to_string(),
                 loader_settings: None,
             },

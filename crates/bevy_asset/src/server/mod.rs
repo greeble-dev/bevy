@@ -1948,7 +1948,7 @@ impl<'a> LoadBuilder<'a> {
         settings(&mut settings_value);
 
         // XXX TODO: This whole dance is pretty heinous due to all the serialized
-        // RON. Would go away if we changed `AssetRef` to store the action params
+        // RON. Would go away if we changed `AssetRef` to store the action
         // as a `Box<dyn>` rather than RON. See also `AssetRef::with_settings`.
         let settings_ron = ron::ser::to_string(&settings_value).expect("XXX TODO");
 
