@@ -2,13 +2,7 @@
 	root: (
 		action: {
 			"basset::action::AcmeSceneFromGltf": (
-				gltf: (
-					action: {
-						"bevy_asset::basset::action::LoadPath": (
-							path: "BoxTextured/BoxTextured.gltf",
-						)
-					}
-				)
+				gltf: "BoxTextured/BoxTextured.gltf"
 			)
 		}
 	)

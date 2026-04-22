@@ -5,13 +5,7 @@
 				scene: (
 					action: {
 						"basset::action::AcmeSceneFromGltf": (
-							gltf: (
-								action: {
-									"bevy_asset::basset::action::LoadPath": (
-										path: "Duck.glb",
-									)
-								}
-							)
+							gltf: "Duck.glb"
 						)
 					}
 				)

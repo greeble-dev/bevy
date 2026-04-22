@@ -938,7 +938,21 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
             type Value = AssetRef<'static>;
 
             fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
-                formatter.write_str("struct AssetRef")
+                formatter.write_str("struct AssetRef or string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<AssetRef<'static>, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(AssetPath::from(v.to_string()).into())
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<AssetRef<'static>, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(AssetPath::from(v).into())
             }
 
             fn visit_seq<V>(self, mut seq: V) -> Result<AssetRef<'static>, V::Error>
@@ -1042,11 +1056,15 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
             }
         }
 
-        deserializer.deserialize_struct(
-            "AssetRef",
-            &["action", "label"],
-            AssetRefVisitor { registry },
-        )
+        // XXX TODO: Review decision to use `deserialize_any` over `deserialize_struct`.
+        // It makes the RON look much nicer, but limits support for non-RON serializers.
+        //
+        // deserializer.deserialize_struct(
+        //     "AssetRef",
+        //     &["action", "label"],
+        //     AssetRefVisitor { registry },
+        // )
+        deserializer.deserialize_any(AssetRefVisitor { registry })
     }
 }
 

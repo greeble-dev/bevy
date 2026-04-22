@@ -21,7 +21,12 @@ use crate::{
     meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
     Asset, AssetApp, AssetDependency, AssetPath, AssetServer, LoaderDependency, PolyAssetLoader,
 };
-use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use atomicow::CowArc;
 use bevy_app::{App, Plugin};
 use bevy_asset::{
@@ -173,6 +178,14 @@ impl<'a> TryFrom<AssetPath<'a>> for RootAssetPath<'a> {
     }
 }
 
+impl From<String> for RootAssetPath<'static> {
+    fn from(value: String) -> Self {
+        // XXX TODO: Avoid going via `AssetPath`. Although that might mean
+        // reimplementing `AssetPath::parse`, which is annoying.
+        AssetPath::from(value).try_into().expect("XXX TODO")
+    }
+}
+
 /// An `AssetRef` without a label.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Reflect)]
 #[reflect(opaque)]
@@ -235,7 +248,21 @@ impl<'de> DeserializeWithRegistry<'de> for RootAssetRef {
             type Value = RootAssetRef;
 
             fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
-                formatter.write_str("struct RootAssetRef")
+                formatter.write_str("struct RootAssetRef or string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<RootAssetRef, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(RootAssetPath::from(v.to_string()).into())
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<RootAssetRef, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(RootAssetPath::from(v).into())
             }
 
             fn visit_seq<V>(self, mut seq: V) -> Result<RootAssetRef, V::Error>
@@ -324,11 +351,15 @@ impl<'de> DeserializeWithRegistry<'de> for RootAssetRef {
             }
         }
 
-        deserializer.deserialize_struct(
-            "RootAssetRef",
-            &["action"],
-            RootAssetRefVisitor { registry },
-        )
+        // XXX TODO: Review decision to use `deserialize_any` over `deserialize_struct`.
+        // It makes the RON look much nicer, but limits support for non-RON serializers.
+        //
+        // deserializer.deserialize_struct(
+        //     "RootAssetRef",
+        //     &["action"],
+        //     RootAssetRefVisitor { registry },
+        // )
+        deserializer.deserialize_any(RootAssetRefVisitor { registry })
     }
 }
 
