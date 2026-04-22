@@ -405,6 +405,8 @@ where
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
 
+        // XXX TODO: Don't need this if we use `TypedReflectDeserializer::of`?
+        // But that can panic.
         let registry = self.registry.read();
         let registration = registry.get(TypeId::of::<Data>()).expect("XXX TODO");
 

@@ -1,19 +1,26 @@
 use alloc::{borrow::Cow, boxed::Box, format};
 use core::any::{Any, TypeId};
-use serde::{de::Error as _, ser::Error as _, Deserialize, Deserializer, Serialize};
+use serde::{
+    de::{DeserializeSeed, Error as _},
+    ser::Error as _,
+    Deserializer, Serialize,
+};
 use thiserror::Error;
 use tracing::warn;
 use uuid::Uuid;
 
 use bevy_ecs::world::{unsafe_world_cell::UnsafeWorldCell, World};
 use bevy_reflect::{
-    serde::{ReflectDeserializerProcessor, ReflectSerializerProcessor},
+    serde::{
+        ReflectDeserializerProcessor, ReflectSerializerProcessor, TypedReflectDeserializer,
+        TypedReflectSerializer,
+    },
     FromReflect, FromType, PartialReflect, Reflect, TypeRegistry,
 };
 
 use crate::{
-    Asset, AssetId, AssetPath, AssetRef, AssetServer, Assets, Handle, InvalidGenerationError,
-    LoadContext, UntypedAssetId, UntypedHandle,
+    Asset, AssetId, AssetRef, AssetServer, Assets, Handle, InvalidGenerationError, LoadContext,
+    UntypedAssetId, UntypedHandle,
 };
 
 /// Type data for the [`TypeRegistry`] used to operate on reflected [`Asset`]s.
@@ -332,7 +339,7 @@ impl ReflectSerializerProcessor for HandleSerializeProcessor {
                         }
                         HandleReference::Uuid(AssetId::<()>::DEFAULT_UUID)
                     }
-                    Some(path) => HandleReference::Path(path.temporary_path_workaround()),
+                    Some(path) => HandleReference::Path(path.clone()),
                 },
                 UntypedHandle::Uuid { uuid, .. } => HandleReference::Uuid(*uuid),
             })
@@ -345,14 +352,17 @@ impl ReflectSerializerProcessor for HandleSerializeProcessor {
                     untyped_handle
                 )));
             };
-            return Ok(Ok(TypedHandleReference {
-                asset_type: asset_registration.type_info().type_path().into(),
-                reference: handle_reference_from_handle(
-                    untyped_handle,
-                    self.ephemeral_handle_behavior,
-                )
-                .map_err(S::Error::custom)?,
-            }
+            return Ok(Ok(TypedReflectSerializer::new(
+                &TypedHandleReference {
+                    asset_type: asset_registration.type_info().type_path().into(),
+                    reference: handle_reference_from_handle(
+                        untyped_handle,
+                        self.ephemeral_handle_behavior,
+                    )
+                    .map_err(S::Error::custom)?,
+                },
+                registry,
+            )
             .serialize(serializer)?));
         }
 
@@ -386,7 +396,9 @@ impl ReflectSerializerProcessor for HandleSerializeProcessor {
             handle_reference_from_handle(&untyped_handle, self.ephemeral_handle_behavior)
                 .map_err(S::Error::custom)?;
 
-        Ok(Ok(handle_reference.serialize(serializer)?))
+        Ok(Ok(
+            TypedReflectSerializer::new(&handle_reference, registry).serialize(serializer)?
+        ))
     }
 }
 
@@ -446,7 +458,11 @@ impl ReflectDeserializerProcessor for HandleDeserializeProcessor<'_> {
         D: Deserializer<'de>,
     {
         if registration.type_id() == TypeId::of::<UntypedHandle>() {
-            let typed_handle_reference = TypedHandleReference::deserialize(deserializer)?;
+            let typed_handle_reference =
+                TypedReflectDeserializer::of::<TypedHandleReference>(registry)
+                    .deserialize(deserializer)?
+                    .try_take::<TypedHandleReference>()
+                    .expect("XXX TODO");
             let Some(asset_type) = registry.get_with_type_path(&typed_handle_reference.asset_type)
             else {
                 return Err(D::Error::custom(format!(
@@ -456,9 +472,9 @@ impl ReflectDeserializerProcessor for HandleDeserializeProcessor<'_> {
             };
             let type_id = asset_type.type_id();
             return Ok(Ok(Box::new(match typed_handle_reference.reference {
-                HandleReference::Path(path) => self
-                    .load_from_path
-                    .load_from_path_erased(type_id, AssetRef::from(path)),
+                HandleReference::Path(path) => {
+                    self.load_from_path.load_from_path_erased(type_id, path)
+                }
                 HandleReference::Uuid(uuid) => UntypedHandle::Uuid { type_id, uuid },
             })));
         }
@@ -471,29 +487,37 @@ impl ReflectDeserializerProcessor for HandleDeserializeProcessor<'_> {
             return Ok(Err(deserializer));
         };
 
-        let handle_reference = HandleReference::deserialize(deserializer)?;
+        // XXX TODO: `TypedReflectDeserializer::of` can panic if the type is not
+        // registered. Should we change to use `TypedReflectDeserializer::new` or
+        // assume it will never panic?
+        let handle_reference = TypedReflectDeserializer::of::<HandleReference>(registry)
+            .deserialize(deserializer)?
+            .try_take::<HandleReference>()
+            .expect("XXX TODO");
 
         let type_id = reflect_handle.asset_type_id;
         Ok(Ok(reflect_handle.typed(match handle_reference {
-            HandleReference::Path(path) => self
-                .load_from_path
-                .load_from_path_erased(type_id, AssetRef::from(path)),
+            HandleReference::Path(path) => self.load_from_path.load_from_path_erased(type_id, path),
             HandleReference::Uuid(uuid) => UntypedHandle::Uuid { type_id, uuid },
         })))
     }
 }
 
 /// The "stable" data of a handle that can be serialized and deserialized.
-#[derive(Serialize, Deserialize)]
+#[derive(Reflect)]
 pub enum HandleReference {
     /// The handle references an asset path that needs to be loaded.
-    Path(AssetPath<'static>), // XXX TODO: Should be `AssetRef`, but how do we handle serialization?
+    // XXX TODO: Consider changing this back to `AssetPath` and adding a separate
+    // `Action(AssetRef<'static>)` variant instead. This would be slightly safer
+    // since we're not relying on `deserialize_any`. See comments on `deserialize_any`
+    // in the `AssetRef` deserializer.
+    Path(AssetRef<'static>),
     /// The handle references a constant [`Uuid`].
     Uuid(Uuid),
 }
 
 /// The "stable" data of a handle whose asset type information is stored internally.
-#[derive(Serialize, Deserialize)]
+#[derive(Reflect)]
 pub struct TypedHandleReference {
     /// The type path of the asset type this handle references.
     pub asset_type: Cow<'static, str>,

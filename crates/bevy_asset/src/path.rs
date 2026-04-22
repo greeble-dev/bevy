@@ -827,9 +827,10 @@ impl<'a> AssetRef<'a> {
     // panicking if not. This is for temporary backwards compatibility. Need to
     // work through where it's used and consider alternatives.
     pub fn temporary_path_workaround(&self) -> AssetPath<'static> {
-        if let Some(action) = self.action.0.downcast_ref::<LoadPath>() {
-            // XXX TODO: Should fail if `LoadPath::loader_settings` is set?
-
+        if let Some(action) = self.action.0.downcast_ref::<LoadPath>()
+            && action.loader_settings.is_none()
+        {
+            // XXX TODO: Should use `try_parse`?
             let path = AssetPath::parse(&action.path).clone_owned();
 
             if let Some(label) = &self.label {
@@ -843,12 +844,15 @@ impl<'a> AssetRef<'a> {
     }
 
     // XXX TODO: Converts the action back to an `AssetPath` if possible,
-    // return `None` if not. This is for temporary backwards compatibility. Need to
-    // work through where it's used and consider alternatives.
+    // returning `None` if not. This is for temporary backwards compatibility,
+    // although it might end up permanent for some things, like serializing
+    // plain paths as a string. Work through where it's used and consider
+    // alternatives.
     pub fn try_temporary_path_workaround(&self) -> Option<AssetPath<'static>> {
-        if let Some(action) = self.action.0.downcast_ref::<LoadPath>() {
-            // XXX TODO: Should fail if `LoadPath::loader_settings` is set?
-
+        if let Some(action) = self.action.0.downcast_ref::<LoadPath>()
+            && action.loader_settings.is_none()
+        {
+            // XXX TODO: Should use `try_parse`?
             let path = AssetPath::parse(&action.path).clone_owned();
 
             if let Some(label) = &self.label {
@@ -912,15 +916,22 @@ impl SerializeWithRegistry for AssetRef<'_> {
     where
         S: Serializer,
     {
-        let mut s = serializer.serialize_struct("AssetRef", 3)?;
+        // XXX TODO: Review. This makes the serialized data nicer, but relies
+        // on `deserialize_any` - see notes on `deserialize_any` call in
+        // `AssetRef` deserializer below.
+        if let Some(path) = self.try_temporary_path_workaround() {
+            path.serialize(serializer)
+        } else {
+            let mut s = serializer.serialize_struct("AssetRef", 3)?;
 
-        s.serialize_field(
-            "action",
-            &ReflectSerializer::new((*self.action.0).as_partial_reflect(), registry),
-        )?;
-        s.serialize_field("label", &self.label.as_ref().map(ToString::to_string))?;
+            s.serialize_field(
+                "action",
+                &ReflectSerializer::new((*self.action.0).as_partial_reflect(), registry),
+            )?;
+            s.serialize_field("label", &self.label.as_ref().map(ToString::to_string))?;
 
-        s.end()
+            s.end()
+        }
     }
 }
 
