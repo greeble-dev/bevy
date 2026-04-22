@@ -685,13 +685,6 @@ impl<'de> Visitor<'de> for AssetPathVisitor {
             Err(err) => Err(E::custom(err)),
         }
     }
-
-    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(AssetPath::from(v))
-    }
 }
 
 /// Normalizes the path by collapsing all occurrences of '.' and '..' dot-segments where possible
