@@ -8,10 +8,10 @@ inconsistencies.
 
 ```rust
 struct GltfConvertCoordinates {
-    rotate_scenes: bool, // Changed in 0.19
-    rotate_nodes: bool, // New in 0.19
+    rotate_scenes: bool, // Changed in 0.20
+    rotate_nodes: bool, // New in 0.20
     rotate_meshes: bool,
-    semantics: GltfConvertSemantics, // New in 0.19
+    semantics: GltfConvertSemantics, // New in 0.20
 }
 ```
 
@@ -41,8 +41,9 @@ settings.convert_coordinates.rotate_nodes = true;
 For convenience, there's a new `GltfConvertCoordinates::ALL` constant that
 enables scene, node and mesh conversion.
 
-(Note that node conversion was present in Bevy 0.17, but removed in 0.18. The
-feature has been restored in 0.19.)
+(Note that node conversion was present in Bevy 0.17, but had bugs relating to
+cameras and lights. 0.18 removed node conversion, and 0.20 restores it with the
+bugs fixed.)
 
 ## Scene Conversion
 
@@ -56,8 +57,8 @@ this:
   - glTF scene root entity
     - glTF root node entities
 
-"User entity" is the entity that was spawned with a `SceneRoot` component or
-passed to `SceneSpawner::spawn_as_child`.
+"User entity" is the entity on which the scene was spawned - usually through a
+`WorldAssetRoot` component or `WorldInstanceSpawner::spawn_as_child`.
 
 In Bevy 0.18, `rotate_scene_entities` would rotate the glTF scene root entity.
 
@@ -68,14 +69,14 @@ In Bevy 0.18, `rotate_scene_entities` would rotate the glTF scene root entity.
 This gave the correct visual result, but left the glTF scene root entity with
 incorrect semantics - its `Transform::forward` would be wrong.
 
-In Bevy 0.19, the option has been renamed to `rotate_scenes` and its behavior
+In Bevy 0.20, the option has been renamed to `rotate_scenes` and its behavior
 has changed - it now rotates the glTF root node entities.
 
 - User entity.
   - glTF scene root entity
     - glTF root node entities \<--- ROTATED
 
-Now the glTF scene root entity has the correct semantics, while the visual
+This means glTF scene root entity has the correct semantics, while the visual
 result stays the same.
 
 ## Arbitrary Semantics
@@ -83,9 +84,9 @@ result stays the same.
 `GltfConvertCoordinates` has a new `semantics` option for arbitrary semantic
 conversion.
 
-Some glTF files don't follow the standard "+Z forward" semantics. The example
-below shows how a glTF file with "+X forward, +Y up" semantics can be converted
-to Bevy's semantics.
+Some glTF files don't follow the standard "+Z forward" semantics, so the default
+conversion options will give the wrong result. The example below shows how to
+convert a glTF file with "+X forward, +Y up" semantics to Bevy's semantics.
 
 ```rust
 settings.convert_coordinates = Some(GltfConvertCoordinates::ALL.with_semantics(
