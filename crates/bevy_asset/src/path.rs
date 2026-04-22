@@ -680,7 +680,10 @@ impl<'de> Visitor<'de> for AssetPathVisitor {
     where
         E: serde::de::Error,
     {
-        Ok(AssetPath::parse(v).into_owned())
+        match AssetPath::try_parse(v) {
+            Ok(path) => Ok(path.into_owned()),
+            Err(err) => Err(E::custom(err)),
+        }
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
