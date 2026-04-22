@@ -15,7 +15,7 @@ use crate::{
     Asset, AssetEvent, AssetHandleProvider, AssetId, AssetIndex, AssetLoadFailedEvent,
     AssetMetaCheck, AssetRef, Assets, DeserializeMetaError, ErasedAssetIndex, ErasedLoadedAsset,
     Handle, LoadedUntypedAsset, LoaderDependency, PolyAssetLoader, UnapprovedPathMode,
-    UntypedAssetId, UntypedAssetLoadFailedEvent, UntypedHandle,
+    UntypedAssetId, UntypedAssetLoadFailedEvent, UntypedHandle, VisitAssetDependencies,
 };
 use alloc::{borrow::ToOwned, boxed::Box, vec, vec::Vec};
 use alloc::{
@@ -1308,6 +1308,60 @@ impl AssetServer {
                 RecursiveDependencyLoadState::Loaded
             ))
         )
+    }
+
+    /// Returns true if all of `value`s dependencies (included recursive dependencies) are loaded.
+    ///
+    /// This allows querying for whether all the handles in a resource or component are loaded.
+    pub fn are_dependencies_loaded(&self, value: &impl VisitAssetDependencies) -> bool {
+        let infos = self.read_infos();
+        let mut loaded = true;
+        value.visit_dependencies(&mut |asset_dependency| {
+            let index = match asset_dependency.id() {
+                // Ignore UUID assets - this effectively makes them considered loaded.
+                Some(UntypedAssetId::Uuid { .. }) | None => return,
+                Some(UntypedAssetId::Index { type_id, index }) => {
+                    ErasedAssetIndex::new(index, type_id)
+                }
+            };
+            let Some(info) = infos.get(index) else {
+                // If the asset ID is no longer valid, we consider that as not loaded.
+                loaded = false;
+                return;
+            };
+
+            if !info.rec_dep_load_state.is_loaded() {
+                loaded = false;
+            }
+        });
+        loaded
+    }
+
+    /// Returns true if all of `value`s dependencies (excluding recursive dependencies) are loaded.
+    ///
+    /// This allows querying for whether all the handles in a resource or component are loaded.
+    pub fn are_direct_dependencies_loaded(&self, value: &impl VisitAssetDependencies) -> bool {
+        let infos = self.read_infos();
+        let mut loaded = true;
+        value.visit_dependencies(&mut |asset_dependency| {
+            let index = match asset_dependency.id() {
+                // Ignore UUID assets - this effectively makes them considered loaded.
+                Some(UntypedAssetId::Uuid { .. }) | None => return,
+                Some(UntypedAssetId::Index { type_id, index }) => {
+                    ErasedAssetIndex::new(index, type_id)
+                }
+            };
+            let Some(info) = infos.get(index) else {
+                // If the asset ID is no longer valid, we consider that as not loaded.
+                loaded = false;
+                return;
+            };
+
+            if !info.dep_load_state.is_loaded() {
+                loaded = false;
+            }
+        });
+        loaded
     }
 
     /// Returns an active handle for the given path, if the asset at the given path has already started loading,
