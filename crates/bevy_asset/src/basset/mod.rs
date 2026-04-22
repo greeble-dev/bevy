@@ -446,7 +446,9 @@ impl ApplyContext<'_> {
 #[reflect_trait]
 pub trait BassetActionParams: Downcast + Send + Sync + 'static + Reflect + Debug {
     // XXX TODO: `PartialReflect` exposes some utilities for `hash` and `eq`. Can
-    // they replace our implementation? See `PartialReflect::reflect_hash`.
+    // they replace our implementation? See `PartialReflect::reflect_hash`. One
+    // worry is that I don't think we can enforce that at compile-time, so we'd
+    // need a runtime error. Also annoying to do `#[reflect(Hash, etc)]`.
     fn hash(&self) -> u64;
     fn eq(&self, other: &dyn BassetActionParams) -> bool;
     fn type_name(&self) -> &'static str;
@@ -549,7 +551,7 @@ impl Debug for ErasedBassetActionParams {
 ///
 /// An action that takes a parameter struct of a known type and returns an
 /// `ErasedLoadedAsset`.
-pub trait BassetAction: Send + Sync + 'static {
+pub trait BassetActionFunction: Send + Sync + 'static {
     type Params: BassetActionParams;
 
     /// XXX TODO: Document.
@@ -572,7 +574,7 @@ pub trait BassetAction: Send + Sync + 'static {
     }
 }
 
-pub trait ErasedBassetAction: Send + Sync + 'static {
+pub trait ErasedBassetActionFunction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
         context: ApplyContext<'a>,
@@ -584,9 +586,9 @@ pub trait ErasedBassetAction: Send + Sync + 'static {
     fn cacheable(&self) -> bool;
 }
 
-impl<T> ErasedBassetAction for T
+impl<T> ErasedBassetActionFunction for T
 where
-    T: BassetAction + Send + Sync,
+    T: BassetActionFunction + Send + Sync,
 {
     fn apply<'a>(
         &'a self,
@@ -601,7 +603,7 @@ where
     }
 
     fn cacheable(&self) -> bool {
-        BassetAction::cacheable(self)
+        BassetActionFunction::cacheable(self)
     }
 }
 
@@ -610,14 +612,14 @@ pub struct DevelopmentActionSourceSettings {
     validate_dependency_cache: bool,
     validate_action_cache: bool,
     // XXX TODO: Better to use `TypeId` or type name?
-    action_params_type_id_to_action_function: HashMap<TypeId, Box<dyn ErasedBassetAction>>,
+    action_params_type_id_to_action_function: HashMap<TypeId, Box<dyn ErasedBassetActionFunction>>,
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
 }
 
 impl Default for DevelopmentActionSourceSettings {
     fn default() -> Self {
         let mut action_params_type_id_to_action_function =
-            HashMap::<TypeId, Box<dyn ErasedBassetAction>>::new();
+            HashMap::<TypeId, Box<dyn ErasedBassetActionFunction>>::new();
 
         // XXX TODO: Review if we should be automatically adding `LoadPath`
         // here. Maybe should be added afterwards so it's not exposed to the
@@ -654,7 +656,7 @@ impl DevelopmentActionSourceSettings {
         self
     }
 
-    pub fn with_action<T: BassetAction>(mut self, action: T) -> Self {
+    pub fn with_action<T: BassetActionFunction>(mut self, action: T) -> Self {
         self.action_params_type_id_to_action_function
             .insert(TypeId::of::<T::Params>(), Box::new(action));
 
@@ -747,7 +749,7 @@ impl DevelopmentActionSource {
     pub(crate) fn action_function<'a>(
         &'a self,
         type_id: TypeId,
-    ) -> Option<&'a dyn ErasedBassetAction> {
+    ) -> Option<&'a dyn ErasedBassetActionFunction> {
         self.settings
             .action_params_type_id_to_action_function
             .get(&type_id)
@@ -1403,7 +1405,7 @@ async fn fallback_action_handler(
             None
         };
 
-        ErasedBassetAction::apply(
+        ErasedBassetActionFunction::apply(
             &LoadPath,
             ApplyContext::new(asset_server, dependency_key),
             &action.params,
@@ -1572,7 +1574,7 @@ pub mod action {
         //loader_name: Option<String>,
     }
 
-    impl BassetAction for LoadPath {
+    impl BassetActionFunction for LoadPath {
         type Params = LoadPathParams;
         type Error = BevyError;
 

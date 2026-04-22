@@ -50,7 +50,7 @@ use crate::action::MeshletFromMeshParams;
 mod action {
     use super::*;
 
-    pub struct JoinStrings;
+    pub struct JoinStringsFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetActionParams)]
@@ -59,7 +59,7 @@ mod action {
         strings: Vec<AssetRef<'static>>,
     }
 
-    impl BassetAction for JoinStrings {
+    impl BassetActionFunction for JoinStringsFunction {
         type Params = JoinStringsParams;
         type Error = BevyError;
 
@@ -83,7 +83,7 @@ mod action {
         }
     }
 
-    pub struct UppercaseString;
+    pub struct UppercaseStringFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetActionParams)]
@@ -91,7 +91,7 @@ mod action {
         string: AssetRef<'static>,
     }
 
-    impl BassetAction for UppercaseString {
+    impl BassetActionFunction for UppercaseStringFunction {
         type Params = UppercaseStringParams;
         type Error = BevyError;
 
@@ -114,7 +114,7 @@ mod action {
 
     /// Creates an `AcmeScene` from a `Gltf`. This does not respect the glTF's
     /// scenes list - it just takes every node.
-    pub struct AcmeSceneFromGltf;
+    pub struct AcmeSceneFromGltfFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetActionParams)]
@@ -127,7 +127,7 @@ mod action {
         //scene: Option<String>,
     }
 
-    impl BassetAction for AcmeSceneFromGltf {
+    impl BassetActionFunction for AcmeSceneFromGltfFunction {
         type Params = AcmeSceneFromGltfParams;
         type Error = BevyError;
 
@@ -146,7 +146,7 @@ mod action {
         }
     }
 
-    pub struct MeshletFromMesh;
+    pub struct MeshletFromMeshFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetActionParams)]
@@ -181,7 +181,7 @@ mod action {
         }
     }
 
-    impl BassetAction for MeshletFromMesh {
+    impl BassetActionFunction for MeshletFromMeshFunction {
         type Params = MeshletFromMeshParams;
         type Error = BevyError;
 
@@ -202,7 +202,7 @@ mod action {
         }
     }
 
-    pub struct ConvertAcmeSceneMeshesToMeshlets;
+    pub struct ConvertAcmeSceneMeshesToMeshletsFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetActionParams)]
@@ -212,7 +212,7 @@ mod action {
         vertex_position_quantization_factor: Option<u8>,
     }
 
-    impl BassetAction for ConvertAcmeSceneMeshesToMeshlets {
+    impl BassetActionFunction for ConvertAcmeSceneMeshesToMeshletsFunction {
         type Params = ConvertAcmeSceneMeshesToMeshletsParams;
         type Error = BevyError;
 
@@ -782,7 +782,7 @@ fn setup(
 
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(-0.3, 2.0, 3.0).looking_at(Vec3::new(-0.3, 0.75, 0.0), Vec3::Y),
+        Transform::from_xyz(-0.4, 3.0, 4.5).looking_at(Vec3::new(-0.3, 0.75, 0.0), Vec3::Y),
         FreeCamera {
             walk_speed: 2.0,
             ..Default::default()
@@ -1029,26 +1029,26 @@ fn main() {
             // ),
         ],
         scenes: vec![
-            // (
-            //     "scene_from_gltf_with_dependencies.basset".into(),
-            //     Transform::from_xyz(-1.0, 1.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
+            (
+                "scene_from_gltf_with_dependencies.basset".into(),
+                Transform::from_xyz(-2.0, 1.0, 0.0)
+                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            ),
             // (
             //     "scene_from_gltf.basset".into(),
             //     Transform::from_xyz(-1.0, 0.0, 0.0)
             //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             // ),
-            // (
-            //     "meshlet_scene.basset".into(),
-            //     Transform::from_xyz(1.0, 0.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
+            (
+                "meshlet_scene.basset".into(),
+                Transform::from_xyz(2.0, 0.0, 0.0)
+                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            ),
         ],
         bsns: vec![Box::new(bsn! {
             MeshletMesh3d(MeshletFromMeshParams::new("Duck.glb#Mesh0/Primitive0"))
             MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
-            Transform::from_scale(Vec3::splat(0.01))
+            template_value(Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01)))
         })],
     };
 
@@ -1086,11 +1086,11 @@ fn main() {
                     .with_file_cache_path("target/basset/cache".into())
                     .with_validate_dependency_cache(args.validate_dependency_cache)
                     .with_validate_action_cache(args.validate_action_cache)
-                    .with_action(action::JoinStrings)
-                    .with_action(action::UppercaseString)
-                    .with_action(action::AcmeSceneFromGltf)
-                    .with_action(action::MeshletFromMesh)
-                    .with_action(action::ConvertAcmeSceneMeshesToMeshlets)
+                    .with_action(action::JoinStringsFunction)
+                    .with_action(action::UppercaseStringFunction)
+                    .with_action(action::AcmeSceneFromGltfFunction)
+                    .with_action(action::MeshletFromMeshFunction)
+                    .with_action(action::ConvertAcmeSceneMeshesToMeshletsFunction)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
                     .with_saver(MeshletMeshSaver)
