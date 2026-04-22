@@ -773,6 +773,12 @@ mod tests {
     }
 
     #[test]
+    fn test_serialize() {
+        assert!(ron::de::from_str::<AssetPath>("\"a/b.test\"").is_ok());
+        assert!(ron::de::from_str::<AssetPath>("\"a/b.test#\"").is_err());
+    }
+
+    #[test]
     fn test_parent() {
         // Parent consumes path segments, returns None when insufficient
         let result = AssetPath::from("a/b.test");
