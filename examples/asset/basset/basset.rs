@@ -14,7 +14,7 @@ use bevy::{
     light::CascadeShadowConfigBuilder,
     log::LogPlugin,
     pbr::experimental::meshlet::{
-        MeshletMesh, MeshletMeshSaver, MeshletPlugin,
+        MeshletMesh, MeshletMesh3d, MeshletMeshSaver, MeshletPlugin,
         MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR,
     },
     prelude::*,
@@ -40,9 +40,12 @@ use bevy_reflect::{
     serde::{TypedReflectDeserializer, TypedReflectSerializer},
     TypeRegistry, TypeRegistryArc,
 };
+use bevy_scene::SceneDependencies;
 use core::{marker::PhantomData, ops::Deref, result::Result};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+
+use crate::action::MeshletFromMeshParams;
 
 mod action {
     use super::*;
@@ -694,10 +697,45 @@ impl Material for MeshletDebugMaterial {}
 #[derive(Resource)]
 struct AssetHandles(Vec<UntypedHandle>);
 
-#[derive(Resource, Clone)]
+#[derive(Resource)]
 struct AssetPaths {
     regular: Vec<(TypeId, AssetRef<'static>)>,
     scenes: Vec<(AssetRef<'static>, Transform)>,
+    // XXX TODO: Maybe better to store as functions to scenes? Then we can don't
+    // have to consume them (since `spawn_scene` consumes the `Scene`).
+    bsns: Vec<Box<dyn Scene>>,
+}
+
+impl AssetPaths {
+    fn publish(&self) -> Vec<PublishDependency> {
+        let bsns = self
+            .bsns
+            .iter()
+            .flat_map(|bsn| bsn_dependencies(&**bsn))
+            .collect::<Vec<_>>();
+
+        self.regular
+            .iter()
+            .map(|(_, path)| path)
+            .chain(self.scenes.iter().map(|(path, _)| path))
+            .chain(bsns.iter())
+            .map(|path| PublishDependency::Load(RootAssetRef::without_label(path.clone())))
+            .collect()
+    }
+}
+
+fn bsn_dependencies(scene: &dyn Scene) -> Vec<AssetRef<'static>> {
+    let mut scene_dependencies = SceneDependencies::default();
+
+    // XXX TODO: This doesn't do anything useful since `HandleTemplate`
+    // doesn't register dependencies. Seems to be planned for the future:
+    // https://discord.com/channels/691052431525675048/1264881140007702558/1483190850644082759
+    scene.register_dependencies(&mut scene_dependencies);
+
+    scene_dependencies
+        .iter()
+        .map(|scene_dependency| scene_dependency.path.clone())
+        .collect()
 }
 
 #[allow(unused, reason = "XXX TODO")]
@@ -719,7 +757,7 @@ const INLINE_JOIN_STRINGS_RON: &str = r#"
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    asset_paths: Res<AssetPaths>,
+    mut asset_paths: ResMut<AssetPaths>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -736,6 +774,10 @@ fn setup(
             acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>(path.clone())),
             *transform,
         ));
+    }
+
+    for scene in std::mem::take(&mut asset_paths.bsns) {
+        commands.spawn_scene(scene);
     }
 
     commands.spawn((
@@ -768,55 +810,6 @@ fn setup(
         }
         .build(),
     ));
-}
-
-fn setup_bsn(_world: &mut World) {
-    // let mesh = world
-    //     .resource_mut::<Assets<Mesh>>()
-    //     .add(Cuboid::new(1.0, 1.0, 1.0));
-    // let material = world
-    //     .resource_mut::<Assets<StandardMaterial>>()
-    //     .add(Color::WHITE);
-
-    // world
-    //     .spawn_scene(bsn! {
-    //         Mesh3d(Clone::clone(&mesh))
-    //         MeshMaterial3d<StandardMaterial>(Clone::clone(&material))
-    //         Transform::IDENTITY
-    //     })
-    //     .expect("XXX TODO");
-
-    // world
-    //     .spawn_scene(bsn! {
-    //         Mesh3d("Duck.glb#Mesh0/Primitive0")
-    //         MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
-    //         Transform::from_scale(Vec3::splat(0.01))
-    //     })
-    //     .expect("XXX TODO");
-
-    // use bevy::pbr::experimental::meshlet::MeshletMesh3d;
-
-    // let material = world
-    //     .resource_mut::<Assets<MeshletDebugMaterial>>()
-    //     .add(MeshletDebugMaterial::default());
-
-    // world
-    //     .spawn_scene(bsn! {
-    //         MeshletMesh3d(AssetRef::new(
-    //             MeshletFromMeshParams::new("Duck.glb#Mesh0/Primitive0".into())
-    //         ))
-    //         MeshMaterial3d<MeshletDebugMaterial>(Clone::clone(&material))
-    //         Transform::from_scale(Vec3::splat(0.01))
-    //     })
-    //     .expect("XXX TODO");
-
-    // world
-    //     .spawn_scene(bsn! {
-    //         MeshletMesh3d(MeshletFromMeshParams::new("Duck.glb#Mesh0/Primitive0"))
-    //         MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
-    //         Transform::from_scale(Vec3::splat(0.01))
-    //     })
-    //     .expect("XXX TODO");
 }
 
 fn print_events<T: Asset + std::fmt::Debug>(
@@ -1036,22 +1029,27 @@ fn main() {
             // ),
         ],
         scenes: vec![
-            (
-                "scene_from_gltf_with_dependencies.basset".into(),
-                Transform::from_xyz(-1.0, 1.0, 0.0)
-                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            ),
+            // (
+            //     "scene_from_gltf_with_dependencies.basset".into(),
+            //     Transform::from_xyz(-1.0, 1.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
             // (
             //     "scene_from_gltf.basset".into(),
             //     Transform::from_xyz(-1.0, 0.0, 0.0)
             //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             // ),
-            (
-                "meshlet_scene.basset".into(),
-                Transform::from_xyz(1.0, 0.0, 0.0)
-                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            ),
+            // (
+            //     "meshlet_scene.basset".into(),
+            //     Transform::from_xyz(1.0, 0.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
         ],
+        bsns: vec![Box::new(bsn! {
+            MeshletMesh3d(MeshletFromMeshParams::new("Duck.glb#Mesh0/Primitive0"))
+            MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
+            Transform::from_scale(Vec3::splat(0.01))
+        })],
     };
 
     let mut app = App::new();
@@ -1119,13 +1117,12 @@ fn main() {
     .init_asset::<acme::AcmeScene>()
     .register_asset_loader(demo::StringAssetLoader)
     .register_asset_loader(demo::IntAssetLoader)
-    .register_asset_loader(acme::AcmeSceneAssetLoader::new(registry))
-    .insert_resource(asset_paths.clone());
+    .register_asset_loader(acme::AcmeSceneAssetLoader::new(registry));
 
     match args.mode {
         ArgMode::Development | ArgMode::Published => {
-            app.add_systems(Startup, setup)
-                .add_systems(Startup, setup_bsn)
+            app.insert_resource(asset_paths)
+                .add_systems(Startup, setup)
                 .add_systems(Update, print)
                 .add_systems(Update, reload.run_if(on_timer(Duration::from_secs(2))))
                 .add_systems(Update, acme::tick_scene_spawners);
@@ -1143,13 +1140,7 @@ fn main() {
             let asset_server = app.world().resource::<AssetServer>();
 
             let input = PublishInput {
-                paths: asset_paths
-                    .regular
-                    .iter()
-                    .map(|(_, path)| path.clone())
-                    .chain(asset_paths.scenes.iter().map(|(path, _)| path.clone()))
-                    .map(|path| PublishDependency::Load(RootAssetRef::without_label(path)))
-                    .collect(),
+                paths: asset_paths.publish(),
             };
 
             block_on(
