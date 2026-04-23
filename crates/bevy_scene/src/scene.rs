@@ -469,7 +469,7 @@ impl Scene for NameEntityReference {
 
 /// A [`Scene`] that will create a new "entity scope" and fully resolve the given scene `S` on top of the current [`ResolvedScene`] (using that scope).
 /// It is not "inherited" or cached.
-pub struct SceneScope<S: Scene>(pub S);
+pub struct SceneScope<S: Scene>(pub Result<S, BevyError>);
 
 impl<S: Scene> Scene for SceneScope<S> {
     fn resolve(
@@ -477,11 +477,17 @@ impl<S: Scene> Scene for SceneScope<S> {
         context: &mut ResolveContext,
         scene: &mut ResolvedScene,
     ) -> Result<(), ResolveSceneError> {
-        context.new_entity_scope(|context| self.0.resolve(context, scene))
+        context.new_entity_scope(|context| {
+            self.0
+                .map_err(ResolveSceneError::TemplateError)?
+                .resolve(context, scene)
+        })
     }
 
     fn register_dependencies(&self, dependencies: &mut SceneDependencies) {
-        self.0.register_dependencies(dependencies);
+        if let Ok(scene) = &self.0 {
+            scene.register_dependencies(dependencies);
+        }
     }
 }
 
@@ -500,6 +506,23 @@ impl<L: SceneList> SceneList for SceneListScope<L> {
 
     fn register_dependencies(&self, dependencies: &mut SceneDependencies) {
         self.0.register_dependencies(dependencies);
+    }
+}
+
+impl<L: SceneList> SceneList for Result<SceneListScope<L>, BevyError> {
+    fn resolve_list(
+        self,
+        context: &mut ResolveContext,
+        scenes: &mut Vec<ResolvedScene>,
+    ) -> Result<(), ResolveSceneError> {
+        self.map_err(ResolveSceneError::TemplateError)?
+            .resolve_list(context, scenes)
+    }
+
+    fn register_dependencies(&self, dependencies: &mut SceneDependencies) {
+        if let Ok(scene_list) = &self {
+            scene_list.register_dependencies(dependencies);
+        }
     }
 }
 

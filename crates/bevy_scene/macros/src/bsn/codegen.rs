@@ -91,12 +91,12 @@ impl BsnTokenStream for BsnRoot {
         // any compile errors. This keeps autocomplete working in broken states,
         // e.g. when typing the name of a field but no value yet.
         quote! {
-            #bevy_scene::SceneScope({
+            #bevy_scene::SceneScope((|| {
                 #(#hoisted_exprs)*
                 let _res = #tokens;
                 #(#errors)*
-                _res
-            })
+                Ok(_res)
+            })())
         }
     }
 }
@@ -114,10 +114,12 @@ impl BsnTokenStream for BsnListRoot {
         // e.g. when typing the name of a field but no value yet.
         quote! {
             {
-                #(#hoisted_exprs)*
-                let _res = #bevy_scene::SceneListScope(#tokens);
-                #(#errors)*
-                _res
+                (|| {
+                    #(#hoisted_exprs)*
+                    let _res = #bevy_scene::SceneListScope(#tokens);
+                    #(#errors)*
+                    Ok(_res)
+                })()
             }
         }
     }
@@ -232,7 +234,7 @@ impl BsnEntry {
                     #bevy_scene::InheritSceneAsset::from(#lit)
                 }),
                 BsnInheritedScene::Fn { function, args } => Ok(quote! {
-                    #bevy_scene::SceneScope(#function(#args))
+                    #bevy_scene::SceneScope(Ok(#function(#args)))
                 }),
             },
             BsnEntry::Name(ident) => {
@@ -543,9 +545,9 @@ impl ToTokens for BsnType {
 impl ToTokens for BsnValue {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            BsnValue::Expr(e) => quote! {{#e}.into()}.to_tokens(tokens),
-            BsnValue::Closure(c) => quote! {(#c).into()}.to_tokens(tokens),
-            BsnValue::Ident(i) => quote! {(#i).into()}.to_tokens(tokens),
+            BsnValue::Expr(e) => quote! {{#e}.try_into()?}.to_tokens(tokens),
+            BsnValue::Closure(c) => quote! {(#c).try_into()?}.to_tokens(tokens),
+            BsnValue::Ident(i) => quote! {(#i).try_into()?}.to_tokens(tokens),
             BsnValue::Lit(Lit::Str(s)) => quote! {#s.try_into()?}.to_tokens(tokens),
             BsnValue::Lit(l) => l.to_tokens(tokens),
             BsnValue::Tuple(t) => {

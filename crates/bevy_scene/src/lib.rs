@@ -1490,30 +1490,78 @@ mod tests {
 
     #[test]
     fn fallibility() {
-        // We can't use `Handle` for testing right now as it doesn't have a
-        // `TryFrom<&'static str>`. So we make a fake one.
-        #[derive(Default, Clone)]
-        struct FakeHandle(#[expect(unused, reason = "For testing only")] AssetPath<'static>);
-
-        impl TryFrom<&'static str> for FakeHandle {
-            type Error = ParseAssetPathError;
-
-            fn try_from(value: &'static str) -> Result<Self, Self::Error> {
-                Ok(Self(AssetPath::try_parse(value)?))
-            }
-        }
-
-        #[derive(Default, Clone, Component, FromTemplate)]
-        struct TestComponent(#[expect(unused, reason = "Just for testing")] FakeHandle);
-
         let mut app = test_app();
         let world = app.world_mut();
 
-        let result = world.spawn_scene(bsn! { TestComponent("malformed_path#") });
+        {
+            // We can't use `Handle` for testing right now as it doesn't have a
+            // `TryFrom<&'static str>`. So we make a fake one.
+            #[derive(Default, Clone, Debug, PartialEq, Eq)]
+            struct FakeHandle(AssetPath<'static>);
 
-        assert_eq!(
-            result.err().unwrap().to_string(),
-            ParseAssetPathError::MissingLabel.to_string() + "\n",
-        );
+            impl TryFrom<&'static str> for FakeHandle {
+                type Error = ParseAssetPathError;
+
+                fn try_from(value: &'static str) -> Result<Self, Self::Error> {
+                    Ok(Self(AssetPath::try_parse(value)?))
+                }
+            }
+
+            #[derive(Default, Clone, Component, FromTemplate, Debug, PartialEq, Eq)]
+            struct TestComponent(FakeHandle);
+
+            let ok_scene = world
+                .spawn_scene(bsn! { TestComponent("valid_path") })
+                .unwrap()
+                .id();
+
+            assert_eq!(
+                world.entity(ok_scene).get::<TestComponent>().cloned(),
+                Some(TestComponent(FakeHandle("valid_path".into())))
+            );
+
+            let err_scene = world.spawn_scene(bsn! { TestComponent("malformed_path#") });
+
+            assert_eq!(
+                err_scene.err().unwrap().to_string(),
+                ParseAssetPathError::MissingLabel.to_string() + "\n",
+            );
+
+            let err_scene_list = world.spawn_scene_list(bsn_list! {
+                (TestComponent("valid_path")),
+                (TestComponent("malformed_path#"))
+            });
+
+            assert_eq!(
+                err_scene_list.err().unwrap().to_string(),
+                ParseAssetPathError::MissingLabel.to_string() + "\n",
+            );
+        }
+
+        {
+            #[derive(Default, Clone, Component, PartialEq, Eq, Debug)]
+            struct TestComponent(u32);
+
+            let ok_scene = world
+                .spawn_scene(bsn! { TestComponent({0i32}) })
+                .unwrap()
+                .id();
+
+            assert_eq!(
+                world.entity(ok_scene).get::<TestComponent>().cloned(),
+                Some(TestComponent(0))
+            );
+
+            let err_scene = world.spawn_scene(bsn! { TestComponent({-1i32}) });
+
+            assert!(err_scene.is_err());
+
+            let err_scene_list = world.spawn_scene(bsn! {
+                 TestComponent({0i32})
+                 TestComponent({-1i32})
+            });
+
+            assert!(err_scene_list.is_err());
+        }
     }
 }
