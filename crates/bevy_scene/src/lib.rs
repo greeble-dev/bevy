@@ -566,7 +566,10 @@ mod tests {
     use bevy_app::{App, TaskPoolPlugin};
     use bevy_asset::io::memory::{Dir, MemoryAssetReader};
     use bevy_asset::io::{AssetSourceBuilder, AssetSourceId};
-    use bevy_asset::{Asset, AssetApp, AssetLoader, AssetPlugin, AssetServer, Assets, Handle};
+    use bevy_asset::{
+        Asset, AssetApp, AssetLoader, AssetPath, AssetPlugin, AssetServer, Assets, Handle,
+        ParseAssetPathError,
+    };
     use bevy_ecs::lifecycle::HookContext;
     use bevy_ecs::prelude::*;
     use bevy_ecs::relationship::Relationship;
@@ -1483,5 +1486,34 @@ mod tests {
         }
 
         b();
+    }
+
+    #[test]
+    fn fallibility() {
+        // We can't use `Handle` for testing right now as it doesn't have a
+        // `TryFrom<&'static str>`. So we make a fake one.
+        #[derive(Default, Clone)]
+        struct FakeHandle(#[expect(unused, reason = "For testing only")] AssetPath<'static>);
+
+        impl TryFrom<&'static str> for FakeHandle {
+            type Error = ParseAssetPathError;
+
+            fn try_from(value: &'static str) -> Result<Self, Self::Error> {
+                Ok(Self(AssetPath::try_parse(value)?))
+            }
+        }
+
+        #[derive(Default, Clone, Component, FromTemplate)]
+        struct TestComponent(#[expect(unused, reason = "Just for testing")] FakeHandle);
+
+        let mut app = test_app();
+        let world = app.world_mut();
+
+        let result = world.spawn_scene(bsn! { TestComponent("malformed_path#") });
+
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            ParseAssetPathError::MissingLabel.to_string() + "\n",
+        );
     }
 }
