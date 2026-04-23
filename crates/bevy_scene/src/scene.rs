@@ -3,7 +3,7 @@ use bevy_asset::{Asset, AssetPath, AssetServer, Assets};
 use bevy_ecs::{
     bundle::Bundle,
     component::Component,
-    error::Result,
+    error::{BevyError, Result},
     event::EntityEvent,
     name::Name,
     relationship::Relationship,
@@ -166,6 +166,9 @@ pub enum ResolveSceneError {
     /// Caused when a Scene/SceneList is not present on the scene asset.
     #[error("The Scene/SceneList is not present on the scene asset. This is likely because the scene has already been resolved, which consumed the source scene")]
     MissingScene,
+    /// XXX TODO: Document. Bikeshed name.
+    #[error("{0}")]
+    TemplateError(BevyError),
 }
 
 /// Context used by [`Scene`] implementations during [`Scene::resolve`].
@@ -258,21 +261,26 @@ all_tuples!(scene_impl, 0, 12, P);
 ///
 /// let patch = Position::patch(|position_template, context| {
 ///     position_template.x = 10;
+///     Ok(())
 /// });
 ///
 /// let position = Position { x: 0, y: 0};
 /// // applying patch to position would result in { x: 10, y: 0 }
 /// ```
-pub struct TemplatePatch<F: FnOnce(&mut T, &mut ResolveContext), T>(pub F, pub PhantomData<T>);
+pub struct TemplatePatch<F: FnOnce(&mut T, &mut ResolveContext) -> Result, T>(
+    pub F,
+    pub PhantomData<T>,
+);
 
 /// Returns a [`Scene`] that completely overwrites the current value of a [`Template`] `T` with the given `value`.
 /// The `value` is cloned each time the [`Template`] is built.
 pub fn template_value<T: Template>(
     value: T,
-) -> TemplatePatch<impl FnOnce(&mut T, &mut ResolveContext), T> {
+) -> TemplatePatch<impl FnOnce(&mut T, &mut ResolveContext) -> Result, T> {
     TemplatePatch(
         move |input: &mut T, _context: &mut ResolveContext| {
             *input = value;
+            Ok(())
         },
         PhantomData,
     )
@@ -285,14 +293,14 @@ pub trait PatchFromTemplate {
     type Template;
 
     /// Takes a "patch function" `func`, and turns it into a [`TemplatePatch`].
-    fn patch<F: FnOnce(&mut Self::Template, &mut ResolveContext)>(
+    fn patch<F: FnOnce(&mut Self::Template, &mut ResolveContext) -> Result>(
         func: F,
     ) -> TemplatePatch<F, Self::Template>;
 }
 
 impl<G: FromTemplate> PatchFromTemplate for G {
     type Template = G::Template;
-    fn patch<F: FnOnce(&mut Self::Template, &mut ResolveContext)>(
+    fn patch<F: FnOnce(&mut Self::Template, &mut ResolveContext) -> Result>(
         func: F,
     ) -> TemplatePatch<F, Self::Template> {
         TemplatePatch(func, PhantomData)
@@ -302,12 +310,13 @@ impl<G: FromTemplate> PatchFromTemplate for G {
 /// A helper function that returns a [`TemplatePatch`] [`Scene`] for something that implements [`Template`].
 pub trait PatchTemplate: Sized {
     /// Takes a "patch function" `func` that patches this [`Template`], and turns it into a [`TemplatePatch`].
-    fn patch_template<F: FnOnce(&mut Self, &mut ResolveContext)>(func: F)
-        -> TemplatePatch<F, Self>;
+    fn patch_template<F: FnOnce(&mut Self, &mut ResolveContext) -> Result>(
+        func: F,
+    ) -> TemplatePatch<F, Self>;
 }
 
 impl<T: Template> PatchTemplate for T {
-    fn patch_template<F: FnOnce(&mut Self, &mut ResolveContext)>(
+    fn patch_template<F: FnOnce(&mut Self, &mut ResolveContext) -> Result>(
         func: F,
     ) -> TemplatePatch<F, Self> {
         TemplatePatch(func, PhantomData)
@@ -315,7 +324,7 @@ impl<T: Template> PatchTemplate for T {
 }
 
 impl<
-        F: FnOnce(&mut T, &mut ResolveContext) + Send + Sync + 'static,
+        F: FnOnce(&mut T, &mut ResolveContext) -> Result + Send + Sync + 'static,
         T: Template<Output: Component> + Send + Sync + Default + 'static,
     > Scene for TemplatePatch<F, T>
 {
@@ -325,7 +334,7 @@ impl<
         scene: &mut ResolvedScene,
     ) -> Result<(), ResolveSceneError> {
         let template = scene.get_or_insert_template::<T>(context);
-        (self.0)(template, context);
+        (self.0)(template, context).map_err(ResolveSceneError::TemplateError)?;
         Ok(())
     }
 }

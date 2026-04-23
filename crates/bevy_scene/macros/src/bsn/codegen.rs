@@ -165,6 +165,7 @@ impl BsnEntry {
                 Ok(quote! {
                     <#path as #bevy_scene::PatchTemplate>::patch_template(move |value, _context| {
                         #(#assigns)*
+                        Ok(())
                     })
                 })
             }
@@ -182,6 +183,7 @@ impl BsnEntry {
                 Ok(quote! {
                     <#path as #bevy_scene::PatchFromTemplate>::patch(move |value, _context| {
                         #(#assigns)*
+                        Ok(())
                     })
                 })
             }
@@ -191,6 +193,7 @@ impl BsnEntry {
             } => Ok(quote! {
                 <#type_path as #bevy_scene::PatchTemplate>::patch_template(move |value, _context| {
                     *value = #type_path::#const_ident;
+                    Ok(())
                 })
             }),
             BsnEntry::SceneExpression(block) => Ok(quote! {{#block}}),
@@ -201,6 +204,7 @@ impl BsnEntry {
             }) => Ok(quote! {
                 <#type_path as #bevy_scene::PatchTemplate>::patch_template(move |value, _context| {
                     *value = #type_path::#function(#args);
+                    Ok(())
                 })
             }),
             BsnEntry::FromTemplateConstructor(BsnConstructor {
@@ -210,6 +214,7 @@ impl BsnEntry {
             }) => Ok(quote! {
                 <#type_path as #bevy_scene::PatchFromTemplate>::patch(move |value, _context| {
                     *value = <#type_path as #bevy_ecs::template::FromTemplate>::Template::#function(#args);
+                    Ok(())
                 })
             }),
             BsnEntry::RelatedSceneList(BsnRelatedSceneList {
@@ -239,6 +244,7 @@ impl BsnEntry {
             BsnEntry::NameExpression(expr) => Ok(quote! {
                 <#bevy_ecs::name::Name as #bevy_scene::PatchFromTemplate>::patch(move |value, _context| {
                     *value = #bevy_ecs::Name({#expr}.into());
+                    Ok(())
                 })
             }),
         }
@@ -540,7 +546,7 @@ impl ToTokens for BsnValue {
             BsnValue::Expr(e) => quote! {{#e}.into()}.to_tokens(tokens),
             BsnValue::Closure(c) => quote! {(#c).into()}.to_tokens(tokens),
             BsnValue::Ident(i) => quote! {(#i).into()}.to_tokens(tokens),
-            BsnValue::Lit(Lit::Str(s)) => quote! {#s.into()}.to_tokens(tokens),
+            BsnValue::Lit(Lit::Str(s)) => quote! {#s.try_into()?}.to_tokens(tokens),
             BsnValue::Lit(l) => l.to_tokens(tokens),
             BsnValue::Tuple(t) => {
                 let inner = t.0.iter();
