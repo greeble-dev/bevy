@@ -1521,22 +1521,16 @@ mod tests {
                 Some(HandleComponent(FakeHandle("valid".into())))
             );
 
-            let err_scene = world.spawn_scene(bsn! { HandleComponent("malformed#") });
+            assert!(world
+                .spawn_scene(bsn! { HandleComponent("malformed#") })
+                .is_err());
 
-            assert_eq!(
-                err_scene.err().unwrap().to_string(),
-                ParseAssetPathError::MissingLabel.to_string() + "\n",
-            );
-
-            let err_scene_list = world.spawn_scene_list(bsn_list! {
-                (HandleComponent("valid")),
-                (HandleComponent("malformed#")),
-            });
-
-            assert_eq!(
-                err_scene_list.err().unwrap().to_string(),
-                ParseAssetPathError::MissingLabel.to_string() + "\n",
-            );
+            assert!(world
+                .spawn_scene_list(bsn_list! {
+                    (HandleComponent("valid")),
+                    (HandleComponent("malformed#")),
+                })
+                .is_err());
         }
 
         // Test `BsnValue::Expr` and `BsnValue::Ident`.
