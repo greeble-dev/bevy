@@ -756,8 +756,8 @@ mod tests {
     #[test]
     fn bsn_root_preserves_inference_on_error() {
         // Arrange
-        let expected = "bevy_scene :: SceneScope ({ let _res = bevy_scene :: auto_nest_tuple \
-            ! () ; :: core :: compile_error ! { \"Test Error\" } _res })";
+        let expected = "bevy_scene :: SceneScope ((|| { let _res = bevy_scene :: auto_nest_tuple \
+            ! () ; :: core :: compile_error ! { \"Test Error\" } Ok (_res) }) ())";
 
         let mut refs = EntityRefs::default();
         let paths = TestPaths::new();
@@ -780,10 +780,10 @@ mod tests {
     fn bsn_list_root_preserves_inference_on_error() {
         // Arrange
         let expected =
-            "{ let _res = bevy_scene :: SceneListScope (bevy_scene :: auto_nest_tuple ! ()) ;"
+            "bevy_scene :: SceneListScope ((|| { let _res = bevy_scene :: auto_nest_tuple ! () ;"
                 .to_string()
                 + " :: core :: compile_error ! { \"Test Error\" }"
-                + " _res }";
+                + " Ok (_res) }) ())";
 
         let mut refs = EntityRefs::default();
         let paths = TestPaths::new();
