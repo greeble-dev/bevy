@@ -166,9 +166,9 @@ pub enum ResolveSceneError {
     /// Caused when a Scene/SceneList is not present on the scene asset.
     #[error("The Scene/SceneList is not present on the scene asset. This is likely because the scene has already been resolved, which consumed the source scene")]
     MissingScene,
-    /// XXX TODO: Document. Bikeshed name.
+    /// Caused when scene resolution encounters a generic [`BevyError`].
     #[error("{0}")]
-    TemplateError(BevyError),
+    BevyError(BevyError),
 }
 
 /// Context used by [`Scene`] implementations during [`Scene::resolve`].
@@ -334,7 +334,7 @@ impl<
         scene: &mut ResolvedScene,
     ) -> Result<(), ResolveSceneError> {
         let template = scene.get_or_insert_template::<T>(context);
-        (self.0)(template, context).map_err(ResolveSceneError::TemplateError)?;
+        (self.0)(template, context).map_err(ResolveSceneError::BevyError)?;
         Ok(())
     }
 }
@@ -469,6 +469,8 @@ impl Scene for NameEntityReference {
 
 /// A [`Scene`] that will create a new "entity scope" and fully resolve the given scene `S` on top of the current [`ResolvedScene`] (using that scope).
 /// It is not "inherited" or cached.
+///
+/// If the value is an error, then calling `resolve` will return that error.
 pub struct SceneScope<S: Scene>(pub Result<S, BevyError>);
 
 impl<S: Scene> Scene for SceneScope<S> {
@@ -479,7 +481,7 @@ impl<S: Scene> Scene for SceneScope<S> {
     ) -> Result<(), ResolveSceneError> {
         match self.0 {
             Ok(inner) => context.new_entity_scope(|context| inner.resolve(context, scene)),
-            Err(err) => Err(ResolveSceneError::TemplateError(err)),
+            Err(err) => Err(ResolveSceneError::BevyError(err)),
         }
     }
 
@@ -492,6 +494,8 @@ impl<S: Scene> Scene for SceneScope<S> {
 
 /// A [`SceneList`] that will create a new "entity scope" and fully resolve the given scene list `L` on top of the current [`Vec<ResolvedScene>`]
 /// (using that scope). It is not "inherited" or cached.
+//
+/// If the value is an error, then calling `resolve_list` will return that error.
 pub struct SceneListScope<L: SceneList>(pub Result<L, BevyError>);
 
 impl<L: SceneList> SceneList for SceneListScope<L> {
@@ -502,7 +506,7 @@ impl<L: SceneList> SceneList for SceneListScope<L> {
     ) -> Result<(), ResolveSceneError> {
         match self.0 {
             Ok(inner) => context.new_entity_scope(|context| inner.resolve_list(context, scenes)),
-            Err(err) => Err(ResolveSceneError::TemplateError(err)),
+            Err(err) => Err(ResolveSceneError::BevyError(err)),
         }
     }
 
