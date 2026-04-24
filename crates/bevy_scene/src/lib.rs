@@ -1493,9 +1493,10 @@ mod tests {
         let mut app = test_app();
         let world = app.world_mut();
 
+        // Test `BsnValue::Lit`.
         {
-            // We can't use `Handle` for testing right now as it doesn't have a
-            // `TryFrom<&'static str>`. So we make a fake one.
+            // Ideally we'd be using the real `Handle`. But we can't use it for
+            // testing errors until it implements `TryFrom<&'static str>`.
             #[derive(Default, Clone, Debug, PartialEq, Eq)]
             struct FakeHandle(AssetPath<'static>);
 
@@ -1508,19 +1509,19 @@ mod tests {
             }
 
             #[derive(Default, Clone, Component, FromTemplate, Debug, PartialEq, Eq)]
-            struct TestComponent(FakeHandle);
+            struct HandleComponent(FakeHandle);
 
             let ok_scene = world
-                .spawn_scene(bsn! { TestComponent("valid_path") })
+                .spawn_scene(bsn! { HandleComponent("valid") })
                 .unwrap()
                 .id();
 
             assert_eq!(
-                world.entity(ok_scene).get::<TestComponent>().cloned(),
-                Some(TestComponent(FakeHandle("valid_path".into())))
+                world.entity(ok_scene).get::<HandleComponent>().cloned(),
+                Some(HandleComponent(FakeHandle("valid".into())))
             );
 
-            let err_scene = world.spawn_scene(bsn! { TestComponent("malformed_path#") });
+            let err_scene = world.spawn_scene(bsn! { HandleComponent("malformed#") });
 
             assert_eq!(
                 err_scene.err().unwrap().to_string(),
@@ -1528,8 +1529,8 @@ mod tests {
             );
 
             let err_scene_list = world.spawn_scene_list(bsn_list! {
-                (TestComponent("valid_path")),
-                (TestComponent("malformed_path#"))
+                (HandleComponent("valid")),
+                (HandleComponent("malformed#")),
             });
 
             assert_eq!(
@@ -1538,30 +1539,35 @@ mod tests {
             );
         }
 
+        // Test `BsnValue::Expr` and `BsnValue::Ident`.
         {
+            // A component with a single `u32`, so we can test for failure by
+            // passing it a negative `i32`.
             #[derive(Default, Clone, Component, PartialEq, Eq, Debug)]
-            struct TestComponent(u32);
+            struct U32Component(u32);
 
-            let ok_scene = world
-                .spawn_scene(bsn! { TestComponent({0i32}) })
-                .unwrap()
-                .id();
+            const ZERO: i32 = 0;
+            const MINUS_ONE: i32 = -1;
 
-            assert_eq!(
-                world.entity(ok_scene).get::<TestComponent>().cloned(),
-                Some(TestComponent(0))
-            );
+            assert!(world.spawn_scene(bsn! { U32Component({0i32}) }).is_ok());
+            assert!(world.spawn_scene(bsn! { U32Component({-1i32}) }).is_err());
 
-            let err_scene = world.spawn_scene(bsn! { TestComponent({-1i32}) });
+            assert!(world.spawn_scene(bsn! { U32Component(ZERO) }).is_ok());
+            assert!(world.spawn_scene(bsn! { U32Component(MINUS_ONE) }).is_err());
 
-            assert!(err_scene.is_err());
+            assert!(world
+                .spawn_scene(bsn! {
+                     U32Component({0i32})
+                     U32Component({-1i32})
+                })
+                .is_err());
 
-            let err_scene_list = world.spawn_scene(bsn! {
-                 TestComponent({0i32})
-                 TestComponent({-1i32})
-            });
-
-            assert!(err_scene_list.is_err());
+            assert!(world
+                .spawn_scene(bsn! {
+                     U32Component(0)
+                     U32Component(MINUS_ONE)
+                })
+                .is_err());
         }
     }
 }
