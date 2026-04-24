@@ -477,23 +477,22 @@ impl<S: Scene> Scene for SceneScope<S> {
         context: &mut ResolveContext,
         scene: &mut ResolvedScene,
     ) -> Result<(), ResolveSceneError> {
-        context.new_entity_scope(|context| {
-            self.0
-                .map_err(ResolveSceneError::TemplateError)?
-                .resolve(context, scene)
-        })
+        match self.0 {
+            Ok(inner) => context.new_entity_scope(|context| inner.resolve(context, scene)),
+            Err(err) => Err(ResolveSceneError::TemplateError(err)),
+        }
     }
 
     fn register_dependencies(&self, dependencies: &mut SceneDependencies) {
-        if let Ok(scene) = &self.0 {
-            scene.register_dependencies(dependencies);
+        if let Ok(inner) = &self.0 {
+            inner.register_dependencies(dependencies);
         }
     }
 }
 
 /// A [`SceneList`] that will create a new "entity scope" and fully resolve the given scene list `L` on top of the current [`Vec<ResolvedScene>`]
 /// (using that scope). It is not "inherited" or cached.
-pub struct SceneListScope<L: SceneList>(pub L);
+pub struct SceneListScope<L: SceneList>(pub Result<L, BevyError>);
 
 impl<L: SceneList> SceneList for SceneListScope<L> {
     fn resolve_list(
@@ -501,27 +500,15 @@ impl<L: SceneList> SceneList for SceneListScope<L> {
         context: &mut ResolveContext,
         scenes: &mut Vec<ResolvedScene>,
     ) -> Result<(), ResolveSceneError> {
-        context.new_entity_scope(|context| self.0.resolve_list(context, scenes))
+        match self.0 {
+            Ok(inner) => context.new_entity_scope(|context| inner.resolve_list(context, scenes)),
+            Err(err) => Err(ResolveSceneError::TemplateError(err)),
+        }
     }
 
     fn register_dependencies(&self, dependencies: &mut SceneDependencies) {
-        self.0.register_dependencies(dependencies);
-    }
-}
-
-impl<L: SceneList> SceneList for Result<SceneListScope<L>, BevyError> {
-    fn resolve_list(
-        self,
-        context: &mut ResolveContext,
-        scenes: &mut Vec<ResolvedScene>,
-    ) -> Result<(), ResolveSceneError> {
-        self.map_err(ResolveSceneError::TemplateError)?
-            .resolve_list(context, scenes)
-    }
-
-    fn register_dependencies(&self, dependencies: &mut SceneDependencies) {
-        if let Ok(scene_list) = &self {
-            scene_list.register_dependencies(dependencies);
+        if let Ok(inner) = &self.0 {
+            inner.register_dependencies(dependencies);
         }
     }
 }

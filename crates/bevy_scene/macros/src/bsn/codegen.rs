@@ -113,14 +113,12 @@ impl BsnTokenStream for BsnListRoot {
         // any compile errors. This keeps autocomplete working in broken states,
         // e.g. when typing the name of a field but no value yet.
         quote! {
-            {
-                (|| {
-                    #(#hoisted_exprs)*
-                    let _res = #bevy_scene::SceneListScope(#tokens);
-                    #(#errors)*
-                    Ok(_res)
-                })()
-            }
+            #bevy_scene::SceneListScope((|| {
+                #(#hoisted_exprs)*
+                let _res = #tokens;
+                #(#errors)*
+                Ok(_res)
+            })())
         }
     }
 }
