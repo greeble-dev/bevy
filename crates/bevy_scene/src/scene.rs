@@ -334,8 +334,7 @@ impl<
         scene: &mut ResolvedScene,
     ) -> Result<(), ResolveSceneError> {
         let template = scene.get_or_insert_template::<T>(context);
-        (self.0)(template, context).map_err(ResolveSceneError::BevyError)?;
-        Ok(())
+        (self.0)(template, context).map_err(ResolveSceneError::BevyError)
     }
 }
 
