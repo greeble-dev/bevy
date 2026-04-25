@@ -1153,6 +1153,8 @@ mod tests {
 
         let sprite = root.get::<Sprite>().unwrap();
         assert_eq!(sprite.0, handle);
+
+        assert!(world.spawn_scene(bsn! { Sprite("malformed#") }).is_err());
     }
 
     #[test]
