@@ -663,7 +663,7 @@ impl<'a> LoadContext<'a> {
 
     /// Create a builder for loading nested assets in this context.
     #[must_use]
-    pub fn loader(&mut self) -> NestedLoadBuilder<'a, '_> {
+    pub fn load_builder(&mut self) -> NestedLoadBuilder<'a, '_> {
         NestedLoadBuilder::new(self)
     }
 
@@ -674,9 +674,9 @@ impl<'a> LoadContext<'a> {
     /// If the current context is configured to not load dependencies automatically (ex: [`AssetProcessor`](crate::processor::AssetProcessor)),
     /// a load will not be kicked off automatically. It is then the calling context's responsibility to begin a load if necessary.
     ///
-    /// If you need to override asset settings, asset type, or load directly, please see [`LoadContext::loader`].
+    /// If you need to override asset settings, asset type, or load directly, please see [`LoadContext::load_builder`].
     pub fn load<'b, A: Asset>(&mut self, path: impl Into<AssetPath<'b>>) -> Handle<A> {
-        self.loader().load(path)
+        self.load_builder().load(path)
     }
 }
 

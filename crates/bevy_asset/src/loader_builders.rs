@@ -1,5 +1,5 @@
 //! Implementations of the builder-pattern used for loading dependent assets via
-//! [`LoadContext::loader`].
+//! [`LoadContext::load_builder`].
 
 use crate::{
     io::Reader,
