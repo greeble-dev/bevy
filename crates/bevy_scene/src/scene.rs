@@ -123,6 +123,25 @@ impl<T: ?Sized + SceneBox> Scene for Box<T> {
     }
 }
 
+impl Scene for Box<[Box<dyn Scene>]> {
+    fn resolve(
+        self,
+        context: &mut ResolveContext,
+        scene: &mut ResolvedScene,
+    ) -> Result<(), ResolveSceneError> {
+        for entry in self {
+            entry.resolve_box(context, scene)?;
+        }
+        Ok(())
+    }
+
+    fn register_dependencies(&self, dependencies: &mut SceneDependencies) {
+        for entry in self {
+            entry.register_dependencies_box(dependencies);
+        }
+    }
+}
+
 /// A collection of asset dependencies required by a [`Scene`].
 #[derive(Default)]
 pub struct SceneDependencies(Vec<SceneDependency>);
@@ -460,9 +479,9 @@ impl Scene for NameEntityReference {
 
 /// A [`Scene`] that will create a new "entity scope" and fully resolve the given scene `S` on top of the current [`ResolvedScene`] (using that scope).
 /// It is not "inherited" or cached.
-pub struct SceneScope<S: Scene>(pub S);
+pub struct SceneScope(pub Box<dyn Scene>);
 
-impl<S: Scene> Scene for SceneScope<S> {
+impl Scene for SceneScope {
     fn resolve(
         self,
         context: &mut ResolveContext,

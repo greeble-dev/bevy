@@ -137,7 +137,29 @@ impl<const ALLOW_FLAT: bool> Bsn<ALLOW_FLAT> {
                     .unwrap_or_else(|e| e.to_compile_error())
             })
             .collect();
-        Ok(quote! { #bevy_scene::auto_nest_tuple!(#(#entries),*) })
+
+        Ok(match entries.len() {
+            0 => quote! { () },
+            1 => {
+                // XXX TODO: Avoid clone?
+                let entry = entries[0].clone();
+                quote! { Box::new(#entry) as Box<dyn Scene> }
+            }
+            _ => {
+                let entries: Vec<_> = entries
+                    .into_iter()
+                    .map(|entry| quote! { Box::new(#entry) as Box<dyn #bevy_scene::Scene> })
+                    .collect();
+
+                quote! {
+                    Box::new(
+                        Box::new(
+                            [ #(#entries),* ]
+                        ) as Box<[Box<dyn #bevy_scene::Scene>]>
+                    ) as Box<dyn Scene>
+                }
+            }
+        })
     }
 
     pub fn to_tokens(&self, ctx: &mut BsnCodegenCtx) -> TokenStream {
@@ -227,7 +249,7 @@ impl BsnEntry {
                     #bevy_scene::InheritSceneAsset::from(#lit)
                 }),
                 BsnInheritedScene::Fn { function, args } => Ok(quote! {
-                    #bevy_scene::SceneScope(#function(#args))
+                    #bevy_scene::SceneScope(Box::new(#function(#args)))
                 }),
             },
             BsnEntry::Name(ident) => {
