@@ -194,7 +194,7 @@ pub use futures_lite::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 pub use handle::*;
 pub use id::*;
 pub use loader::*;
-pub use loader_builders::NestedLoadBuilder;
+pub use loader_builders::LoadHandleBuilder;
 pub use path::*;
 pub use reflect::*;
 pub use render_asset::*;
@@ -807,8 +807,7 @@ mod tests {
             let mut embedded = String::new();
             for dep in ron.embedded_dependencies {
                 let loaded = load_context
-                    .load_builder()
-                    .load_async::<CoolText>(&dep)
+                    .load_value::<CoolText>(&dep)
                     .await
                     .map_err(|_| Self::Error::CannotLoadDependency {
                         dependency: dep.into(),
@@ -822,7 +821,7 @@ mod tests {
                 dependencies: ron
                     .dependencies
                     .iter()
-                    .map(|p| load_context.load(p))
+                    .map(|p| load_context.load_handle(p))
                     .collect(),
                 sub_texts: ron
                     .sub_texts
@@ -1985,10 +1984,7 @@ mod tests {
                 load_context: &mut LoadContext<'_>,
             ) -> Result<Self::Asset, Self::Error> {
                 // We expect this load to fail.
-                load_context
-                    .load_builder()
-                    .load_async::<SubText>("a.cool.ron#A")
-                    .await?;
+                load_context.load_value::<SubText>("a.cool.ron#A").await?;
                 Ok(TestAsset)
             }
 
@@ -2726,7 +2722,7 @@ mod tests {
             ) -> Result<Self::Asset, Self::Error> {
                 let mut nested_path = String::new();
                 reader.read_to_string(&mut nested_path).await?;
-                Ok(DeferredNested(load_context.load(nested_path)))
+                Ok(DeferredNested(load_context.load_handle(nested_path)))
             }
 
             fn extensions(&self) -> &[&str] {
@@ -2754,11 +2750,8 @@ mod tests {
             ) -> Result<Self::Asset, Self::Error> {
                 let mut nested_path = String::new();
                 reader.read_to_string(&mut nested_path).await?;
-                let deferred_nested: LoadedAsset<DeferredNested> = load_context
-                    .load_builder()
-                    .load_async(nested_path)
-                    .await
-                    .unwrap();
+                let deferred_nested: LoadedAsset<DeferredNested> =
+                    load_context.load_value(nested_path).await.unwrap();
                 Ok(ImmediateNested(deferred_nested.get().0.clone()))
             }
 
@@ -2879,7 +2872,7 @@ mod tests {
             ) -> Result<Self::Asset, Self::Error> {
                 // Load the asset in the root context, but then put the handle in the subasset. So
                 // the subasset's (internal) load context never loaded `dep`.
-                let dep = load_context.load::<TestAsset>("abc.ron");
+                let dep = load_context.load_handle::<TestAsset>("abc.ron");
                 load_context.add_labeled_asset("subasset", AssetWithDep { dep });
                 Ok(TestAsset)
             }

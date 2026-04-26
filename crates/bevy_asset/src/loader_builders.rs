@@ -28,7 +28,7 @@ impl ReaderRef<'_> {
 }
 
 /// A builder for loading nested assets inside a [`LoadContext`].
-pub struct NestedLoadBuilder<'ctx, 'builder> {
+pub struct LoadHandleBuilder<'ctx, 'builder> {
     load_context: &'builder mut LoadContext<'ctx>,
     /// A function to modify the meta for an asset loader. In practice, this just mutates the loader
     /// settings of a load.
@@ -37,9 +37,9 @@ pub struct NestedLoadBuilder<'ctx, 'builder> {
     override_unapproved: bool,
 }
 
-impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
+impl<'ctx, 'builder> LoadHandleBuilder<'ctx, 'builder> {
     pub(crate) fn new(load_context: &'builder mut LoadContext<'ctx>) -> Self {
-        NestedLoadBuilder {
+        LoadHandleBuilder {
             load_context,
             meta_transform: None,
             override_unapproved: false,
@@ -47,7 +47,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     }
 }
 
-impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
+impl<'ctx, 'builder> LoadHandleBuilder<'ctx, 'builder> {
     /// Use the given `settings` function to override the asset's [`AssetLoader`] settings.
     ///
     /// The type `S` must match the configured [`AssetLoader::Settings`] or `settings` changes will
@@ -136,90 +136,6 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
         handle
     }
 
-    /// Loads the provided path as the given type, returning the loaded data.
-    ///
-    /// This load is async and therefore needs to be awaited before returning the loaded data.
-    pub async fn load_async<'a, A: Asset>(
-        self,
-        path: impl Into<AssetPath<'a>>,
-    ) -> Result<LoadedAsset<A>, LoadDirectError> {
-        self.load_typed_async_internal(path.into().into_owned(), None)
-            .await
-    }
-
-    /// Loads the provided path as the given type, returning the loaded data.
-    ///
-    /// This load is async and therefore needs to be awaited before returning the loaded data.
-    pub async fn load_erased_async<'a>(
-        self,
-        type_id: TypeId,
-        path: impl Into<AssetPath<'a>>,
-    ) -> Result<ErasedLoadedAsset, LoadDirectError> {
-        self.load_async_internal(Some(type_id), &path.into().into_owned(), None)
-            .await
-            .map(|(_, asset)| asset)
-    }
-
-    /// Loads the provided path with an unknown type (which is guessed based on the path or meta
-    /// file), returning the loaded data.
-    ///
-    /// This load is async and therefore needs to be awaited before returning the loaded data.
-    pub async fn load_untyped_async<'a>(
-        self,
-        path: impl Into<AssetPath<'a>>,
-    ) -> Result<ErasedLoadedAsset, LoadDirectError> {
-        self.load_async_internal(None, &path.into().into_owned(), None)
-            .await
-            .map(|(_, asset)| asset)
-    }
-
-    /// Loads the given type from the given `reader`, returning the loaded data.
-    ///
-    /// This load is async and therefore needs to be awaited before returning the loaded data. The
-    /// provided path determines the path used for handles of subassets, as well as any relative
-    /// paths of assets used by the nested loader.
-    pub async fn load_async_from_reader<'a, A: Asset>(
-        self,
-        path: impl Into<AssetPath<'a>>,
-        reader: &'builder mut dyn Reader,
-    ) -> Result<LoadedAsset<A>, LoadDirectError> {
-        self.load_typed_async_internal(path.into().into_owned(), Some(reader))
-            .await
-    }
-
-    /// Loads the given type from the given `reader`, returning the loaded data.
-    ///
-    /// This load is async and therefore needs to be awaited before returning the loaded data. The
-    /// provided path determines the path used for handles of subassets, as well as any relative
-    /// paths of assets used by the nested loader.
-    /// that path as a dependency of this asset.
-    pub async fn load_erased_async_from_reader<'a>(
-        self,
-        type_id: TypeId,
-        path: impl Into<AssetPath<'a>>,
-        reader: &'builder mut dyn Reader,
-    ) -> Result<ErasedLoadedAsset, LoadDirectError> {
-        self.load_async_internal(Some(type_id), &path.into().into_owned(), Some(reader))
-            .await
-            .map(|(_, asset)| asset)
-    }
-
-    /// Loads an asset from the given `reader` with an unknown type (which is guessed based on the
-    /// path or meta file), returning the loaded data.
-    ///
-    /// This load is async and therefore needs to be awaited before returning the loaded data. The
-    /// provided path determines the path used for handles of subassets, as well as any relative
-    /// paths of assets used by the nested loader.
-    pub async fn load_untyped_async_from_reader<'a>(
-        self,
-        path: impl Into<AssetPath<'a>>,
-        reader: &'builder mut dyn Reader,
-    ) -> Result<ErasedLoadedAsset, LoadDirectError> {
-        self.load_async_internal(None, &path.into().into_owned(), Some(reader))
-            .await
-            .map(|(_, asset)| asset)
-    }
-
     /// Acquires the handle for the given type and path, and if necessary, begins a corresponding
     /// (deferred) load.
     fn load_internal<'a>(
@@ -253,13 +169,155 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
         self.load_context.dependencies.insert(index);
         handle
     }
+}
+
+/// A builder for loading nested assets inside a [`LoadContext`].
+pub struct LoadValueBuilder<'ctx, 'builder> {
+    load_context: &'builder mut LoadContext<'ctx>,
+    /// A function to modify the meta for an asset loader. In practice, this just mutates the loader
+    /// settings of a load.
+    meta_transform: Option<MetaTransform>,
+    /// Whether unapproved paths are allowed to be loaded.
+    override_unapproved: bool,
+}
+
+impl<'ctx, 'builder> LoadValueBuilder<'ctx, 'builder> {
+    pub(crate) fn new(load_context: &'builder mut LoadContext<'ctx>) -> Self {
+        LoadValueBuilder {
+            load_context,
+            meta_transform: None,
+            override_unapproved: false,
+        }
+    }
+}
+
+impl<'ctx, 'builder> LoadValueBuilder<'ctx, 'builder> {
+    /// Use the given `settings` function to override the asset's [`AssetLoader`] settings.
+    ///
+    /// The type `S` must match the configured [`AssetLoader::Settings`] or `settings` changes will
+    /// be ignored and an error will be printed to the log.
+    ///
+    /// Repeatedly calling this method will "chain" the operations (matching the order of these
+    /// calls).
+    ///
+    /// [`AssetLoader`]: crate::AssetLoader
+    /// [`AssetLoader::Settings`]: crate::AssetLoader::Settings
+    #[must_use]
+    pub fn with_settings<S: Settings>(
+        mut self,
+        settings: impl Fn(&mut S) + Send + Sync + 'static,
+    ) -> Self {
+        let new_transform = loader_settings_meta_transform(settings);
+        if let Some(prev_transform) = self.meta_transform.take() {
+            self.meta_transform = Some(Box::new(move |meta| {
+                prev_transform(meta);
+                new_transform(meta);
+            }));
+        } else {
+            self.meta_transform = Some(new_transform);
+        }
+        self
+    }
+
+    /// Loads from unapproved paths are allowed, even if
+    /// [`AssetPlugin::unapproved_path_mode`](crate::AssetPlugin::unapproved_path_mode) is
+    /// [`Deny`](crate::UnapprovedPathMode::Deny).
+    #[must_use = "the load doesn't start until LoadBuilder has been consumed"]
+    pub fn override_unapproved(mut self) -> Self {
+        self.override_unapproved = true;
+        self
+    }
+
+    /// Loads the provided path as the given type, returning the loaded data.
+    ///
+    /// This load is async and therefore needs to be awaited before returning the loaded data.
+    pub async fn load<'a, A: Asset>(
+        self,
+        path: impl Into<AssetPath<'a>>,
+    ) -> Result<LoadedAsset<A>, LoadDirectError> {
+        self.load_typed_internal(path.into().into_owned(), None)
+            .await
+    }
+
+    /// Loads the provided path as the given type, returning the loaded data.
+    ///
+    /// This load is async and therefore needs to be awaited before returning the loaded data.
+    pub async fn load_erased<'a>(
+        self,
+        type_id: TypeId,
+        path: impl Into<AssetPath<'a>>,
+    ) -> Result<ErasedLoadedAsset, LoadDirectError> {
+        self.load_internal(Some(type_id), &path.into().into_owned(), None)
+            .await
+            .map(|(_, asset)| asset)
+    }
+
+    /// Loads the provided path with an unknown type (which is guessed based on the path or meta
+    /// file), returning the loaded data.
+    ///
+    /// This load is async and therefore needs to be awaited before returning the loaded data.
+    pub async fn load_untyped<'a>(
+        self,
+        path: impl Into<AssetPath<'a>>,
+    ) -> Result<ErasedLoadedAsset, LoadDirectError> {
+        self.load_internal(None, &path.into().into_owned(), None)
+            .await
+            .map(|(_, asset)| asset)
+    }
+
+    /// Loads the given type from the given `reader`, returning the loaded data.
+    ///
+    /// This load is async and therefore needs to be awaited before returning the loaded data. The
+    /// provided path determines the path used for handles of subassets, as well as any relative
+    /// paths of assets used by the nested loader.
+    pub async fn load_from_reader<'a, A: Asset>(
+        self,
+        path: impl Into<AssetPath<'a>>,
+        reader: &'builder mut dyn Reader,
+    ) -> Result<LoadedAsset<A>, LoadDirectError> {
+        self.load_typed_internal(path.into().into_owned(), Some(reader))
+            .await
+    }
+
+    /// Loads the given type from the given `reader`, returning the loaded data.
+    ///
+    /// This load is async and therefore needs to be awaited before returning the loaded data. The
+    /// provided path determines the path used for handles of subassets, as well as any relative
+    /// paths of assets used by the nested loader.
+    /// that path as a dependency of this asset.
+    pub async fn load_erased_from_reader<'a>(
+        self,
+        type_id: TypeId,
+        path: impl Into<AssetPath<'a>>,
+        reader: &'builder mut dyn Reader,
+    ) -> Result<ErasedLoadedAsset, LoadDirectError> {
+        self.load_internal(Some(type_id), &path.into().into_owned(), Some(reader))
+            .await
+            .map(|(_, asset)| asset)
+    }
+
+    /// Loads an asset from the given `reader` with an unknown type (which is guessed based on the
+    /// path or meta file), returning the loaded data.
+    ///
+    /// This load is async and therefore needs to be awaited before returning the loaded data. The
+    /// provided path determines the path used for handles of subassets, as well as any relative
+    /// paths of assets used by the nested loader.
+    pub async fn load_untyped_from_reader<'a>(
+        self,
+        path: impl Into<AssetPath<'a>>,
+        reader: &'builder mut dyn Reader,
+    ) -> Result<ErasedLoadedAsset, LoadDirectError> {
+        self.load_internal(None, &path.into().into_owned(), Some(reader))
+            .await
+            .map(|(_, asset)| asset)
+    }
 
     /// Creates a future to do a nested load.
     ///
     /// The type is either provided, or it is deduced from the path or meta file. If `reader` is
     /// [`Some`], the load reads from the provided reader. Otherwise, the asset is loaded from
     /// `path`.
-    async fn load_async_internal(
+    async fn load_internal(
         self,
         type_id: Option<TypeId>,
         path: &AssetPath<'static>,
@@ -335,12 +393,12 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
         clippy::result_large_err,
         reason = "we need to give the user the correct error type"
     )]
-    async fn load_typed_async_internal<A: Asset>(
+    async fn load_typed_internal<A: Asset>(
         self,
         path: AssetPath<'static>,
         reader: Option<&'builder mut dyn Reader>,
     ) -> Result<LoadedAsset<A>, LoadDirectError> {
-        self.load_async_internal(Some(TypeId::of::<A>()), &path, reader)
+        self.load_internal(Some(TypeId::of::<A>()), &path, reader)
             .await
             .and_then(move |(loader, untyped_asset)| {
                 untyped_asset

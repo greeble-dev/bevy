@@ -1,6 +1,6 @@
 use crate::{
     io::{AssetReaderError, MissingAssetSourceError, MissingProcessedAssetReaderError, Reader},
-    loader_builders::NestedLoadBuilder,
+    loader_builders::{LoadHandleBuilder, LoadValueBuilder},
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfo, ProcessedInfoMinimal, Settings},
     path::AssetPath,
     Asset, AssetIndex, AssetLoadError, AssetServer, AssetServerMode, Assets, ErasedAssetIndex,
@@ -663,8 +663,14 @@ impl<'a> LoadContext<'a> {
 
     /// Create a builder for loading nested assets in this context.
     #[must_use]
-    pub fn load_builder(&mut self) -> NestedLoadBuilder<'a, '_> {
-        NestedLoadBuilder::new(self)
+    pub fn load_handle_builder(&mut self) -> LoadHandleBuilder<'a, '_> {
+        LoadHandleBuilder::new(self)
+    }
+
+    /// Create a builder for loading nested assets in this context.
+    #[must_use]
+    pub fn load_value_builder(&mut self) -> LoadValueBuilder<'a, '_> {
+        LoadValueBuilder::new(self)
     }
 
     /// Retrieves a handle for the asset at the given path and adds that path as a dependency of the asset.
@@ -675,8 +681,15 @@ impl<'a> LoadContext<'a> {
     /// a load will not be kicked off automatically. It is then the calling context's responsibility to begin a load if necessary.
     ///
     /// If you need to override asset settings, asset type, or load directly, please see [`LoadContext::load_builder`].
-    pub fn load<'b, A: Asset>(&mut self, path: impl Into<AssetPath<'b>>) -> Handle<A> {
-        self.load_builder().load(path)
+    pub fn load_handle<'b, A: Asset>(&mut self, path: impl Into<AssetPath<'b>>) -> Handle<A> {
+        self.load_handle_builder().load(path)
+    }
+
+    pub async fn load_value<'b, A: Asset>(
+        &mut self,
+        path: impl Into<AssetPath<'b>>,
+    ) -> Result<LoadedAsset<A>, LoadDirectError> {
+        self.load_value_builder().load(path).await
     }
 }
 

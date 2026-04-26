@@ -778,7 +778,7 @@ impl AssetLoader for AnimationGraphAssetLoader {
             animation_graph.add_node(AnimationGraphNode {
                 node_type: match serialized_node.node_type {
                     SerializedAnimationNodeType::Clip(ref path) => {
-                        AnimationNodeType::Clip(load_context.load(path.clone()))
+                        AnimationNodeType::Clip(load_context.load_handle(path.clone()))
                     }
                     SerializedAnimationNodeType::Blend => AnimationNodeType::Blend,
                     SerializedAnimationNodeType::Add => AnimationNodeType::Add,
