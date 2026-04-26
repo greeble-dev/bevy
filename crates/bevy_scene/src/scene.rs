@@ -497,9 +497,9 @@ impl Scene for SceneScope {
 
 /// A [`SceneList`] that will create a new "entity scope" and fully resolve the given scene list `L` on top of the current [`Vec<ResolvedScene>`]
 /// (using that scope). It is not "inherited" or cached.
-pub struct SceneListScope<L: SceneList>(pub L);
+pub struct SceneListScope(pub Box<dyn SceneList>);
 
-impl<L: SceneList> SceneList for SceneListScope<L> {
+impl SceneList for SceneListScope {
     fn resolve_list(
         self,
         context: &mut ResolveContext,

@@ -139,11 +139,11 @@ impl<const ALLOW_FLAT: bool> Bsn<ALLOW_FLAT> {
             .collect();
 
         Ok(match entries.len() {
-            0 => quote! { () },
+            0 => quote! { Box::new(()) as Box<dyn #bevy_scene::Scene> },
             1 => {
                 // XXX TODO: Avoid clone?
                 let entry = entries[0].clone();
-                quote! { Box::new(#entry) as Box<dyn Scene> }
+                quote! { Box::new(#entry) as Box<dyn #bevy_scene::Scene> }
             }
             _ => {
                 let entries: Vec<_> = entries
@@ -521,15 +521,37 @@ impl BsnType {
 impl BsnTokenStream for BsnSceneListItems {
     fn to_tokens(&self, ctx: &mut BsnCodegenCtx) -> TokenStream {
         let bevy_scene = ctx.bevy_scene;
-        let scenes = self.0.iter().map(|s| match s {
-            BsnSceneListItem::Scene(bsn) => {
-                let tokens = bsn.to_tokens(ctx);
-                quote! {#bevy_scene::EntityScene(#tokens)}
-            }
-            BsnSceneListItem::Expression(stmts) => quote! {#(#stmts)*},
-        });
+        let scenes: Vec<_> = self
+            .0
+            .iter()
+            .map(|s| match s {
+                BsnSceneListItem::Scene(bsn) => {
+                    let tokens = bsn.to_tokens(ctx);
+                    quote! {Box::new(#bevy_scene::EntityScene(#tokens)) as Box<dyn #bevy_scene::SceneList>}
+                }
+                BsnSceneListItem::Expression(stmts) => {
+                    quote! {Box::new(#(#stmts)*) as Box<dyn #bevy_scene::SceneList>}
+                }
+            })
+            .collect();
 
-        quote! { #bevy_scene::auto_nest_tuple!(#(#scenes),*) }
+        match scenes.len() {
+            0 => quote! { Box::new(()) as Box<dyn #bevy_scene::SceneList> },
+            1 => {
+                // XXX TODO: Avoid clone?
+                let scene = scenes[0].clone();
+                quote! { #scene }
+            }
+            _ => {
+                quote! {
+                    Box::new(
+                        Box::new(
+                            [ #(#scenes),* ]
+                        ) as Box<[Box<dyn #bevy_scene::SceneList>]>
+                    ) as Box<dyn #bevy_scene::SceneList>
+                }
+            }
+        }
     }
 }
 

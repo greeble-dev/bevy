@@ -79,12 +79,31 @@ impl<T: ?Sized + SceneListBox> SceneList for Box<T> {
     }
 }
 
+impl SceneList for Box<[Box<dyn SceneList>]> {
+    fn resolve_list(
+        self,
+        context: &mut ResolveContext,
+        scenes: &mut Vec<ResolvedScene>,
+    ) -> Result<(), ResolveSceneError> {
+        for entry in self {
+            entry.resolve_list_box(context, scenes)?;
+        }
+        Ok(())
+    }
+
+    fn register_dependencies(&self, dependencies: &mut SceneDependencies) {
+        for entry in self {
+            entry.register_dependencies_box(dependencies);
+        }
+    }
+}
+
 /// Corresponds to a single member of a [`SceneList`] (an [`Entity`] with an `S` [`Scene`]).
 ///
 /// [`Entity`]: bevy_ecs::entity::Entity
-pub struct EntityScene<S>(pub S);
+pub struct EntityScene(pub Box<dyn Scene>);
 
-impl<S: Scene> SceneList for EntityScene<S> {
+impl SceneList for EntityScene {
     fn resolve_list(
         self,
         context: &mut ResolveContext,
