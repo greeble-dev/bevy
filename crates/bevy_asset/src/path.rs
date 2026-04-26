@@ -956,7 +956,10 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
             where
                 E: serde::de::Error,
             {
-                Ok(AssetPath::from(v.to_string()).into())
+                Ok(AssetPath::try_parse(v)
+                    .map_err(|err| E::custom(err.to_string()))?
+                    .into_owned()
+                    .into())
             }
 
             fn visit_string<E>(self, v: String) -> Result<AssetRef<'static>, E>

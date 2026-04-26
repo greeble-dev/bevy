@@ -1317,8 +1317,7 @@ impl PolyAssetLoader for BassetLoader {
                 .expect("XXX TODO");
 
             TypedReflectDeserializer::new(registration, &registry)
-                .deserialize(&mut ron::de::Deserializer::from_bytes(&bytes).expect("XXX TODO"))
-                .expect("XXX TODO")
+                .deserialize(&mut ron::de::Deserializer::from_bytes(&bytes).expect("XXX TODO"))?
                 .try_take::<BassetFileSerializable>()
                 .expect("XXX TODO")
         };
@@ -1635,7 +1634,7 @@ pub mod action {
         ) -> Result<ErasedLoadedAsset, Self::Error> {
             // XXX TODO: Try to avoid clones? But will mean changing lifetimes
             // of `BassetAction::apply`.
-            let path = AssetPath::parse(&action.path).into_owned();
+            let path = AssetPath::try_parse(&action.path)?.into_owned();
 
             // XXX TODO: Selecting a subasset should be done by the `RootAssetRef::label`,
             // not here. How do we make this more robust?
