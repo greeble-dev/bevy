@@ -139,10 +139,11 @@ impl<const ALLOW_FLAT: bool> Bsn<ALLOW_FLAT> {
             .collect();
 
         Ok(match entries.len() {
+            // XXX TODO: Check if an empty list should be an error.
             0 => quote! { Box::new(()) as Box<dyn #bevy_scene::Scene> },
             1 => {
-                // XXX TODO: Avoid clone?
-                let entry = entries[0].clone();
+                // XXX TODO: Can this be cleaner?
+                let entry = entries.into_iter().next().unwrap();
                 quote! { Box::new(#entry) as Box<dyn #bevy_scene::Scene> }
             }
             _ => {
@@ -534,10 +535,11 @@ impl BsnTokenStream for BsnSceneListItems {
             .collect();
 
         match scenes.len() {
+            // XXX TODO: Check if an empty list should be an error.
             0 => quote! { Box::new(()) as Box<dyn #bevy_scene::SceneList> },
             1 => {
-                // XXX TODO: Avoid clone?
-                let scene = scenes[0].clone();
+                // XXX TODO: Can this be cleaner?
+                let scene = scenes.into_iter().next().unwrap();
                 quote! { #scene }
             }
             _ => {
