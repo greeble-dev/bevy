@@ -2155,7 +2155,9 @@ pub fn handle_internal_asset_events(world: &mut World) {
                 for parent in path.ancestors().skip(1) {
                     let parent_asset_path =
                         AssetPath::from(parent.to_path_buf()).with_source(source.clone());
-                    for folder_handle in infos.get_path_handles(&parent_asset_path) {
+                    for folder_handle in
+                        infos.get_path_handles(&AssetRef::from(parent_asset_path.clone()))
+                    {
                         info!(
                             "Reloading folder {parent_asset_path} because the content has changed"
                         );
@@ -2169,7 +2171,7 @@ pub fn handle_internal_asset_events(world: &mut World) {
         let mut paths_to_reload = <HashSet<_>>::default();
         let mut reload_path =
             |path: PathBuf, source: &AssetSourceId<'static>, infos: &AssetInfos| {
-                let path = AssetPath::from(path).with_source(source);
+                let path = AssetRef::from(AssetPath::from(path).with_source(source));
                 queue_ancestors(&path, infos, &mut paths_to_reload);
                 paths_to_reload.insert(path);
             };

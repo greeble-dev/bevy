@@ -3367,7 +3367,14 @@ mod tests {
             .map(UntypedHandle::typed::<CoolText>)
             .collect::<Vec<_>>();
         // Sort the handles so we know abc is first and def is second.
-        handles.sort_by_key(|handle| handle.path().unwrap().path().to_path_buf());
+        handles.sort_by_key(|handle| {
+            handle
+                .path()
+                .unwrap()
+                .temporary_path_workaround()
+                .path()
+                .to_path_buf()
+        });
 
         let abc_handle = handles[0].clone();
         let def_handle = handles[1].clone();
@@ -3415,7 +3422,14 @@ mod tests {
             .map(UntypedHandle::typed::<CoolText>)
             .collect::<Vec<_>>();
         // Sort the handles so we know the order is abc, def, and ghi.
-        handles.sort_by_key(|handle| handle.path().unwrap().path().to_path_buf());
+        handles.sort_by_key(|handle| {
+            handle
+                .path()
+                .unwrap()
+                .temporary_path_workaround()
+                .path()
+                .to_path_buf()
+        });
 
         let new_abc_handle = handles[0].clone();
         let new_def_handle = handles[1].clone();
