@@ -153,10 +153,8 @@ impl<const ALLOW_FLAT: bool> Bsn<ALLOW_FLAT> {
 
                 quote! {
                     Box::new(
-                        Box::new(
-                            [ #(#entries),* ]
-                        ) as Box<[Box<dyn #bevy_scene::Scene>]>
-                    ) as Box<dyn Scene>
+                        [ #(#entries),* ]
+                    ) as Box<[Box<dyn #bevy_scene::Scene>]>
                 }
             }
         })
@@ -545,10 +543,8 @@ impl BsnTokenStream for BsnSceneListItems {
             _ => {
                 quote! {
                     Box::new(
-                        Box::new(
-                            [ #(#scenes),* ]
-                        ) as Box<[Box<dyn #bevy_scene::SceneList>]>
-                    ) as Box<dyn #bevy_scene::SceneList>
+                        [ #(#scenes),* ]
+                    ) as Box<[Box<dyn #bevy_scene::SceneList>]>
                 }
             }
         }
@@ -794,8 +790,8 @@ mod tests {
     #[test]
     fn bsn_root_preserves_inference_on_error() {
         // Arrange
-        let expected = "bevy_scene :: SceneScope ({ let _res = bevy_scene :: auto_nest_tuple \
-            ! () ; :: core :: compile_error ! { \"Test Error\" } _res })";
+        let expected = "bevy_scene :: SceneScope ({ let _res = Box :: new (()) as Box < dyn bevy_scene :: Scene > \
+            ; :: core :: compile_error ! { \"Test Error\" } _res })";
 
         let mut refs = EntityRefs::default();
         let paths = TestPaths::new();
@@ -818,7 +814,7 @@ mod tests {
     fn bsn_list_root_preserves_inference_on_error() {
         // Arrange
         let expected =
-            "{ let _res = bevy_scene :: SceneListScope (bevy_scene :: auto_nest_tuple ! ()) ;"
+            "{ let _res = bevy_scene :: SceneListScope (Box :: new (()) as Box < dyn bevy_scene :: SceneList >) ;"
                 .to_string()
                 + " :: core :: compile_error ! { \"Test Error\" }"
                 + " _res }";

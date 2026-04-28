@@ -101,9 +101,9 @@ impl SceneList for Box<[Box<dyn SceneList>]> {
 /// Corresponds to a single member of a [`SceneList`] (an [`Entity`] with an `S` [`Scene`]).
 ///
 /// [`Entity`]: bevy_ecs::entity::Entity
-pub struct EntityScene(pub Box<dyn Scene>);
+pub struct EntityScene<S>(pub S);
 
-impl SceneList for EntityScene {
+impl<S: Scene> SceneList for EntityScene<S> {
     fn resolve_list(
         self,
         context: &mut ResolveContext,
