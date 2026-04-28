@@ -20,7 +20,7 @@ use bevy::{
     camera::NormalizedRenderTarget,
     input_focus::{
         directional_navigation::{AutoNavigationConfig, DirectionalNavigationPlugin},
-        InputFocus, InputFocusVisible,
+        FocusCause, InputFocus, InputFocusVisible,
     },
     math::{CompassOctant, Dir2, Rot2},
     picking::{
@@ -256,7 +256,7 @@ fn setup_scattered_ui(mut commands: Commands, mut input_focus: ResMut<InputFocus
 
     // Set initial focus
     if let Some(button) = first_button {
-        input_focus.set(button);
+        input_focus.set(button, FocusCause::Navigated);
     }
 }
 

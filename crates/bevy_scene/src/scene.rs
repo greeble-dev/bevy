@@ -417,7 +417,7 @@ impl Scene for InheritSceneAsset {
             context.inherited = Some(scene_patch);
             Ok(())
         } else {
-            Err(ResolveSceneError::MissingSceneDependency(self.0.clone()))
+            Err(ResolveSceneError::MissingSceneDependency(self.0))
         }
     }
 
@@ -434,7 +434,7 @@ impl<F: (Fn(&mut TemplateContext) -> Result<O>) + Clone + Send + Sync + 'static,
         _context: &mut ResolveContext,
         scene: &mut ResolvedScene,
     ) -> Result<(), ResolveSceneError> {
-        scene.push_template(FnTemplate(self.0.clone()));
+        scene.push_template(FnTemplate(self.0));
         Ok(())
     }
 }
@@ -472,7 +472,7 @@ impl Scene for NameEntityReference {
         }
         scene.entity_indices.push(this_index);
         let name = scene.get_or_insert_template::<Name>(context);
-        *name = self.name.clone();
+        *name = self.name;
         Ok(())
     }
 }
@@ -546,7 +546,7 @@ impl<
         _context: &mut ResolveContext,
         scene: &mut ResolvedScene,
     ) -> Result<(), ResolveSceneError> {
-        scene.push_bundle_template(OnTemplate(self.0.clone(), PhantomData));
+        scene.push_bundle_template(OnTemplate(self.0, PhantomData));
         Ok(())
     }
 }

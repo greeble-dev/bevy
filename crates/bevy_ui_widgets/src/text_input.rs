@@ -11,7 +11,9 @@ use bevy_app::{App, Plugin, PostUpdate, PreUpdate};
 use bevy_ecs::prelude::*;
 use bevy_input::keyboard::{Key, KeyboardInput};
 use bevy_input::{ButtonInput, InputSystems};
-use bevy_input_focus::{FocusGained, FocusLost, FocusedInput, InputFocus, InputFocusSystems};
+use bevy_input_focus::{
+    FocusCause, FocusGained, FocusLost, FocusedInput, InputFocus, InputFocusSystems,
+};
 use bevy_math::Vec2;
 use bevy_picking::events::{Drag, Pointer, Press, Release};
 use bevy_picking::pointer::PointerButton;
@@ -196,7 +198,7 @@ fn on_pointer_press(
             TextEdit::MoveToPoint
         }(local_pos));
 
-    input_focus.set(press.entity);
+    input_focus.set(press.entity, FocusCause::Pressed);
 
     press.propagate(false);
 }
@@ -401,23 +403,29 @@ pub struct SelectAllOnFocus;
 /// Resource to track when a pointer press caused focus on an [`EditableText`].
 /// A corresponding pointer release will select all text if there is no other selection.
 #[derive(Resource, Default)]
-struct QueuedSelectAll(Option<(Entity, PointerButton)>);
+struct QueuedSelectAll(Option<Entity>);
 
 fn on_focus_select_all(
     focus_gained: On<FocusGained>,
-    mut pointer_presses: MessageReader<Pointer<Press>>,
-    mut q_text_input: Query<&mut EditableText, With<SelectAllOnFocus>>,
+    mut q_text_input: Query<(&mut EditableText, Has<SelectAllOnFocus>)>,
     mut queued_select_all: ResMut<QueuedSelectAll>,
 ) {
     let target = focus_gained.event_target();
-    if let Ok(mut editable_text) = q_text_input.get_mut(target) {
-        // Ideally, FocusGained would contain information on how it was gained instead.
-        let focus_gained_by_pointer_press =
-            pointer_presses.read().find(|press| press.entity == target);
-        if let Some(press) = focus_gained_by_pointer_press {
-            queued_select_all.0 = Some((target, press.button));
-        } else {
-            editable_text.queue_edit(TextEdit::SelectAll);
+    if let Ok((mut editable_text, select_all_on_focus)) = q_text_input.get_mut(target) {
+        match focus_gained.event().cause {
+            FocusCause::Pressed => {
+                if select_all_on_focus {
+                    queued_select_all.0 = Some(target);
+                }
+            }
+
+            // Navigating into a text input should always select all even without
+            // the `SelectAllOnFocus` marker, unless it is a multiline input.
+            FocusCause::Navigated => {
+                if select_all_on_focus || !editable_text.allow_newlines {
+                    editable_text.queue_edit(TextEdit::SelectAll);
+                }
+            }
         }
     }
 }
@@ -431,11 +439,11 @@ fn apply_queued_select_all(
     mut queued_select_all: ResMut<QueuedSelectAll>,
     mut q_text_input: Query<&mut EditableText, With<SelectAllOnFocus>>,
 ) {
-    let Some((target, button)) = queued_select_all.0 else {
+    let Some(target) = queued_select_all.0 else {
         return;
     };
     for pointer_release in pointer_releases.read() {
-        if pointer_release.button == button
+        if pointer_release.button == PointerButton::Primary
             && let Ok(mut editable_text) = q_text_input.get_mut(target)
         {
             editable_text.queue_edit(TextEdit::SelectAllIfCollapsed);
