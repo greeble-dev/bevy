@@ -548,26 +548,7 @@ impl AssetServer {
             .load(path.into())
     }
 
-    pub(crate) fn load_with_meta_transform<'a, A: Asset, G: Send + Sync + 'static>(
-        &self,
-        path: impl Into<AssetRef<'a>>,
-        // XXX TODO: Heinous workaround to support settings on `AssetRef`. See `AssetRef::with_settings`.
-        settings: Option<String>,
-        guard: G,
-        override_unapproved: bool,
-    ) -> Handle<A> {
-        self.load_with_meta_transform_erased(
-            path,
-            TypeId::of::<A>(),
-            Some(type_name::<A>()),
-            settings,
-            guard,
-            override_unapproved,
-        )
-        .typed_unchecked()
-    }
-
-    pub(crate) fn load_with_meta_transform_erased<'a, G: Send + Sync + 'static>(
+    pub(crate) fn load_with_meta_transform<'a, G: Send + Sync + 'static>(
         &self,
         path: impl Into<AssetRef<'a>>,
         type_id: TypeId,
@@ -1094,6 +1075,7 @@ impl AssetServer {
         }
         // `get_or_create_path_handle` always returns a Strong variant, so this is safe.
         let index = (&handle).try_into().unwrap();
+        self.write_infos().stats.started_load_tasks += 1;
         self.load_folder_internal(index, path);
 
         handle
@@ -1137,8 +1119,6 @@ impl AssetServer {
             }
             Ok(())
         }
-
-        self.write_infos().stats.started_load_tasks += 1;
 
         let path = path.into_owned();
         let server = self.clone();
@@ -2083,7 +2063,7 @@ impl<'a> LoadBuilder<'a> {
         type_name: Option<&str>,
         asset_path: AssetRef<'_>,
     ) -> UntypedHandle {
-        self.asset_server.load_with_meta_transform_erased(
+        self.asset_server.load_with_meta_transform(
             asset_path,
             type_id,
             type_name,
@@ -2168,45 +2148,51 @@ pub fn handle_internal_asset_events(world: &mut World) {
             }
         }
 
-        let reload_parent_folders = |path: &PathBuf, source: &AssetSourceId<'static>| {
-            for parent in path.ancestors().skip(1) {
-                let parent_asset_path =
-                    AssetPath::from(parent.to_path_buf()).with_source(source.clone());
-                for folder_handle in infos.get_path_handles(&parent_asset_path.clone().into()) {
-                    info!("Reloading folder {parent_asset_path} because the content has changed");
-                    // `get_path_handles` only returns Strong variants, so this is safe.
-                    let index = (&folder_handle).try_into().unwrap();
-                    server.load_folder_internal(index, parent_asset_path.clone());
+        let mut folders_to_reload = Vec::default();
+        let mut reload_parent_folders =
+            |path: &PathBuf, source: &AssetSourceId<'static>, infos: &mut AssetInfos| {
+                let mut new_loads = 0;
+                for parent in path.ancestors().skip(1) {
+                    let parent_asset_path =
+                        AssetPath::from(parent.to_path_buf()).with_source(source.clone());
+                    for folder_handle in infos.get_path_handles(&parent_asset_path) {
+                        info!(
+                            "Reloading folder {parent_asset_path} because the content has changed"
+                        );
+                        new_loads += 1;
+                        folders_to_reload.push((folder_handle, parent_asset_path.clone()));
+                    }
                 }
-            }
-        };
+                infos.stats.started_load_tasks += new_loads;
+            };
 
         let mut paths_to_reload = <HashSet<_>>::default();
-        let mut reload_path = |path: PathBuf, source: &AssetSourceId<'static>| {
-            let path = AssetRef::from(AssetPath::from(path).with_source(source));
-            queue_ancestors(&path, &infos, &mut paths_to_reload);
-            paths_to_reload.insert(path);
-        };
+        let mut reload_path =
+            |path: PathBuf, source: &AssetSourceId<'static>, infos: &AssetInfos| {
+                let path = AssetPath::from(path).with_source(source);
+                queue_ancestors(&path, infos, &mut paths_to_reload);
+                paths_to_reload.insert(path);
+            };
 
         let mut handle_event = |source: AssetSourceId<'static>, event: AssetSourceEvent| {
             match event {
                 AssetSourceEvent::AddedAsset(path) => {
-                    reload_parent_folders(&path, &source);
-                    reload_path(path, &source);
+                    reload_parent_folders(&path, &source, &mut infos);
+                    reload_path(path, &source, &infos);
                 }
                 // TODO: if the asset was processed and the processed file was changed, the first modified event
                 // should be skipped?
                 AssetSourceEvent::ModifiedAsset(path) | AssetSourceEvent::ModifiedMeta(path) => {
-                    reload_path(path, &source);
+                    reload_path(path, &source, &infos);
                 }
                 AssetSourceEvent::RenamedFolder { old, new } => {
-                    reload_parent_folders(&old, &source);
-                    reload_parent_folders(&new, &source);
+                    reload_parent_folders(&old, &source, &mut infos);
+                    reload_parent_folders(&new, &source, &mut infos);
                 }
                 AssetSourceEvent::RemovedAsset(path)
                 | AssetSourceEvent::RemovedFolder(path)
                 | AssetSourceEvent::AddedFolder(path) => {
-                    reload_parent_folders(&path, &source);
+                    reload_parent_folders(&path, &source, &mut infos);
                 }
                 _ => {}
             }
@@ -2236,6 +2222,11 @@ pub fn handle_internal_asset_events(world: &mut World) {
         #[cfg(any(target_arch = "wasm32", not(feature = "multi_threaded")))]
         drop(infos);
 
+        for (handle, path) in folders_to_reload {
+            // `get_path_handles` only returns Strong variants, so this is safe.
+            let index = (&handle).try_into().unwrap();
+            server.load_folder_internal(index, path);
+        }
         for path in paths_to_reload {
             server.reload_internal(path, true);
         }

@@ -417,7 +417,7 @@ pub trait LoadFromPath {
 
 impl LoadFromPath for LoadContext<'_> {
     fn load_from_path_erased(&mut self, type_id: TypeId, path: AssetRef<'static>) -> UntypedHandle {
-        self.loader().with_dynamic_type(type_id).load(path)
+        self.load_builder().load_erased(type_id, path)
     }
 }
 
