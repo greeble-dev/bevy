@@ -31,6 +31,15 @@ bevy_ui = { path = "../crates/bevy_ui" }
 bevy_platform = { path = "../crates/bevy_platform", default-features = false, features = [
   "std",
 ] }
+bevy_feathers = { path = "../crates/bevy_feathers" }
+bevy_color = { path = "../crates/bevy_color" }
+bevy_input_focus = { path = "../crates/bevy_input_focus" }
+bevy_text = { path = "../crates/bevy_text" }
+bevy_utils = { path = "../crates/bevy_utils" }
+bevy_ui_widgets = { path = "../crates/bevy_ui_widgets" }
+bevy_window = { path = "../crates/bevy_window" }
+bevy_shader = { path = "../crates/bevy_shader" }
+bevy_image = { path = "../crates/bevy_image" }
 
 # Other crates
 glam = { version = "0.32.0", default-features = false, features = [
@@ -40,6 +49,7 @@ glam = { version = "0.32.0", default-features = false, features = [
 rand = "0.10"
 chacha20 = { version = "0.10.0", default-features = false, features = ["rng"] }
 nonmax = { version = "0.5", default-features = false }
+tracing = { version = "0.1", default-features = false }
 
 [lints.clippy]
 doc_markdown = "warn"
@@ -120,4 +130,9 @@ harness = false
 [[bench]]
 name = "transform"
 path = "benches/bevy_transform/main.rs"
+harness = false
+
+[[bench]]
+name = "feathers"
+path = "benches/bevy_feathers/main.rs"
 harness = false
