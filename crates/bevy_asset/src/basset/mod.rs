@@ -36,10 +36,7 @@ use bevy_asset::{
     AssetRef, ErasedLoadedAsset, LoadContext, LoadedAsset,
 };
 use bevy_ecs::{error::BevyError, reflect::AppTypeRegistry, world::FromWorld};
-use bevy_platform::{
-    collections::{HashMap, HashSet},
-    hash::FixedHasher,
-};
+use bevy_platform::collections::{HashMap, HashSet};
 use bevy_reflect::{
     reflect_trait,
     serde::{
@@ -47,14 +44,14 @@ use bevy_reflect::{
         ReflectSerializeWithRegistry, ReflectSerializer, SerializeWithRegistry,
         TypedReflectDeserializer,
     },
-    Reflect, ReflectDeserialize, ReflectFromReflect, ReflectSerialize, TypeInfo, TypePath,
-    TypeRegistry, TypeRegistryArc,
+    PartialReflect, Reflect, ReflectDeserialize, ReflectFromReflect, ReflectSerialize, TypeInfo,
+    TypePath, TypeRegistry, TypeRegistryArc,
 };
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
     any::{type_name, TypeId},
     fmt::{Debug, Display},
-    hash::{BuildHasher, Hash, Hasher},
+    hash::{Hash, Hasher},
     ops::Deref,
     result::Result,
 };
@@ -495,14 +492,7 @@ impl ApplyContext<'_> {
 
 // XXX TODO: Review `Debug` bound.
 #[reflect_trait]
-pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {
-    // XXX TODO: `PartialReflect` exposes some utilities for `hash` and `eq`. Can
-    // they replace our implementation? See `PartialReflect::reflect_hash`. One
-    // worry is that I don't think we can enforce that at compile-time, so we'd
-    // need a runtime error. Also annoying to do `#[reflect(Hash, etc)]`.
-    fn hash(&self) -> u64;
-    fn eq(&self, other: &dyn BassetAction) -> bool;
-}
+pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {}
 
 // XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
 impl_downcast!(BassetAction);
@@ -518,28 +508,6 @@ impl TypePath for dyn BassetAction {
     }
 }
 
-impl<T> BassetAction for T
-where
-    T: Send + Sync + 'static + Hash + PartialEq + Reflect + Debug,
-{
-    // XXX TODO: This can cause ambiguities if both `Hash` and `BassetAction`
-    // are in scope. Should rename?
-    fn hash(&self) -> u64 {
-        // XXX TODO: Should we include the type name of `T` as well?
-        FixedHasher.hash_one(self)
-    }
-
-    // XXX TODO: This can cause ambiguities if both `Eq` and `BassetAction`
-    // are in scope. Should rename?
-    fn eq(&self, other: &dyn BassetAction) -> bool {
-        if let Some(downcast) = other.downcast_ref::<T>() {
-            self == downcast
-        } else {
-            false
-        }
-    }
-}
-
 // XXX TODO: Decide if member should be pub?
 #[derive(Clone)]
 pub struct ErasedBassetAction(pub Arc<dyn BassetAction>);
@@ -549,20 +517,29 @@ impl ErasedBassetAction {
         Self(action)
     }
 
-    pub fn type_path(&self) -> Option<&'static str> {
-        self.0.get_represented_type_info().map(TypeInfo::type_path)
+    pub fn type_path(&self) -> &'static str {
+        // We assume that `get_represented_type_info` is available. This is
+        // checked in `DevelopmentActionSourceSettings::with_action`.
+        (*self.0)
+            .get_represented_type_info()
+            .map(TypeInfo::type_path)
+            .unwrap_or("ERROR") // XXX TODO: What should this do?
     }
 }
 
 impl Hash for ErasedBassetAction {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u64(self.0.hash());
+        // We assume that `reflect_hash` is available. This is checked in
+        // `DevelopmentActionSourceSettings::with_action`.
+        state.write_u64((*self.0).reflect_hash().unwrap_or_default());
     }
 }
 
 impl PartialEq for ErasedBassetAction {
     fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&*other.0)
+        // We assume that `reflect_partial_eq` is available. This is checked in
+        // `DevelopmentActionSourceSettings::with_action`.
+        (*self.0).reflect_partial_eq(&*other.0) == Some(true)
     }
 }
 
@@ -579,7 +556,10 @@ impl Ord for ErasedBassetAction {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         // XXX TODO: Decide if this is good enough or if we need a proper Ord.
         // Making clients implement `Ord` for all actions is gonna suck though.
-        self.0.hash().cmp(&other.0.hash())
+        (*self.0)
+            .reflect_hash()
+            .unwrap_or_default()
+            .cmp(&(*other.0).reflect_hash().unwrap_or_default())
     }
 }
 
@@ -594,7 +574,7 @@ impl Debug for ErasedBassetAction {
 /// An action that takes a parameter struct of a known type and returns an
 /// `ErasedLoadedAsset`.
 pub trait BassetActionFunction: Send + Sync + 'static {
-    type Action: BassetAction + TypePath;
+    type Action: BassetAction + TypePath + Default;
 
     /// XXX TODO: Document.
     type Error: Into<BevyError>;
@@ -701,6 +681,14 @@ impl DevelopmentActionSourceSettings {
     }
 
     pub fn with_action<T: BassetActionFunction>(mut self, action: T) -> Self {
+        // XXX TODO: Error handling.
+        // XXX TODO: Annoying that we're checking by instantiating the type.
+        // Any other options?
+        let default = T::Action::default();
+        assert!(default.get_represented_type_info().is_some());
+        assert!(default.reflect_partial_eq(&default).is_some());
+        assert!(default.reflect_hash().is_some());
+
         self.action_type_path_to_action_function
             .insert(T::Action::type_path(), Box::new(action));
 
@@ -762,9 +750,6 @@ pub(crate) struct DevelopmentActionSource {
 pub(crate) enum FindActionFunctionError {
     #[error("Couldn't find action \"{0}\"")]
     NotFound(&'static str),
-    // XXX TODO: Review
-    #[error("Action returned `None` from `PartialReflect::get_represented_type_info`")]
-    MissingTypeInfo,
 }
 
 impl DevelopmentActionSource {
@@ -803,13 +788,11 @@ impl DevelopmentActionSource {
         &'a self,
         action: &ErasedBassetAction,
     ) -> Result<&'a dyn ErasedBassetActionFunction, FindActionFunctionError> {
-        let type_path = action
-            .type_path()
-            .ok_or(FindActionFunctionError::MissingTypeInfo)?;
+        let type_path = action.type_path();
 
         self.settings
             .action_type_path_to_action_function
-            .get(&type_path)
+            .get(type_path)
             .map(move |a| &**a)
             .ok_or(FindActionFunctionError::NotFound(type_path))
     }
@@ -1433,7 +1416,7 @@ async fn fallback_action_handler(
     action_source: &dyn ActionSource,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     // XXX TODO: Check if there's a better way to handle this.
-    if action.action.type_path() == Some(LoadPath::type_path()) {
+    if action.action.type_path() == LoadPath::type_path() {
         // XXX TODO: Is there ever a situation where the dependency key will be found
         // here? `fallback_action_handler` is currently only used by minimal and
         // published action sources, which don't support dependency keys.
@@ -1598,7 +1581,7 @@ pub mod action {
     pub struct LoadPathFunction;
 
     #[derive(Reflect, Default, Hash, PartialEq, Debug)]
-    #[reflect(BassetAction)]
+    #[reflect(BassetAction, Hash, PartialEq)]
     pub struct LoadPath {
         // XXX TODO: Should be `RootAssetPath`? Avoiding for now to simplify lifetimes and defaults.
         pub path: String,
@@ -1614,6 +1597,8 @@ pub mod action {
         // how dependency/action keys are calculated.
         //loader_name: Option<String>,
     }
+
+    impl BassetAction for LoadPath {}
 
     impl BassetActionFunction for LoadPathFunction {
         type Action = LoadPath;

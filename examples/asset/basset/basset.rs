@@ -53,11 +53,13 @@ mod action {
     pub struct JoinStringsFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetAction)]
+    #[reflect(BassetAction, PartialEq, Hash)]
     pub struct JoinStrings {
         separator: String,
         strings: Vec<AssetRef<'static>>,
     }
+
+    impl BassetAction for JoinStrings {}
 
     impl BassetActionFunction for JoinStringsFunction {
         type Action = JoinStrings;
@@ -86,10 +88,12 @@ mod action {
     pub struct UppercaseStringFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetAction)]
+    #[reflect(BassetAction, PartialEq, Hash)]
     pub struct UppercaseString {
         string: AssetRef<'static>,
     }
+
+    impl BassetAction for UppercaseString {}
 
     impl BassetActionFunction for UppercaseStringFunction {
         type Action = UppercaseString;
@@ -117,7 +121,7 @@ mod action {
     pub struct AcmeSceneFromGltfFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetAction)]
+    #[reflect(BassetAction, PartialEq, Hash)]
     pub struct AcmeSceneFromGltf {
         gltf: AssetRef<'static>,
         // XXX TODO: Would be nice to support selecting a scene. but that's
@@ -126,6 +130,8 @@ mod action {
         //#[serde(default)]
         //scene: Option<String>,
     }
+
+    impl BassetAction for AcmeSceneFromGltf {}
 
     impl BassetActionFunction for AcmeSceneFromGltfFunction {
         type Action = AcmeSceneFromGltf;
@@ -149,11 +155,13 @@ mod action {
     pub struct MeshletFromMeshFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetAction)]
+    #[reflect(BassetAction, PartialEq, Hash)]
     pub struct MeshletFromMesh {
         pub mesh: AssetRef<'static>, // XXX TODO: Better if we had a typed asset ref?
         pub vertex_position_quantization_factor: Option<u8>,
     }
+
+    impl BassetAction for MeshletFromMesh {}
 
     impl MeshletFromMesh {
         pub fn new(mesh: impl Into<AssetRef<'static>>) -> Self {
@@ -205,12 +213,14 @@ mod action {
     pub struct ConvertAcmeSceneMeshesToMeshletsFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetAction)]
+    #[reflect(BassetAction, PartialEq, Hash)]
     pub struct ConvertAcmeSceneMeshesToMeshlets {
         scene: AssetRef<'static>,
         #[reflect(default)]
         vertex_position_quantization_factor: Option<u8>,
     }
+
+    impl BassetAction for ConvertAcmeSceneMeshesToMeshlets {}
 
     impl BassetActionFunction for ConvertAcmeSceneMeshesToMeshletsFunction {
         type Action = ConvertAcmeSceneMeshesToMeshlets;
@@ -525,7 +535,7 @@ mod acme {
     ) -> &'a T {
         asset
             .get_labeled_by_id(sub_asset_handle.id().untyped())
-            .expect("XXX TODO")
+            .unwrap_or_else(|| panic!("XXX TODO {:?}", sub_asset_handle.path()))
             .get::<T>()
             .expect("XXX TODO")
     }
@@ -534,10 +544,6 @@ mod acme {
         let mut entities = Vec::<AcmeEntity>::new();
 
         let gltf = asset.get::<Gltf>().expect("XXX TODO");
-
-        for material in &gltf.materials {
-            std::dbg!(material);
-        }
 
         // Add all the root nodes to the stack.
         let mut stack = gltf
