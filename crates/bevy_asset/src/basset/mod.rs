@@ -47,8 +47,8 @@ use bevy_reflect::{
         ReflectSerializeWithRegistry, ReflectSerializer, SerializeWithRegistry,
         TypedReflectDeserializer,
     },
-    Reflect, ReflectDeserialize, ReflectFromReflect, ReflectSerialize, TypePath, TypeRegistry,
-    TypeRegistryArc,
+    Reflect, ReflectDeserialize, ReflectFromReflect, ReflectSerialize, TypeInfo, TypePath,
+    TypeRegistry, TypeRegistryArc,
 };
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
@@ -70,6 +70,7 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
+use thiserror::Error;
 use tracing::{debug, info, warn};
 
 mod blob;
@@ -501,7 +502,6 @@ pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {
     // need a runtime error. Also annoying to do `#[reflect(Hash, etc)]`.
     fn hash(&self) -> u64;
     fn eq(&self, other: &dyn BassetAction) -> bool;
-    fn type_name(&self) -> &'static str;
 }
 
 // XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
@@ -538,10 +538,6 @@ where
             false
         }
     }
-
-    fn type_name(&self) -> &'static str {
-        type_name::<T>()
-    }
 }
 
 // XXX TODO: Decide if member should be pub?
@@ -553,12 +549,8 @@ impl ErasedBassetAction {
         Self(action)
     }
 
-    pub fn type_id(&self) -> TypeId {
-        self.0.type_id()
-    }
-
-    pub fn type_name(&self) -> &'static str {
-        self.0.type_name()
+    pub fn type_path(&self) -> Option<&'static str> {
+        self.0.get_represented_type_info().map(TypeInfo::type_path)
     }
 }
 
@@ -602,7 +594,7 @@ impl Debug for ErasedBassetAction {
 /// An action that takes a parameter struct of a known type and returns an
 /// `ErasedLoadedAsset`.
 pub trait BassetActionFunction: Send + Sync + 'static {
-    type Action: BassetAction;
+    type Action: BassetAction + TypePath;
 
     /// XXX TODO: Document.
     type Error: Into<BevyError>;
@@ -662,14 +654,16 @@ pub struct DevelopmentActionSourceSettings {
     validate_dependency_cache: bool,
     validate_action_cache: bool,
     // XXX TODO: Better to use `TypeId` or type name?
-    action_type_id_to_action_function: HashMap<TypeId, Box<dyn ErasedBassetActionFunction>>,
+    action_type_path_to_action_function: HashMap<&'static str, Box<dyn ErasedBassetActionFunction>>,
+    // XXX TODO: We're using type name for the asset but type path for the action?
+    // Might be necessary but double check.
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
 }
 
 impl Default for DevelopmentActionSourceSettings {
     fn default() -> Self {
-        let mut action_type_id_to_action_function =
-            HashMap::<TypeId, Box<dyn ErasedBassetActionFunction>>::new();
+        let mut action_type_path_to_action_function =
+            HashMap::<&'static str, Box<dyn ErasedBassetActionFunction>>::new();
 
         // XXX TODO: Review if we should be automatically adding `LoadPath`
         // here. Maybe should be added afterwards so it's not exposed to the
@@ -677,14 +671,14 @@ impl Default for DevelopmentActionSourceSettings {
         // It's likely the `LoadPath` will be the most common action, so making
         // `DevelopmentActionSource::action_function` check for `LoadPath` before
         // the hash lookup might pay off.
-        action_type_id_to_action_function
-            .insert(TypeId::of::<LoadPath>(), Box::new(LoadPathFunction));
+        action_type_path_to_action_function
+            .insert(LoadPath::type_path(), Box::new(LoadPathFunction));
 
         Self {
             file_cache_path: Default::default(),
             validate_dependency_cache: Default::default(),
             validate_action_cache: Default::default(),
-            action_type_id_to_action_function,
+            action_type_path_to_action_function,
             asset_type_name_to_saver: Default::default(),
         }
     }
@@ -707,8 +701,8 @@ impl DevelopmentActionSourceSettings {
     }
 
     pub fn with_action<T: BassetActionFunction>(mut self, action: T) -> Self {
-        self.action_type_id_to_action_function
-            .insert(TypeId::of::<T::Action>(), Box::new(action));
+        self.action_type_path_to_action_function
+            .insert(T::Action::type_path(), Box::new(action));
 
         self
     }
@@ -764,6 +758,15 @@ pub(crate) struct DevelopmentActionSource {
     action_cache: Option<MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>>,
 }
 
+#[derive(Error, Debug)]
+pub(crate) enum FindActionFunctionError {
+    #[error("Couldn't find action \"{0}\"")]
+    NotFound(&'static str),
+    // XXX TODO: Review
+    #[error("Action returned `None` from `PartialReflect::get_represented_type_info`")]
+    MissingTypeInfo,
+}
+
 impl DevelopmentActionSource {
     pub(crate) fn new(
         settings: Arc<DevelopmentActionSourceSettings>,
@@ -798,12 +801,17 @@ impl DevelopmentActionSource {
     // XXX TODO: Clarify that this is mapping the `BassetAction` type name to action.
     pub(crate) fn action_function<'a>(
         &'a self,
-        type_id: TypeId,
-    ) -> Option<&'a dyn ErasedBassetActionFunction> {
+        action: &ErasedBassetAction,
+    ) -> Result<&'a dyn ErasedBassetActionFunction, FindActionFunctionError> {
+        let type_path = action
+            .type_path()
+            .ok_or(FindActionFunctionError::MissingTypeInfo)?;
+
         self.settings
-            .action_type_id_to_action_function
-            .get(&type_id)
+            .action_type_path_to_action_function
+            .get(&type_path)
             .map(move |a| &**a)
+            .ok_or(FindActionFunctionError::NotFound(type_path))
     }
 
     pub(crate) fn saver<'a>(
@@ -824,15 +832,7 @@ impl ActionSource for DevelopmentActionSource {
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         Box::pin(async move {
-            let action_function =
-                self.action_function(action.action().type_id())
-                    .ok_or_else(|| {
-                        // XXX TODO: Clarify error?
-                        BevyError::from(format!(
-                            "Couldn't find action \"{}\")",
-                            action.action().type_name()
-                        ))
-                    })?;
+            let action_function = self.action_function(action.action())?;
 
             // XXX TODO: Avoid clone?
             // XXX TODO: Could have a fast path here since we know the dependency key
@@ -1069,15 +1069,7 @@ impl ActionSource for DevelopmentActionSource {
 
                 match &input_asset {
                     PublishDependency::Load(action) => {
-                        let action_function = self
-                            .action_function(action.action().type_id())
-                            .ok_or_else(|| {
-                                // XXX TODO: Clarify error?
-                                BevyError::from(format!(
-                                    "Couldn't find action \"{}\")",
-                                    action.action().type_name()
-                                ))
-                            })?;
+                        let action_function = self.action_function(action.action())?;
 
                         // XXX TODO: Review all the code in here to avoid duplication.
                         //
@@ -1441,7 +1433,7 @@ async fn fallback_action_handler(
     action_source: &dyn ActionSource,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     // XXX TODO: Check if there's a better way to handle this.
-    if action.action.type_id() == TypeId::of::<LoadPath>() {
+    if action.action.type_path() == Some(LoadPath::type_path()) {
         // XXX TODO: Is there ever a situation where the dependency key will be found
         // here? `fallback_action_handler` is currently only used by minimal and
         // published action sources, which don't support dependency keys.
