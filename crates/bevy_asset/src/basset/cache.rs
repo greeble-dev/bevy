@@ -487,21 +487,12 @@ pub(crate) struct DependencyCacheValue {
     // XXX TODO: Consider storing more info for debugging. Loader name for one.
 }
 
-fn collect_sort_dedup<T: Ord + PartialEq>(iter: impl Iterator<Item = T>) -> Vec<T> {
-    let mut value = iter.collect::<Vec<_>>();
-
-    value.sort();
-    value.dedup();
-
-    value
-}
-
 // XXX TODO: Review. This is the same as `LoaderDependency` but with a dependency
 // key. Check if we can avoid duplication or restructure to be nicer. Note that
 // we shouldn't - in theory - ever have a mix of None and Some dependency keys.
 // We should be consistently keying everything or nothing. Check if that's ever true
 // and maybe the dependency key yes/no decision can be moved higher up.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, Reflect)]
+#[derive(Clone, PartialEq, Eq, Debug, Reflect)]
 pub struct CacheLoaderDependency(pub LoaderDependency, pub DependencyCacheKey);
 
 impl CacheLoaderDependency {
@@ -519,8 +510,8 @@ impl DependencyCacheValue {
         external_dependees: impl Iterator<Item = RootAssetRef>,
     ) -> Self {
         Self {
-            loader_dependees: collect_sort_dedup(loader_dependees),
-            external_dependees: collect_sort_dedup(external_dependees),
+            loader_dependees: loader_dependees.collect(),
+            external_dependees: external_dependees.collect(),
         }
     }
 
@@ -583,10 +574,12 @@ impl ActionCacheKey {
         self.0.as_bytes()
     }
 
-    pub(crate) fn new(
-        dependency_key: DependencyCacheKey,
-        dependees: impl Iterator<Item = ActionCacheKey>,
-    ) -> Self {
+    pub(crate) fn new(dependency_key: DependencyCacheKey, dependees: &[ActionCacheKey]) -> Self {
+        // Sort and de-dupe the keys for consistency.
+        let mut sorted_dependee_keys = dependees.to_vec();
+        sorted_dependee_keys.sort();
+        sorted_dependee_keys.dedup();
+
         // XXX TODO: In theory we could make the action key the same as the
         // dependency key if there's zero dependees.
         //
@@ -598,11 +591,12 @@ impl ActionCacheKey {
         //     it kinda seems to work.
 
         // XXX TODO: Should hasher be seeded?
+
         let mut hasher = blake3::Hasher::new();
 
         hasher.update(&dependency_key.as_bytes());
 
-        for dependee in dependees {
+        for dependee in sorted_dependee_keys {
             hasher.update(&dependee.as_bytes());
         }
 
@@ -749,6 +743,76 @@ mod hex {
                     );
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn action_cache_key() {
+        fn fake_hash(value: u8) -> BassetHash {
+            let mut result = [0u8; 32];
+            result[0] = value;
+
+            BassetHash(result)
+        }
+
+        let d0 = DependencyCacheKey(fake_hash(1));
+        let d1 = DependencyCacheKey(fake_hash(2));
+        let a0 = ActionCacheKey(fake_hash(3));
+        let a1 = ActionCacheKey(fake_hash(4));
+        let a2 = ActionCacheKey(fake_hash(5));
+
+        // Identical.
+        assert_eq!(
+            ActionCacheKey::new(d0, &[a0, a1]),
+            ActionCacheKey::new(d0, &[a0, a1])
+        );
+
+        // Different dependency key.
+        assert_ne!(
+            ActionCacheKey::new(d0, &[a0, a1]),
+            ActionCacheKey::new(d1, &[a0, a1])
+        );
+
+        // Different dependees.
+        {
+            assert_ne!(
+                ActionCacheKey::new(d0, &[a0, a1]),
+                ActionCacheKey::new(d0, &[])
+            );
+
+            assert_ne!(
+                ActionCacheKey::new(d0, &[a0, a1]),
+                ActionCacheKey::new(d0, &[a0])
+            );
+
+            assert_ne!(
+                ActionCacheKey::new(d0, &[a0, a1]),
+                ActionCacheKey::new(d0, &[a0, a1, a2])
+            );
+        }
+
+        // Ordering shouldn't matter.
+        assert_eq!(
+            ActionCacheKey::new(d0, &[a0, a1]),
+            ActionCacheKey::new(d0, &[a1, a0])
+        );
+
+        // Duplication shouldn't matter.
+        {
+            assert_eq!(
+                ActionCacheKey::new(d0, &[a0, a1]),
+                ActionCacheKey::new(d0, &[a0, a0, a1])
+            );
+
+            assert_eq!(
+                ActionCacheKey::new(d0, &[a0, a1]),
+                ActionCacheKey::new(d0, &[a0, a1, a0, a1])
+            );
         }
     }
 }

@@ -339,7 +339,7 @@ impl<A: Asset> From<A> for LoadedAsset<A> {
 }
 
 /// How an asset loader depends on paths and actions. XXX TODO: Clarify?
-#[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, Reflect)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Reflect)]
 pub enum LoaderDependency {
     /// The loader will load this path or action through a normal load call. XXX TODO: Clarify?
     Load(RootAssetRef),

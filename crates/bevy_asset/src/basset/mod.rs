@@ -185,7 +185,7 @@ impl From<String> for RootAssetPath<'static> {
 }
 
 /// An `AssetRef` without a label.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug, Reflect)]
+#[derive(Eq, PartialEq, Hash, Clone, Debug, Reflect)]
 #[reflect(opaque)]
 #[reflect(SerializeWithRegistry, DeserializeWithRegistry)]
 pub struct RootAssetRef {
@@ -544,24 +544,6 @@ impl PartialEq for ErasedBassetAction {
 }
 
 impl Eq for ErasedBassetAction {}
-
-// XXX TODO: Can't we automatically derive this since we've implemented `Ord`?
-impl PartialOrd for ErasedBassetAction {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ErasedBassetAction {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        // XXX TODO: Decide if this is good enough or if we need a proper Ord.
-        // Making clients implement `Ord` for all actions is gonna suck though.
-        (*self.0)
-            .reflect_hash()
-            .unwrap_or_default()
-            .cmp(&(*other.0).reflect_hash().unwrap_or_default())
-    }
-}
 
 impl Debug for ErasedBassetAction {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

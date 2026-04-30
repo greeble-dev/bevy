@@ -742,7 +742,7 @@ pub(crate) fn normalize_path(path: &Path) -> PathBuf {
 // XXX TODO: Reconsider `pub(crate)` on members. Convenient for `impl From<AssetRef> for RootAssetRef`,
 // to construct an AssetRef, but feels like sitting on the fence - if we need it then things outside
 // of `bevy_asset` should be able to use it. Either make pub or add a constructor.
-#[derive(Reflect, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+#[derive(Reflect, Eq, PartialEq, Hash, Clone)]
 // XXX TODO?
 #[reflect(opaque)]
 #[reflect(SerializeWithRegistry, DeserializeWithRegistry)]

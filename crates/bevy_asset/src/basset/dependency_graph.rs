@@ -117,7 +117,14 @@ impl InternalGraph {
             // We found valid nodes for all dependees, so we're valid. Create our
             // node and link it to the dependees.
 
-            let action_key = ActionCacheKey::new(dependency_key, resolved.iter().map(|(_, k)| *k));
+            let action_key = ActionCacheKey::new(
+                dependency_key,
+                resolved
+                    .iter()
+                    .map(|(_, k)| *k)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            );
 
             let node_id = self
                 .graph
@@ -171,7 +178,7 @@ impl InternalGraph {
             };
         }
 
-        let action_key = ActionCacheKey::new(dependency_key, core::iter::empty());
+        let action_key = ActionCacheKey::new(dependency_key, &[]);
 
         let node_id = self
             .graph
@@ -232,7 +239,7 @@ impl Debug for InternalGraph {
         );
 
         // XXX TODO: Maybe petgraph has this built-in somewhere?
-        let mut root_nodes = self
+        let root_nodes = self
             .graph
             .nodes_iter()
             .filter(|&n| {
@@ -243,8 +250,6 @@ impl Debug for InternalGraph {
             })
             .map(|n| node_to_path[&n].clone())
             .collect::<Vec<_>>();
-
-        root_nodes.sort();
 
         let mut stack = Vec::<(NodeIndex, usize)>::new();
 
