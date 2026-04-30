@@ -1392,16 +1392,17 @@ pub trait ActionSourceBuilder: Send + Sync + 'static {
 }
 
 // XXX TODO: Review use cases.
-async fn fallback_action_handler(
+// XXX TODO: Little bit scary that the action source itself calls this and passes self
+// as a parameter. Can we avoid? See also below where it's unclear if we need the dependency key.
+async fn try_load_path_action(
     action: &RootAssetRef,
     asset_server: &AssetServer,
     action_source: &dyn ActionSource,
-) -> Result<ErasedLoadedAsset, BevyError> {
+) -> Option<Result<ErasedLoadedAsset, BevyError>> {
     // XXX TODO: Check if there's a better way to handle this.
     if action.action.type_path() == LoadPath::type_path() {
         // XXX TODO: Is there ever a situation where the dependency key will be found
-        // here? `fallback_action_handler` is currently only used by minimal and
-        // published action sources, which don't support dependency keys.
+        // here? `LoadPath` shouldn't support dependency keys.
         // XXX TODO: Avoid clone?
         // XXX TODO: Could have a fast path here since we know the dependency
         // key is for an action?
@@ -1413,15 +1414,16 @@ async fn fallback_action_handler(
             None
         };
 
-        ErasedBassetActionFunction::apply(
-            &LoadPathFunction,
-            ApplyContext::new(asset_server, dependency_key),
-            &action.action,
+        Some(
+            ErasedBassetActionFunction::apply(
+                &LoadPathFunction,
+                ApplyContext::new(asset_server, dependency_key),
+                &action.action,
+            )
+            .await,
         )
-        .await
     } else {
-        // XXX TODO?
-        Err(AssetReaderError::NotFound(action.to_string().into()).into())
+        None
     }
 }
 
@@ -1451,7 +1453,14 @@ impl ActionSource for MinimalActionSource {
         // entire asset server.
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
-        Box::pin(async move { fallback_action_handler(action, asset_server, self).await })
+        Box::pin(async move {
+            try_load_path_action(action, asset_server, self)
+                .await
+                // XXX TODO: Review if this is the appropriate error.
+                .unwrap_or_else(
+                    || Err(AssetReaderError::NotFound(action.to_string().into()).into()),
+                )
+        })
     }
 }
 
@@ -1488,15 +1497,22 @@ impl ActionSource for PublishedActionSource {
         asset_server: &'a AssetServer,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
         Box::pin(async move {
-            // XXX TODO: Review how we should be referencing assets. Maybe want
-            // a distinct type for safety?
+            // Early out if we've got a load path action. They're guaranteed to
+            // not be published - only the file they're loading and the loader
+            // dependencies are published.
+            if let Some(load_path_action) = try_load_path_action(action, asset_server, self).await {
+                return load_path_action;
+            }
+
+            // XXX TODO: Review if we should be treating these strings as
+            // reliable paths. Maybe want a distinct type for safety at least?
             let action_string = action.to_string();
 
             // XXX TODO: The below duplicates a fair amount of `read_standalone_asset`.
             // Refactor?
 
             let Ok(mut readers) = self.pack_file.action(&action_string) else {
-                return fallback_action_handler(action, asset_server, self).await;
+                return Err(AssetReaderError::NotFound(action.to_string().into()).into());
             };
 
             let Some(mut meta_reader) = readers.meta else {
