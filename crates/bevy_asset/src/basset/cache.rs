@@ -534,7 +534,9 @@ impl DependencyCacheValue {
 
 impl FileCacheValue for Arc<DependencyCacheValue> {
     async fn write(&self, file: &mut File, registry: &TypeRegistryArc) -> Result<(), BevyError> {
-        // XXX TODO: Should have a serialized struct that includes a version number and an opaque value.
+        // XXX TODO: Consider adding more information to the file for debugging and validation. E.g. storing the
+        // original action text.
+        // XXX TODO: Does this file need a version number? Arguably implicit in the hash, but maybe add one for safety.
         // XXX TODO: Consider non-pretty serialization. Will be annoying for debugging,
         // but files will be a bit smaller and might be faster to save?
 

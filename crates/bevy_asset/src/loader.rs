@@ -338,12 +338,15 @@ impl<A: Asset> From<A> for LoadedAsset<A> {
     }
 }
 
-/// How an asset loader depends on paths and actions. XXX TODO: Clarify?
+/// Describes how an asset loader depends on paths and actions.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Reflect)]
 pub enum LoaderDependency {
-    /// The loader will load this path or action through a normal load call. XXX TODO: Clarify?
+    /// The loader will apply this action through a normal load call. This means
+    /// the action might itself have dependencies.
     Load(RootAssetRef),
-    /// The loader will use the bytes of the file at this path. XXX TODO: Reconsider name? Bit vague.
+    /// The loader will only read the bytes of the file at this path (usually
+    /// through `LoaderContext::read_asset_bytes`). This means it has no further
+    /// dependencies.
     File(RootAssetPath<'static>),
 }
 
