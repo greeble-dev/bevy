@@ -1,1 +1,9 @@
-(root: Action((name: "basset::action::AcmeSceneFromGltf", params: (gltf: Path("Duck.glb")))))
+(
+	root: (
+		action: {
+			"basset::action::AcmeSceneFromGltf": (
+				gltf: "Duck.glb"
+			)
+		}
+	)
+)

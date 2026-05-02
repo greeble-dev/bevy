@@ -184,7 +184,9 @@ impl AssetServer {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn read_loaders(&self) -> RwLockReadGuard<'_, AssetLoaders> {
+    // XXX: Was changed from private to `pub(crate)` for `ApplyContext::load_from_reader`.
+    // Consider alternatives.
+    pub(crate) fn read_loaders(&self) -> RwLockReadGuard<'_, AssetLoaders> {
         self.data
             .loaders
             .read()

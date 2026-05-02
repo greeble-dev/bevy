@@ -14,7 +14,7 @@ use crate::{
         },
         standalone::{
             load_standalone_asset, read_standalone_asset, save_standalone_asset,
-            write_standalone_asset,
+            write_standalone_asset, StandaloneAssetData,
         },
     },
     io::{AssetReaderError, AssetSourceId, AssetSources},
@@ -74,7 +74,7 @@ mod blob;
 pub mod cache;
 mod dependency_graph;
 pub mod publisher;
-mod standalone;
+pub mod standalone;
 
 // XXX TODO: Is this necessary any more? Maybe just fold into `AssetPlugin`.
 pub struct BassetPlugin;
@@ -430,9 +430,8 @@ impl<'a> ApplyContext<'a> {
         }
     }
 
-    // XXX TODO: Don't expose this. Might only be used by `LoadPath`, so we should
-    // probably move some of that logic into ApplyContext.
-    pub(crate) fn asset_server(&'a self) -> &'a AssetServer {
+    // XXX TODO: Try to avoid exposing this?
+    pub fn asset_server(&'a self) -> &'a AssetServer {
         self.asset_server
     }
 }
@@ -480,13 +479,63 @@ impl ApplyContext<'_> {
         }
     }
 
-    pub async fn finish<A: Asset>(self, asset: A) -> ErasedLoadedAsset {
+    // XXX TODO: This is a slightly odd function to support saving and reloading
+    // within an action - see `CompressImage` for use case. Consider alternatives.
+    // Also need to think through what happens if the asset has dependencies
+    // or path relative stuff.
+    pub async fn load_from_reader(
+        &self,
+        reader: &mut dyn Reader,
+        loader_type_name: &str,
+        settings: &dyn Settings,
+    ) -> Result<ErasedLoadedAsset, BevyError> {
+        let maybe_loader = self
+            .asset_server
+            .read_loaders()
+            .get_by_name(loader_type_name)
+            .expect("XXX TODO");
+
+        let loader = maybe_loader.get().await.expect("XXX TODO");
+
+        let load_context = LoadContext::new(
+            self.asset_server,
+            // XXX TODO: Does this matter?
+            AssetPath::parse("XXX TODO"),
+            // XXX TODO: Review `load_dependencies` value?
+            true,
+            false,
+            None,
+        );
+
+        loader.load(reader, settings, load_context).await
+    }
+
+    pub fn finish<A: Asset>(self, asset: A) -> BassetActionOutput {
         let mut loaded_asset = LoadedAsset::new_with_dependencies(asset);
 
         loaded_asset.loader_dependencies = self.loader_dependencies;
         loaded_asset.dependency_key = self.dependency_key;
 
-        loaded_asset.into()
+        BassetActionOutput {
+            asset: loaded_asset.into(),
+            saved: None,
+        }
+    }
+
+    pub fn finish_erased_saved(
+        self,
+        mut asset: ErasedLoadedAsset,
+        saved: StandaloneAssetData,
+    ) -> BassetActionOutput {
+        // XXX TODO: Note that we're overwriting the asset's own dependencies and
+        // key. Check that this is correct.
+        asset.loader_dependencies = self.loader_dependencies;
+        asset.dependency_key = self.dependency_key;
+
+        BassetActionOutput {
+            asset,
+            saved: Some(saved),
+        }
     }
 }
 
@@ -551,6 +600,13 @@ impl Debug for ErasedBassetAction {
     }
 }
 
+pub struct BassetActionOutput {
+    pub asset: ErasedLoadedAsset,
+    // XXX TODO: This value is only needed for the action cache. Is there any
+    // benefit to telling the action that it won't be used?
+    pub saved: Option<StandaloneAssetData>,
+}
+
 /// XXX TODO: Document.
 ///
 /// An action that takes a parameter struct of a known type and returns an
@@ -570,7 +626,7 @@ pub trait BassetActionFunction: Send + Sync + 'static {
         &self,
         context: ApplyContext<'_>,
         action: &Self::Action,
-    ) -> impl ConditionalSendFuture<Output = Result<ErasedLoadedAsset, Self::Error>>;
+    ) -> impl ConditionalSendFuture<Output = Result<BassetActionOutput, Self::Error>>;
 
     /// XXX TODO: Consider name. It implies publishable as well?
     fn cacheable(&self) -> bool {
@@ -585,7 +641,7 @@ pub trait ErasedBassetActionFunction: Send + Sync + 'static {
         // XXX TODO: Could consider taking `&' dyn BassetAction`? More general,
         // but also more risk if we need something from `ErasedBassetAction` like a debug type name.
         action: &'a ErasedBassetAction,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
+    ) -> BoxedFuture<'a, Result<BassetActionOutput, BevyError>>;
 
     fn cacheable(&self) -> bool;
 }
@@ -598,7 +654,7 @@ where
         &'a self,
         context: ApplyContext<'a>,
         action: &'a ErasedBassetAction,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+    ) -> BoxedFuture<'a, Result<BassetActionOutput, BevyError>> {
         Box::pin(async move {
             let action = action.0.downcast_ref::<T::Action>().expect("XXX TODO");
 
@@ -662,6 +718,9 @@ impl DevelopmentActionSourceSettings {
         self
     }
 
+    // XXX TODO: Rename since we're now taking a function rather than the action?
+    // Or maybe we should make `BassetAction` have a reference to its function
+    // rather than vice versa?
     pub fn with_action<T: BassetActionFunction>(mut self, action: T) -> Self {
         // XXX TODO: Error handling.
         // XXX TODO: Annoying that we're checking by instantiating the type.
@@ -834,7 +893,7 @@ impl ActionSource for DevelopmentActionSource {
 
             let apply_context = ApplyContext::new(asset_server, dependency_key);
 
-            let asset = action_function
+            let output = action_function
                 .apply(apply_context, action.action())
                 .await?;
 
@@ -851,25 +910,31 @@ impl ActionSource for DevelopmentActionSource {
             */
 
             // XXX TODO: Is settings parameter correct?
-            let action_key = if let Some(future) = self.register_dependencies(action, None, &asset)
-            {
-                future.await
-            } else {
-                None
-            };
+            let action_key =
+                if let Some(future) = self.register_dependencies(action, None, &output.asset) {
+                    future.await
+                } else {
+                    None
+                };
 
             if let Some(action_key) = action_key {
                 if action_function.cacheable()
                     && let Some(action_cache) = &self.action_cache
                 {
-                    if let Some((saver, settings)) = self.saver(asset.asset_type_name()) {
+                    if let Some(saved) = output.saved {
+                        // XXX TODO: Slightly duplicates the other path. Refactor?
+                        let standalone_asset_blob = write_standalone_asset(&saved)?;
+                        action_cache.put(action_key, standalone_asset_blob.into(), action);
+                    } else if let Some((saver, settings)) =
+                        self.saver(output.asset.asset_type_name())
+                    {
                         // XXX TODO: Support action outputs with sub-assets. Could be troublesome
                         // as there's two potential cases:
                         //
                         // 1. The asset saver for the root asset expects to be given the sub-assets.
                         // 2. The root asset and sub-assets should be saved by separate savers.
                         assert!(
-                            asset.labeled_assets.is_empty(),
+                            output.asset.labeled_assets.is_empty(),
                             "XXX TODO. Not supported yet. {action:?}",
                         );
 
@@ -881,13 +946,13 @@ impl ActionSource for DevelopmentActionSource {
                             .expect("XXX TODO");
 
                         let standalone_asset =
-                            save_standalone_asset(&asset, &*loader, saver, settings).await?;
+                            save_standalone_asset(&output.asset, &*loader, saver, settings).await?;
 
                         let standalone_asset_blob = write_standalone_asset(&standalone_asset)?;
 
                         action_cache.put(action_key, standalone_asset_blob.into(), action);
                     } else {
-                        let type_name = asset.asset_type_name();
+                        let type_name = output.asset.asset_type_name();
                         debug!(?type_name, ?action, "Cache ineligible, no saver for type.");
                     }
                 }
@@ -898,7 +963,7 @@ impl ActionSource for DevelopmentActionSource {
                 );
             }
 
-            Ok(asset)
+            Ok(output.asset)
         })
     }
 
@@ -1420,7 +1485,8 @@ async fn try_load_path_action(
                 ApplyContext::new(asset_server, dependency_key),
                 &action.action,
             )
-            .await,
+            .await
+            .map(|output| output.asset),
         )
     } else {
         None
@@ -1606,7 +1672,7 @@ pub mod action {
             &self,
             context: ApplyContext<'_>,
             action: &Self::Action,
-        ) -> Result<ErasedLoadedAsset, Self::Error> {
+        ) -> Result<BassetActionOutput, Self::Error> {
             // XXX TODO: Try to avoid clones? But will mean changing lifetimes
             // of `BassetAction::apply`.
             let path = AssetPath::try_parse(&action.path)?.into_owned();
@@ -1710,9 +1776,12 @@ pub mod action {
 
             // XXX TODO: Should we be resolving the label here? See also comment
             // on `LoadPath` - we should probably rely on the `AssetRef` to handle that.
-            asset
-                .take_labeled(path.label_cow())
-                .map_err(|_| format!("Couldn't find labeled asset \"{path:?}\".").into())
+            Ok(BassetActionOutput {
+                asset: asset.take_labeled(path.label_cow()).map_err(|_| {
+                    BevyError::from(format!("Couldn't find labeled asset \"{path:?}\"."))
+                })?,
+                saved: None,
+            })
         }
 
         fn cacheable(&self) -> bool {

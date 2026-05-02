@@ -11,12 +11,10 @@ use bevy::{
     },
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     ecs::error::BevyError,
+    image::CompressedImageSaver,
     light::CascadeShadowConfigBuilder,
     log::LogPlugin,
-    pbr::experimental::meshlet::{
-        MeshletMesh, MeshletMesh3d, MeshletMeshSaver, MeshletPlugin,
-        MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR,
-    },
+    pbr::experimental::meshlet::*,
     prelude::*,
     reflect::{
         serde::{ReflectDeserializer, ReflectSerializer},
@@ -45,12 +43,15 @@ use core::{marker::PhantomData, ops::Deref, result::Result};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
-use crate::action::MeshletFromMesh;
-
 mod action {
-    use super::*;
+    use bevy_asset::{
+        basset::standalone::StandaloneAssetData,
+        io::VecReader,
+        meta::{AssetAction, AssetMeta, AssetMetaDyn},
+        saver::ErasedAssetSaver,
+    };
 
-    pub struct JoinStringsFunction;
+    use super::*;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetAction, PartialEq, Hash)]
@@ -61,6 +62,8 @@ mod action {
 
     impl BassetAction for JoinStrings {}
 
+    pub struct JoinStringsFunction;
+
     impl BassetActionFunction for JoinStringsFunction {
         type Action = JoinStrings;
         type Error = BevyError;
@@ -69,7 +72,7 @@ mod action {
             &self,
             mut context: ApplyContext<'_>,
             action: &Self::Action,
-        ) -> Result<ErasedLoadedAsset, Self::Error> {
+        ) -> Result<BassetActionOutput, Self::Error> {
             let mut strings = Vec::new();
 
             for path in &action.strings {
@@ -81,11 +84,9 @@ mod action {
                 .reduce(|l, r| l + &action.separator + &r)
                 .unwrap_or("".to_owned());
 
-            Ok(context.finish(demo::StringAsset(joined)).await)
+            Ok(context.finish(demo::StringAsset(joined)))
         }
     }
-
-    pub struct UppercaseStringFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetAction, PartialEq, Hash)]
@@ -95,6 +96,8 @@ mod action {
 
     impl BassetAction for UppercaseString {}
 
+    pub struct UppercaseStringFunction;
+
     impl BassetActionFunction for UppercaseStringFunction {
         type Action = UppercaseString;
         type Error = BevyError;
@@ -103,7 +106,7 @@ mod action {
             &self,
             mut context: ApplyContext<'_>,
             action: &Self::Action,
-        ) -> Result<ErasedLoadedAsset, Self::Error> {
+        ) -> Result<BassetActionOutput, Self::Error> {
             let string = demo::StringAsset(
                 context
                     .load_dependee::<demo::StringAsset>(&action.string)
@@ -112,14 +115,12 @@ mod action {
                     .to_uppercase(),
             );
 
-            Ok(context.finish(string).await)
+            Ok(context.finish(string))
         }
     }
 
     /// Creates an `AcmeScene` from a `Gltf`. This does not respect the glTF's
     /// scenes list - it just takes every node.
-    pub struct AcmeSceneFromGltfFunction;
-
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetAction, PartialEq, Hash)]
     pub struct AcmeSceneFromGltf {
@@ -133,6 +134,8 @@ mod action {
 
     impl BassetAction for AcmeSceneFromGltf {}
 
+    pub struct AcmeSceneFromGltfFunction;
+
     impl BassetActionFunction for AcmeSceneFromGltfFunction {
         type Action = AcmeSceneFromGltf;
         type Error = BevyError;
@@ -141,14 +144,14 @@ mod action {
             &self,
             mut context: ApplyContext<'_>,
             action: &Self::Action,
-        ) -> Result<ErasedLoadedAsset, Self::Error> {
+        ) -> Result<BassetActionOutput, Self::Error> {
             let gltf = context.erased_load_dependee(&action.gltf).await?;
 
             let scene = acme::from_gltf(&gltf);
 
             // XXX TODO: What about dependencies?
 
-            Ok(context.finish(scene).await)
+            Ok(context.finish(scene))
         }
     }
 
@@ -160,8 +163,6 @@ mod action {
         pub mesh: AssetRef<'static>, // XXX TODO: Better if we had a typed asset ref?
         pub vertex_position_quantization_factor: Option<u8>,
     }
-
-    impl BassetAction for MeshletFromMesh {}
 
     impl MeshletFromMesh {
         pub fn new(mesh: impl Into<AssetRef<'static>>) -> Self {
@@ -189,6 +190,8 @@ mod action {
         }
     }
 
+    impl BassetAction for MeshletFromMesh {}
+
     impl BassetActionFunction for MeshletFromMeshFunction {
         type Action = MeshletFromMesh;
         type Error = BevyError;
@@ -197,7 +200,7 @@ mod action {
             &self,
             mut context: ApplyContext<'_>,
             action: &Self::Action,
-        ) -> Result<ErasedLoadedAsset, Self::Error> {
+        ) -> Result<BassetActionOutput, Self::Error> {
             // TODO: Should we check if `MeshletPlugin` is registered so we can
             // return a sensible error?
 
@@ -206,11 +209,9 @@ mod action {
             let meshlet =
                 MeshletMesh::from_mesh(&mesh, action.vertex_position_quantization_factor())?;
 
-            Ok(context.finish(meshlet).await)
+            Ok(context.finish(meshlet))
         }
     }
-
-    pub struct ConvertAcmeSceneMeshesToMeshletsFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetAction, PartialEq, Hash)]
@@ -222,6 +223,8 @@ mod action {
 
     impl BassetAction for ConvertAcmeSceneMeshesToMeshlets {}
 
+    pub struct ConvertAcmeSceneMeshesToMeshletsFunction;
+
     impl BassetActionFunction for ConvertAcmeSceneMeshesToMeshletsFunction {
         type Action = ConvertAcmeSceneMeshesToMeshlets;
         type Error = BevyError;
@@ -230,7 +233,7 @@ mod action {
             &self,
             mut context: ApplyContext<'_>,
             action: &Self::Action,
-        ) -> Result<ErasedLoadedAsset, Self::Error> {
+        ) -> Result<BassetActionOutput, Self::Error> {
             // TODO: Should we check if `MeshletPlugin` is registered so we can
             // return a sensible error?
 
@@ -250,7 +253,78 @@ mod action {
                 }
             }
 
-            Ok(context.finish(scene).await)
+            Ok(context.finish(scene))
+        }
+    }
+
+    #[derive(Default, Debug, PartialEq, Hash, Reflect)]
+    #[reflect(BassetAction, PartialEq, Hash)]
+    pub struct CompressImage {
+        pub image: AssetRef<'static>,
+    }
+
+    impl BassetAction for CompressImage {}
+
+    pub struct CompressImageFunction;
+
+    impl BassetActionFunction for CompressImageFunction {
+        type Action = CompressImage;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            mut context: ApplyContext<'_>,
+            action: &Self::Action,
+        ) -> Result<BassetActionOutput, Self::Error> {
+            // XXX TODO: See what can be refactored out of here.
+            let uncompressed_asset = context.erased_load_dependee(&action.image).await?;
+
+            if uncompressed_asset.asset_type_id()
+                != TypeId::of::<<CompressedImageSaver as AssetSaver>::Asset>()
+            {
+                return Err("XXX TODO".into());
+            }
+
+            let loader_type_name = CompressedImageSaver.loader_type_name();
+
+            let mut asset_bytes = Vec::<u8>::new();
+
+            let settings = <CompressedImageSaver as AssetSaver>::save(
+                &CompressedImageSaver,
+                &mut asset_bytes,
+                SavedAsset::from_loaded(&uncompressed_asset).expect("XXX TODO"),
+                &(),
+                AssetPath::from("XXX TODO"), // XXX TODO: Does this matter?
+            )
+            .await?;
+
+            let asset = context
+                .load_from_reader(
+                    &mut VecReader::new(asset_bytes.clone()),
+                    loader_type_name,
+                    &settings,
+                )
+                .await?;
+
+            let meta = AssetMeta::<
+                <<CompressedImageSaver as AssetSaver>::OutputLoader as AssetLoader>::Settings,
+                (),
+            >::new(AssetAction::Load {
+                loader: loader_type_name.into(),
+                settings,
+            });
+
+            let meta_bytes = AssetMetaDyn::serialize(&meta);
+
+            // XXX TODO: Verify dependencies and anything else correctly matches
+            // `ApplyContext::finish`.
+            Ok(context.finish_erased_saved(
+                asset,
+                StandaloneAssetData {
+                    asset: asset_bytes,
+                    meta: meta_bytes,
+                },
+            ))
         }
     }
 }
@@ -574,12 +648,16 @@ mod acme {
                     let standard_material =
                         get_sub_asset(asset, primitive.material.as_ref().expect("XXX TODO"));
 
-                    let material = Some(AcmeMaterial {
-                        base_color_texture: standard_material
-                            .base_color_texture
-                            .clone()
-                            .map(|p| p.path().expect("XXX TODO").clone()),
-                    });
+                    let base_color_texture =
+                        standard_material.base_color_texture.clone().map(|p| {
+                            let path = p.path().expect("XXX TODO");
+
+                            AssetRef::new(action::CompressImage {
+                                image: path.clone(),
+                            })
+                        });
+
+                    let material = Some(AcmeMaterial { base_color_texture });
 
                     entities.push(AcmeEntity {
                         transform,
@@ -1042,22 +1120,23 @@ fn main() {
                 Transform::from_xyz(-2.0, 1.0, 0.0)
                     .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             ),
-            // (
-            //     "scene_from_gltf.basset".into(),
-            //     Transform::from_xyz(-1.0, 0.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
+            (
+                "scene_from_gltf.basset".into(),
+                Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            ),
             (
                 "meshlet_scene.basset".into(),
                 Transform::from_xyz(2.0, 0.0, 0.0)
                     .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             ),
         ],
-        bsns: vec![Box::new(bsn! {
-            MeshletMesh3d(MeshletFromMesh::new("Duck.glb#Mesh0/Primitive0"))
-            MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
-            template_value(Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01)))
-        })],
+        bsns: vec![
+        // Box::new(bsn! {
+        //     MeshletMesh3d(action::MeshletFromMesh::new("Duck.glb#Mesh0/Primitive0"))
+        //     MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
+        //     template_value(Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01)))
+        // })
+        ],
     };
 
     let mut app = App::new();
@@ -1099,6 +1178,7 @@ fn main() {
                     .with_action(action::AcmeSceneFromGltfFunction)
                     .with_action(action::MeshletFromMeshFunction)
                     .with_action(action::ConvertAcmeSceneMeshesToMeshletsFunction)
+                    .with_action(action::CompressImageFunction)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
                     .with_saver(MeshletMeshSaver)
