@@ -446,6 +446,8 @@ impl Plugin for AssetPlugin {
             .register_type::<AssetRef<'static>>()
             .register_type::<RootAssetRef>()
             .register_type::<RootAssetPath<'static>>()
+            .register_type::<HandleReference>()
+            .register_type::<TypedHandleReference>()
             .add_message::<UntypedAssetLoadFailedEvent>()
             .configure_sets(
                 PreUpdate,
