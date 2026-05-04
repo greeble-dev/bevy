@@ -130,7 +130,15 @@ impl core::fmt::Debug for StrongHandle {
 ///
 /// [`Handle::Strong`], via [`StrongHandle`] also provides access to useful [`Asset`] metadata, such as the [`AssetPath`] (if it exists).
 #[derive(Reflect)]
-#[reflect(Debug, Hash, PartialEq, Clone, Handle, from_reflect = false)]
+#[reflect(
+    Debug,
+    Hash,
+    PartialEq,
+    Clone,
+    Handle,
+    from_reflect = false,
+    strict_compatibility
+)]
 pub enum Handle<A: Asset> {
     /// A "strong" reference to a live (or loading) [`Asset`]. If a [`Handle`] is [`Handle::Strong`], the [`Asset`] will be kept
     /// alive until the [`Handle`] is dropped. Strong handles also provide access to additional asset metadata.
@@ -934,7 +942,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "blocked by #24111"]
     fn handle_try_apply_verifies_type_id() {
         #[derive(Reflect, Asset)]
         struct A;

@@ -28,6 +28,7 @@ mod kw {
     syn::custom_keyword!(no_field_bounds);
     syn::custom_keyword!(no_auto_register);
     syn::custom_keyword!(opaque);
+    syn::custom_keyword!(strict_compatibility);
 }
 
 // The "special" trait idents that are used internally for reflection.
@@ -192,6 +193,7 @@ pub(crate) struct ContainerAttributes {
     custom_attributes: CustomAttributes,
     is_opaque: bool,
     idents: Vec<Ident>,
+    strict_compatibility: bool,
 }
 
 impl ContainerAttributes {
@@ -255,6 +257,8 @@ impl ContainerAttributes {
             self.parse_partial_ord(input)
         } else if lookahead.peek(kw::PartialEq) {
             self.parse_partial_eq(input)
+        } else if lookahead.peek(kw::strict_compatibility) {
+            self.parse_strict_compatibility(input)
         } else if lookahead.peek(Ident::peek_any) {
             self.parse_ident(input)
         } else {
@@ -497,6 +501,16 @@ impl ContainerAttributes {
         Ok(())
     }
 
+    /// Parse `strict_compatibility` attribute.
+    ///
+    /// Examples:
+    /// - `#[reflect(strict_compatibility)]`
+    fn parse_strict_compatibility(&mut self, input: ParseStream) -> syn::Result<()> {
+        input.parse::<kw::strict_compatibility>()?;
+        self.strict_compatibility = true;
+        Ok(())
+    }
+
     /// Returns true if the given reflected trait name (i.e. `ReflectDefault` for `Default`)
     /// is registered for this type.
     pub fn contains(&self, name: &str) -> bool {
@@ -659,6 +673,11 @@ impl ContainerAttributes {
     /// Returns true if the `opaque` attribute was found on this type.
     pub fn is_opaque(&self) -> bool {
         self.is_opaque
+    }
+
+    /// Returns true if the `strict_compatibility` attribute was found on this type.
+    pub fn strict_compatibility(&self) -> bool {
+        self.strict_compatibility
     }
 }
 

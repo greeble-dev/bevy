@@ -85,6 +85,27 @@ pub(crate) fn impl_enum(reflect_enum: &ReflectEnum) -> proc_macro2::TokenStream 
 
     let where_reflect_clause = where_clause_options.extend_where_clause(where_clause);
 
+    let strict_compatibility = if reflect_enum.meta().attrs().strict_compatibility() {
+        Some(quote! {
+            if let Some(value_info) = #ref_value.get_represented_enum_info() {
+                // XXX TODO: Should be getting type id from self.get_represented_enum_info?
+                if value_info.type_id() != TypeId::of::<Self>() {
+                    return Err(#bevy_reflect_path::ApplyError::MismatchedTypes {
+                        from_type: value_info.type_path().into(), // XXX TODO?
+                        to_type: core::any::type_name::<Self>().into(), // XXX TODO: Probably wrong. Should be type path.
+                    });
+                }
+            } else {
+                return Err(#bevy_reflect_path::ApplyError::MismatchedTypes {
+                    from_type: "unknown".into(), // XXX TODO?
+                    to_type: core::any::type_name::<Self>().into(), // XXX TODO: Probably wrong. Should be type path.
+                });
+            }
+        })
+    } else {
+        None
+    };
+
     quote! {
         #get_type_registration_impl
 
@@ -195,6 +216,7 @@ pub(crate) fn impl_enum(reflect_enum: &ReflectEnum) -> proc_macro2::TokenStream 
             ) -> #FQResult<(), #bevy_reflect_path::ApplyError>  {
                 if let #bevy_reflect_path::ReflectRef::Enum(#ref_value) =
                     #bevy_reflect_path::PartialReflect::reflect_ref(#ref_value) {
+                    #strict_compatibility
                     if #bevy_reflect_path::enums::Enum::variant_name(self) == #bevy_reflect_path::enums::Enum::variant_name(#ref_value) {
                         // Same variant -> just update fields
                         match #bevy_reflect_path::enums::Enum::variant_type(#ref_value) {
