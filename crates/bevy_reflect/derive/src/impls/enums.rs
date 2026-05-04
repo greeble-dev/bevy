@@ -85,6 +85,8 @@ pub(crate) fn impl_enum(reflect_enum: &ReflectEnum) -> proc_macro2::TokenStream 
 
     let where_reflect_clause = where_clause_options.extend_where_clause(where_clause);
 
+    let validate = reflect_enum.meta().attrs().get_validate_impl();
+
     quote! {
         #get_type_registration_impl
 
@@ -239,6 +241,7 @@ pub(crate) fn impl_enum(reflect_enum: &ReflectEnum) -> proc_macro2::TokenStream 
                         }
                     );
                 }
+                #validate
                 #FQResult::Ok(())
             }
 

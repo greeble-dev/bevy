@@ -28,6 +28,7 @@ mod kw {
     syn::custom_keyword!(no_field_bounds);
     syn::custom_keyword!(no_auto_register);
     syn::custom_keyword!(opaque);
+    syn::custom_keyword!(validate);
 }
 
 // The "special" trait idents that are used internally for reflection.
@@ -117,6 +118,10 @@ impl TypePathAttrs {
     }
 }
 
+/// XXX TODO: Document.
+#[derive(Clone)]
+pub(crate) struct ValidateAttr(Path, Span);
+
 /// A collection of traits that have been registered for a reflected type.
 ///
 /// This keeps track of a few traits that are utilized internally for reflection
@@ -192,6 +197,7 @@ pub(crate) struct ContainerAttributes {
     custom_attributes: CustomAttributes,
     is_opaque: bool,
     idents: Vec<Ident>,
+    validate: Option<ValidateAttr>,
 }
 
 impl ContainerAttributes {
@@ -255,6 +261,8 @@ impl ContainerAttributes {
             self.parse_partial_ord(input)
         } else if lookahead.peek(kw::PartialEq) {
             self.parse_partial_eq(input)
+        } else if lookahead.peek(kw::validate) {
+            self.parse_validate(input)
         } else if lookahead.peek(Ident::peek_any) {
             self.parse_ident(input)
         } else {
@@ -497,6 +505,27 @@ impl ContainerAttributes {
         Ok(())
     }
 
+    /// XXX TODO: Document.
+    fn parse_validate(&mut self, input: ParseStream) -> syn::Result<()> {
+        // XXX TODO: These parsing idioms are probably wrong.
+
+        let ident = input.parse::<kw::validate>()?;
+
+        let Ok(equals) = input.parse::<Token![=]>() else {
+            // XXX TODO: Returning the wrong span?
+            return Err(syn::Error::new(ident.span(), "Expected \"=\""));
+        };
+
+        let Ok(path) = input.parse::<Path>() else {
+            // XXX TODO: Returning the wrong span?
+            return Err(syn::Error::new(equals.span(), "Expected path"));
+        };
+
+        self.validate = Some(ValidateAttr(path, ident.span())); // XXX TODO: Span is wrong?
+
+        Ok(())
+    }
+
     /// Returns true if the given reflected trait name (i.e. `ReflectDefault` for `Default`)
     /// is registered for this type.
     pub fn contains(&self, name: &str) -> bool {
@@ -659,6 +688,17 @@ impl ContainerAttributes {
     /// Returns true if the `opaque` attribute was found on this type.
     pub fn is_opaque(&self) -> bool {
         self.is_opaque
+    }
+
+    /// XXX TODO: Document.
+    // XXX TODO: We need a different approach for supporting `FromReflect` -
+    // that doesn't use `self` so it needs to pass in a variable name.
+    pub fn get_validate_impl(&self) -> Option<proc_macro2::TokenStream> {
+        self.validate.as_ref().map(|ValidateAttr(path, span)| {
+            quote_spanned! {*span=>
+                #path(self)?;
+            }
+        })
     }
 }
 

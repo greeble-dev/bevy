@@ -5,7 +5,9 @@ use crate::{
 use alloc::sync::Arc;
 use bevy_ecs::template::{FromTemplate, SpecializeFromTemplate, Template, TemplateContext};
 use bevy_platform::{collections::Equivalent, sync::Mutex};
-use bevy_reflect::{enums::Enum, FromReflect, PartialReflect, Reflect, ReflectRef, TypePath};
+use bevy_reflect::{
+    enums::Enum, ApplyError, FromReflect, PartialReflect, Reflect, ReflectRef, TypePath,
+};
 use core::{
     any::TypeId,
     hash::{Hash, Hasher},
@@ -130,7 +132,15 @@ impl core::fmt::Debug for StrongHandle {
 ///
 /// [`Handle::Strong`], via [`StrongHandle`] also provides access to useful [`Asset`] metadata, such as the [`AssetPath`] (if it exists).
 #[derive(Reflect)]
-#[reflect(Debug, Hash, PartialEq, Clone, Handle, from_reflect = false)]
+#[reflect(
+    Debug,
+    Hash,
+    PartialEq,
+    Clone,
+    Handle,
+    from_reflect = false,
+    validate = validate_handle,
+)]
 pub enum Handle<A: Asset> {
     /// A "strong" reference to a live (or loading) [`Asset`]. If a [`Handle`] is [`Handle::Strong`], the [`Asset`] will be kept
     /// alive until the [`Handle`] is dropped. Strong handles also provide access to additional asset metadata.
@@ -174,6 +184,22 @@ where
             }
             _ => None,
         }
+    }
+}
+
+fn validate_handle<A: Asset>(value: &Handle<A>) -> Result<(), ApplyError> {
+    if let Handle::Strong(strong) = value
+        && (strong.type_id != TypeId::of::<A>())
+    {
+        // XXX TODO: Rethink using `ApplyError` as we can't provide the
+        // `from_type`. Maybe have a separate `ValidateError` that simply
+        // wraps a string.
+        Err(ApplyError::MismatchedTypes {
+            from_type: "XXX TODO".into(),
+            to_type: core::any::type_name::<A>().into(),
+        })
+    } else {
+        Ok(())
     }
 }
 
@@ -942,7 +968,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Blocked by #24111"]
     fn handle_try_apply_verifies_type_id() {
         use crate::{AssetApp, Assets};
 
@@ -962,8 +987,10 @@ mod tests {
         let mut assets_b = app.world_mut().resource_mut::<Assets<B>>();
         let mut handle_b = assets_b.add(B);
         assert!(
+            // XXX TODO: Can we be more precise that just `is_err`? Risk of
+            // false pass due to another error.
             handle_b.try_apply(reflected_handle_a).is_err(),
-            "Handle<A> should not be appliable to Handle<B>"
+            "Handle<A> should not be applicable to Handle<B>"
         );
     }
 

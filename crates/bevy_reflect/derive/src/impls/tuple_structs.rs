@@ -54,6 +54,8 @@ pub(crate) fn impl_tuple_struct(reflect_struct: &ReflectStruct) -> proc_macro2::
 
     let where_reflect_clause = where_clause_options.extend_where_clause(where_clause);
 
+    let validate = reflect_struct.meta().attrs().get_validate_impl();
+
     quote! {
         #get_type_registration_impl
 
@@ -124,7 +126,8 @@ pub(crate) fn impl_tuple_struct(reflect_struct: &ReflectStruct) -> proc_macro2::
                         }
                     );
                 }
-               #FQResult::Ok(())
+                #validate
+                #FQResult::Ok(())
             }
             #[inline]
             fn reflect_kind(&self) -> #bevy_reflect_path::ReflectKind {

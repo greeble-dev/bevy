@@ -33,11 +33,14 @@ pub(crate) fn impl_opaque(meta: &ReflectMeta) -> proc_macro2::TokenStream {
     let common_methods = common_partial_reflect_methods(meta, || None, || None, || None);
     let clone_fn = meta.attrs().get_clone_impl(bevy_reflect_path);
 
+    let validate = meta.attrs().get_validate_impl();
+
     let apply_impl = if let Some(remote_ty) = meta.remote_ty() {
         let ty = remote_ty.type_path();
         quote! {
             if let #FQOption::Some(value) = <dyn #bevy_reflect_path::PartialReflect>::try_downcast_ref::<#ty>(value) {
                 *self = Self(#FQClone::clone(value));
+                #validate
                 return #FQResult::Ok(());
             }
         }
@@ -45,6 +48,7 @@ pub(crate) fn impl_opaque(meta: &ReflectMeta) -> proc_macro2::TokenStream {
         quote! {
             if let #FQOption::Some(value) = <dyn #bevy_reflect_path::PartialReflect>::try_downcast_ref::<Self>(value) {
                 *self = #FQClone::clone(value);
+                #validate
                 return #FQResult::Ok(());
             }
         }

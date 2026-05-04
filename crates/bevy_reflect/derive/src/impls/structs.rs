@@ -66,6 +66,8 @@ pub(crate) fn impl_struct(reflect_struct: &ReflectStruct) -> proc_macro2::TokenS
 
     let where_reflect_clause = where_clause_options.extend_where_clause(where_clause);
 
+    let validate = reflect_struct.meta().attrs().get_validate_impl();
+
     quote! {
         #get_type_registration_impl
 
@@ -164,6 +166,7 @@ pub(crate) fn impl_struct(reflect_struct: &ReflectStruct) -> proc_macro2::TokenS
                         }
                     );
                 }
+                #validate
                 #FQResult::Ok(())
             }
             #[inline]
