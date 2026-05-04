@@ -19,8 +19,8 @@ use bevy_reflect::{
 };
 
 use crate::{
-    Asset, AssetId, AssetRef, AssetServer, Assets, Handle, InvalidGenerationError, LoadContext,
-    UntypedAssetId, UntypedHandle,
+    Asset, AssetContainer, AssetId, AssetRef, AssetServer, Assets, Handle, InvalidGenerationError,
+    LoadContext, UntypedAssetId, UntypedHandle,
 };
 
 /// Type data for the [`TypeRegistry`] used to operate on reflected [`Asset`]s.
@@ -46,6 +46,7 @@ pub struct ReflectAsset {
     len: fn(&World) -> usize,
     ids: for<'w> fn(&'w World) -> Box<dyn Iterator<Item = UntypedAssetId> + 'w>,
     remove: fn(&mut World, UntypedAssetId) -> Option<Box<dyn Reflect>>,
+    to_container: fn(Box<dyn PartialReflect>) -> Box<dyn AssetContainer>,
 }
 
 impl ReflectAsset {
@@ -161,6 +162,12 @@ impl ReflectAsset {
     pub fn ids<'w>(&self, world: &'w World) -> impl Iterator<Item = UntypedAssetId> + 'w {
         (self.ids)(world)
     }
+
+    // XXX TODO: Document.
+    // XXX TODO: This is `pub(crate)` due to `AssetContainer`. Is that ok?
+    pub(crate) fn to_container(&self, value: Box<dyn PartialReflect>) -> Box<dyn AssetContainer> {
+        (self.to_container)(value)
+    }
 }
 
 impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
@@ -205,6 +212,11 @@ impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
                 let mut assets = world.resource_mut::<Assets<A>>();
                 let value = assets.remove(asset_id.typed_debug_checked());
                 value.map(|value| Box::new(value) as Box<dyn Reflect>)
+            },
+            to_container: |value| {
+                // XXX TODO: Avoid unboxing and then boxing again?
+                let value: A = FromReflect::take_from_reflect(value).expect("XXX TODO");
+                Box::new(value)
             },
         }
     }

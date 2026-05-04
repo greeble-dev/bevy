@@ -5,13 +5,14 @@ use crate::{
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfo, ProcessedInfoMinimal, Settings},
     path::AssetPath,
     Asset, AssetDependency, AssetIndex, AssetLoadError, AssetRef, AssetServer, AssetServerMode,
-    Assets, ErasedAssetIndex, Handle, UntypedAssetId, UntypedHandle, VisitAssetDependencies,
+    Assets, ErasedAssetIndex, Handle, ReflectAsset, UntypedAssetId, UntypedHandle,
+    VisitAssetDependencies,
 };
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use atomicow::CowArc;
 use bevy_ecs::{error::BevyError, world::World};
 use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
-use bevy_reflect::{Reflect, TypePath};
+use bevy_reflect::{PartialReflect, Reflect, TypePath, TypeRegistry};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::any::{Any, TypeId};
 use downcast_rs::{impl_downcast, Downcast};
@@ -562,7 +563,8 @@ pub struct LoadContext<'a> {
 
 impl<'a> LoadContext<'a> {
     /// Creates a new [`LoadContext`] instance.
-    pub(crate) fn new(
+    // XXX TODO: Change back to `pub(crate)`. Only changed temporary for testing.
+    pub fn new(
         asset_server: &'a AssetServer,
         asset_path: AssetPath<'static>,
         should_load_dependencies: bool,
@@ -732,6 +734,38 @@ impl<'a> LoadContext<'a> {
             asset_id_to_asset_index: self.asset_id_to_asset_index,
             dependency_key: self.dependency_key,
         }
+    }
+
+    // XXX TODO: Review.
+    // XXX TODO: Error type?
+    pub fn finish_reflect(
+        self,
+        value: Box<dyn PartialReflect>,
+        registry: &TypeRegistry,
+    ) -> Result<ErasedLoadedAsset, BevyError> {
+        let type_id = value
+            .get_represented_type_info()
+            .expect("XXX TODO")
+            .type_id();
+
+        let reflect_asset = registry
+            .get_type_data::<ReflectAsset>(type_id)
+            .expect("XXX TODO")
+            .clone();
+
+        let container = reflect_asset.to_container(value);
+
+        // XXX TODO: Visit dependencies.
+
+        Ok(ErasedLoadedAsset {
+            value: container,
+            dependencies: self.dependencies,
+            loader_dependencies: self.loader_dependencies,
+            labeled_assets: self.labeled_assets,
+            label_to_asset_index: self.label_to_asset_index,
+            asset_id_to_asset_index: self.asset_id_to_asset_index,
+            dependency_key: self.dependency_key,
+        })
     }
 
     /// Gets the source asset path for this load context.

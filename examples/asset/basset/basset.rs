@@ -7,7 +7,7 @@ use argh::FromArgs;
 use bevy::{
     asset::{
         basset::*, io::Reader, saver::AssetSaver, AssetLoader, AssetRef, ErasedLoadedAsset,
-        LoadContext,
+        HandleDeserializeProcessor, LoadContext, PolyAssetLoader,
     },
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     ecs::error::BevyError,
@@ -21,7 +21,7 @@ use bevy::{
         TypePath,
     },
     render::render_resource::AsBindGroup,
-    tasks::block_on,
+    tasks::{block_on, IoTaskPool},
     time::common_conditions::on_timer,
 };
 // XXX TODO: Should be in `use bevy` above?
@@ -30,16 +30,14 @@ use bevy_asset::{
         action::LoadPath,
         publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
     },
-    io::{AssetSourceId, Writer},
-    saver::SavedAsset,
+    io::{AssetSourceId, VecReader, Writer},
+    meta::Settings,
+    saver::{PolyAssetSaver, SavedAsset},
     AssetPath, AsyncWriteExt,
 };
-use bevy_reflect::{
-    serde::{TypedReflectDeserializer, TypedReflectSerializer},
-    TypeRegistry, TypeRegistryArc,
-};
+use bevy_reflect::{TypeRegistry, TypeRegistryArc};
 use bevy_scene::SceneDependencies;
-use core::{marker::PhantomData, ops::Deref, result::Result};
+use core::{ops::Deref, result::Result};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
@@ -451,104 +449,79 @@ mod demo {
 }
 
 #[derive(TypePath)]
-struct RonAssetLoader<Data>
-where
-    Data: Asset + Reflect,
-{
+struct RonAssetLoader {
     registry: TypeRegistryArc,
-    marker: PhantomData<Data>,
 }
 
-impl<Data> RonAssetLoader<Data>
-where
-    Data: Asset + Reflect,
-{
+impl RonAssetLoader {
     fn new(registry: TypeRegistryArc) -> Self {
-        Self {
-            registry,
-            marker: Default::default(),
-        }
+        Self { registry }
     }
 }
 
-impl<Data> AssetLoader for RonAssetLoader<Data>
-where
-    Data: Asset + Reflect,
-{
-    type Asset = Data;
+impl PolyAssetLoader for RonAssetLoader {
     type Settings = ();
-    type Error = std::io::Error;
+    type Error = BevyError;
 
     async fn load(
         &self,
         reader: &mut dyn Reader,
         _settings: &Self::Settings,
-        _load_context: &mut LoadContext<'_>,
-    ) -> Result<Self::Asset, Self::Error> {
+        mut load_context: LoadContext<'_>,
+    ) -> Result<ErasedLoadedAsset, Self::Error> {
         // XXX TODO: Check if we can use `ron::de::from_reader`.
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
 
-        // XXX TODO: Don't need this if we use `TypedReflectDeserializer::of`?
-        // But that can panic.
         let registry = self.registry.read();
-        let registration = registry.get(TypeId::of::<Data>()).expect("XXX TODO");
 
-        Ok(TypedReflectDeserializer::new(registration, &registry)
+        let mut processor = HandleDeserializeProcessor {
+            load_from_path: &mut load_context,
+        };
+
+        let deserializer = ReflectDeserializer::with_processor(&registry, &mut processor);
+
+        let reflected = deserializer
             .deserialize(&mut ron::de::Deserializer::from_bytes(&bytes).expect("XXX TODO"))
-            .expect("XXX TODO")
-            .try_take::<Data>()
-            .expect("XXX TODO"))
+            .expect("XXX TODO");
+
+        load_context.finish_reflect(reflected, &registry)
     }
 
     fn extensions(&self) -> &[&str] {
-        &["acme"]
+        &["ron"]
     }
 }
 
 #[derive(TypePath)]
-struct RonAssetSaver<Data>
-where
-    Data: Asset + Reflect,
-{
-    marker: PhantomData<Data>,
+struct RonAssetSaver {
     registry: TypeRegistryArc,
 }
 
-impl<Data> RonAssetSaver<Data>
-where
-    Data: Asset + Reflect,
-{
+impl RonAssetSaver {
     fn new(registry: TypeRegistryArc) -> Self {
-        Self {
-            registry,
-            marker: Default::default(),
-        }
+        Self { registry }
     }
 }
 
-impl<Data> AssetSaver for RonAssetSaver<Data>
-where
-    Data: Asset + Reflect,
-{
-    type Asset = Data;
+impl PolyAssetSaver for RonAssetSaver {
     type Settings = ();
-    type OutputLoader = RonAssetLoader<Data>;
+    type OutputLoader = RonAssetLoader;
     type Error = std::io::Error;
 
     async fn save(
         &self,
         writer: &mut Writer,
-        asset: SavedAsset<'_, '_, Self::Asset>,
+        asset: &dyn PartialReflect,
         _settings: &Self::Settings,
         _asset_path: AssetPath<'_>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<Box<dyn Settings>, Self::Error> {
         let string = {
             let registry = self.registry.read();
 
             // XXX TODO: Check if we can use `ron::de::to_writer_pretty`.
             ron::ser::to_string_pretty(
-                &TypedReflectSerializer::new(&*asset, &registry),
+                &ReflectSerializer::new(asset, &registry),
                 ron::ser::PrettyConfig::default(),
             )
             .expect("XXX TODO")
@@ -556,7 +529,7 @@ where
 
         writer.write_all(string.as_bytes()).await?;
 
-        Ok(())
+        Ok(Box::new(()))
     }
 }
 
@@ -769,8 +742,9 @@ mod acme {
         }
     }
 
-    pub type AcmeSceneAssetLoader = RonAssetLoader<AcmeScene>;
-    pub type AcmeSceneAssetSaver = RonAssetSaver<AcmeScene>;
+    // XXX TODO:
+    //pub type AcmeSceneAssetLoader = RonAssetLoader<AcmeScene>;
+    //pub type AcmeSceneAssetSaver = RonAssetSaver<AcmeScene>;
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Default)]
@@ -1081,6 +1055,43 @@ fn test_serialization() {
     // }
 }
 
+fn test_reflect_serialization(registry: TypeRegistryArc, asset_server: AssetServer) {
+    let task = IoTaskPool::get().spawn(async move {
+        let saver = RonAssetSaver::new(registry.clone());
+        let loader = RonAssetLoader::new(registry.clone());
+
+        let material_original = StandardMaterial::from(Color::srgba(1.0, 2.0, 3.0, 1.0));
+
+        let mut material_ron = Vec::<u8>::new();
+        saver
+            .save(
+                &mut material_ron,
+                &material_original,
+                &(),
+                AssetPath::default(),
+            )
+            .await
+            .unwrap();
+
+        std::dbg!(String::from_utf8(material_ron.clone()).unwrap());
+
+        let material_loaded = loader
+            .load(
+                &mut VecReader::new(material_ron),
+                &(),
+                LoadContext::new(&asset_server, AssetPath::default(), true, false, None),
+            )
+            .await
+            .unwrap()
+            .take::<StandardMaterial>()
+            .unwrap();
+
+        std::dbg!(&material_loaded);
+    });
+
+    task.detach();
+}
+
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
     let args: Args = argh::from_env();
@@ -1181,8 +1192,9 @@ fn main() {
                     .with_action(action::CompressImageFunction)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
-                    .with_saver(MeshletMeshSaver)
-                    .with_saver(acme::AcmeSceneAssetSaver::new(registry.clone())),
+                    .with_saver(MeshletMeshSaver),
+                // XXX TODO
+                //.with_saver(acme::AcmeSceneAssetSaver::new(registry.clone())),
             ))),
             ..Default::default()
         }
@@ -1204,8 +1216,14 @@ fn main() {
     .init_asset::<demo::IntAsset>()
     .init_asset::<acme::AcmeScene>()
     .register_asset_loader(demo::StringAssetLoader)
-    .register_asset_loader(demo::IntAssetLoader)
-    .register_asset_loader(acme::AcmeSceneAssetLoader::new(registry));
+    .register_asset_loader(demo::IntAssetLoader);
+    // XXX TODO
+    //.register_asset_loader(acme::AcmeSceneAssetLoader::new(registry));
+
+    test_reflect_serialization(
+        registry.clone(),
+        app.world().resource::<AssetServer>().clone(),
+    );
 
     match args.mode {
         ArgMode::Development | ArgMode::Published => {

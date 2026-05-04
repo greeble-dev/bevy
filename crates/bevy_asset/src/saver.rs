@@ -3,13 +3,13 @@ use crate::{
     meta::{AssetAction, AssetMeta, AssetMetaDyn, Settings},
     transformer::TransformedAsset,
     Asset, AssetContainer, AssetId, AssetLoader, AssetPath, AssetServer, ErasedLoadedAsset, Handle,
-    LabeledAsset, UntypedAssetId, UntypedHandle,
+    LabeledAsset, PolyAssetLoader, UntypedAssetId, UntypedHandle,
 };
 use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use atomicow::CowArc;
 use bevy_ecs::error::BevyError;
 use bevy_platform::collections::{hash_map::Entry, HashMap};
-use bevy_reflect::TypePath;
+use bevy_reflect::{PartialReflect, TypePath};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{any::TypeId, borrow::Borrow, ops::Deref};
 use futures_lite::AsyncWriteExt;
@@ -93,6 +93,26 @@ impl<S: AssetSaver> ErasedAssetSaver for S {
     fn loader_type_name(&self) -> &'static str {
         core::any::type_name::<S::OutputLoader>()
     }
+}
+
+// XXX TODO: Document.
+pub trait PolyAssetSaver: TypePath + Send + Sync + 'static {
+    /// The settings type used by this [`PolyAssetSaver`].
+    type Settings: Settings + Default + Serialize + for<'a> Deserialize<'a>;
+    /// The type of [`PolyAssetLoader`] used to load this [`Asset`]
+    type OutputLoader: PolyAssetLoader;
+    /// The type of [error](`std::error::Error`) which could be encountered by this saver.
+    type Error: Into<BevyError>;
+
+    fn save(
+        &self,
+        writer: &mut Writer,
+        // XXX TODO: This needs to be rethought. We can't use `SavedAsset` as it
+        // gives an explicit asset type.
+        asset: &dyn PartialReflect,
+        settings: &Self::Settings,
+        asset_path: AssetPath<'_>,
+    ) -> impl ConditionalSendFuture<Output = Result<Box<dyn Settings>, Self::Error>>;
 }
 
 /// An [`Asset`] (and any labeled "sub assets") intended to be saved.
