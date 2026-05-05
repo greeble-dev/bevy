@@ -9,7 +9,7 @@ use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use atomicow::CowArc;
 use bevy_ecs::error::BevyError;
 use bevy_platform::collections::{hash_map::Entry, HashMap};
-use bevy_reflect::{PartialReflect, TypePath};
+use bevy_reflect::{PartialReflect, TypePath, TypeRegistry};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{any::TypeId, borrow::Borrow, ops::Deref};
 use futures_lite::AsyncWriteExt;
@@ -107,9 +107,7 @@ pub trait PolyAssetSaver: TypePath + Send + Sync + 'static {
     fn save(
         &self,
         writer: &mut Writer,
-        // XXX TODO: This needs to be rethought. We can't use `SavedAsset` as it
-        // gives an explicit asset type.
-        asset: &dyn PartialReflect,
+        asset: &ErasedSavedAsset,
         settings: &Self::Settings,
         asset_path: AssetPath<'_>,
     ) -> impl ConditionalSendFuture<Output = Result<Box<dyn Settings>, Self::Error>>;
@@ -335,6 +333,13 @@ impl<'a> ErasedSavedAsset<'a, '_> {
             &self.label_to_asset_index,
             &self.asset_id_to_asset_index,
         ))
+    }
+
+    pub fn as_partial_reflect<'b>(
+        &'b self,
+        registry: &TypeRegistry,
+    ) -> Option<&'b dyn PartialReflect> {
+        self.value.as_partial_reflect(registry)
     }
 }
 

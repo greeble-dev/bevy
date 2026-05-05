@@ -32,7 +32,7 @@ use bevy_asset::{
     },
     io::{AssetSourceId, VecReader, Writer},
     meta::Settings,
-    saver::{PolyAssetSaver, SavedAsset},
+    saver::{ErasedSavedAsset, PolyAssetSaver, SavedAsset},
     AssetPath, AsyncWriteExt,
 };
 use bevy_reflect::{TypeRegistry, TypeRegistryArc};
@@ -512,16 +512,18 @@ impl PolyAssetSaver for RonAssetSaver {
     async fn save(
         &self,
         writer: &mut Writer,
-        asset: &dyn PartialReflect,
+        asset: &ErasedSavedAsset<'_, '_>,
         _settings: &Self::Settings,
         _asset_path: AssetPath<'_>,
     ) -> Result<Box<dyn Settings>, Self::Error> {
         let string = {
             let registry = self.registry.read();
 
+            let reflected_asset = asset.as_partial_reflect(&registry).expect("XXX TODO");
+
             // XXX TODO: Check if we can use `ron::de::to_writer_pretty`.
             ron::ser::to_string_pretty(
-                &ReflectSerializer::new(asset, &registry),
+                &ReflectSerializer::new(reflected_asset, &registry),
                 ron::ser::PrettyConfig::default(),
             )
             .expect("XXX TODO")
@@ -1066,7 +1068,7 @@ fn test_reflect_serialization(registry: TypeRegistryArc, asset_server: AssetServ
         saver
             .save(
                 &mut material_ron,
-                &material_original,
+                &SavedAsset::from_asset(&material_original).upcast(),
                 &(),
                 AssetPath::default(),
             )

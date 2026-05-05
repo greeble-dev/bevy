@@ -508,6 +508,17 @@ impl<A: Asset> AssetContainer for A {
     }
 }
 
+impl dyn AssetContainer {
+    pub(crate) fn as_partial_reflect(
+        &self,
+        registry: &TypeRegistry,
+    ) -> Option<&dyn PartialReflect> {
+        registry
+            .get_type_data::<ReflectAsset>(self.type_id())?
+            .container_as_partial_reflect(self)
+    }
+}
+
 /// An error that occurs when attempting an async load using [`NestedLoadBuilder`].
 #[derive(Error, Debug)]
 pub enum LoadDirectError {
@@ -739,7 +750,7 @@ impl<'a> LoadContext<'a> {
     // XXX TODO: Review.
     // XXX TODO: Error type?
     pub fn finish_reflect(
-        self,
+        mut self,
         value: Box<dyn PartialReflect>,
         registry: &TypeRegistry,
     ) -> Result<ErasedLoadedAsset, BevyError> {
@@ -755,7 +766,13 @@ impl<'a> LoadContext<'a> {
 
         let container = reflect_asset.to_container(value);
 
-        // XXX TODO: Visit dependencies.
+        container.visit_dependencies(&mut |dependency| {
+            // Ignore UntypedAssetId::Uuid since UUID assets are always loaded.
+            if let Some(UntypedAssetId::Index { type_id, index }) = dependency.id() {
+                self.dependencies
+                    .insert(ErasedAssetIndex { index, type_id });
+            }
+        });
 
         Ok(ErasedLoadedAsset {
             value: container,

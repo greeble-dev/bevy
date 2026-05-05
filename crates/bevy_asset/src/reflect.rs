@@ -47,6 +47,7 @@ pub struct ReflectAsset {
     ids: for<'w> fn(&'w World) -> Box<dyn Iterator<Item = UntypedAssetId> + 'w>,
     remove: fn(&mut World, UntypedAssetId) -> Option<Box<dyn Reflect>>,
     to_container: fn(Box<dyn PartialReflect>) -> Box<dyn AssetContainer>,
+    container_as_partial_reflect: fn(&dyn AssetContainer) -> Option<&dyn PartialReflect>,
 }
 
 impl ReflectAsset {
@@ -168,6 +169,16 @@ impl ReflectAsset {
     pub(crate) fn to_container(&self, value: Box<dyn PartialReflect>) -> Box<dyn AssetContainer> {
         (self.to_container)(value)
     }
+
+    // XXX TODO: Document.
+    // XXX TODO: This is `pub(crate)` due to `AssetContainer`. Is that ok?
+    // XXX TODO: Reconsider name? Bit verbose.
+    pub(crate) fn container_as_partial_reflect<'a>(
+        &self,
+        value: &'a dyn AssetContainer,
+    ) -> Option<&'a dyn PartialReflect> {
+        (self.container_as_partial_reflect)(value)
+    }
 }
 
 impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
@@ -217,6 +228,11 @@ impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
                 // XXX TODO: Avoid unboxing and then boxing again?
                 let value: A = FromReflect::take_from_reflect(value).expect("XXX TODO");
                 Box::new(value)
+            },
+            container_as_partial_reflect: |value| {
+                value
+                    .downcast_ref::<A>()
+                    .map(|value| value as &dyn PartialReflect)
             },
         }
     }
