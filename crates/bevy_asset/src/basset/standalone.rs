@@ -126,6 +126,9 @@ pub(crate) async fn save_standalone_asset(
     // XXX TODO: As with reading, need to decide if we try to support the original path.
     let fake_path = AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
 
+    // XXX TODO: Don't throw away the loader settings returned from `AssetSaver::save`.
+    // See below. Although note that `ErasedAssetSaver` doesn't return them for some
+    // reason? Maybe needs fixing.
     saver
         .save(&mut asset_bytes, asset, saver_settings, fake_path)
         .await?;

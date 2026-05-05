@@ -477,6 +477,13 @@ impl ErasedLoadedAsset {
     pub fn visit_dependencies(&self, visit: &mut dyn FnMut(AssetDependency)) {
         self.value.visit_dependencies(visit);
     }
+
+    pub fn as_partial_reflect<'b>(
+        &'b self,
+        registry: &TypeRegistry,
+    ) -> Option<&'b dyn PartialReflect> {
+        self.value.as_partial_reflect(registry)
+    }
 }
 
 /// A type erased container for an [`Asset`] value that is capable of inserting the [`Asset`] into a [`World`]'s [`Assets`] collection.

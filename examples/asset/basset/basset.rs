@@ -46,7 +46,6 @@ mod action {
         basset::standalone::StandaloneAssetData,
         io::VecReader,
         meta::{AssetAction, AssetMeta, AssetMetaDyn},
-        saver::ErasedAssetSaver,
     };
 
     use super::*;
@@ -283,7 +282,8 @@ mod action {
                 return Err("XXX TODO".into());
             }
 
-            let loader_type_name = CompressedImageSaver.loader_type_name();
+            let loader_type_name =
+                core::any::type_name::<<CompressedImageSaver as AssetSaver>::OutputLoader>();
 
             let mut asset_bytes = Vec::<u8>::new();
 
@@ -743,10 +743,6 @@ mod acme {
             );
         }
     }
-
-    // XXX TODO:
-    //pub type AcmeSceneAssetLoader = RonAssetLoader<AcmeScene>;
-    //pub type AcmeSceneAssetSaver = RonAssetSaver<AcmeScene>;
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Default)]
@@ -773,7 +769,7 @@ impl AssetPaths {
         let bsns = self
             .bsns
             .iter()
-            .flat_map(|bsn| bsn_dependencies(&**bsn))
+            .flat_map(|bsn| bsn_dependencies(bsn.as_ref()))
             .collect::<Vec<_>>();
 
         self.regular
@@ -1194,9 +1190,8 @@ fn main() {
                     .with_action(action::CompressImageFunction)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
-                    .with_saver(MeshletMeshSaver),
-                // XXX TODO
-                //.with_saver(acme::AcmeSceneAssetSaver::new(registry.clone())),
+                    .with_saver(MeshletMeshSaver)
+                    .with_default_poly_saver(RonAssetSaver::new(registry.clone())),
             ))),
             ..Default::default()
         }
@@ -1217,10 +1212,10 @@ fn main() {
     .init_asset::<demo::StringAsset>()
     .init_asset::<demo::IntAsset>()
     .init_asset::<acme::AcmeScene>()
+    .register_asset_reflect::<acme::AcmeScene>()
     .register_asset_loader(demo::StringAssetLoader)
-    .register_asset_loader(demo::IntAssetLoader);
-    // XXX TODO
-    //.register_asset_loader(acme::AcmeSceneAssetLoader::new(registry));
+    .register_asset_loader(demo::IntAssetLoader)
+    .register_poly_asset_loader(RonAssetLoader::new(registry.clone()));
 
     test_reflect_serialization(
         registry.clone(),

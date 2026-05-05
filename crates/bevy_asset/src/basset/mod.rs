@@ -19,6 +19,7 @@ use crate::{
     },
     io::{AssetReaderError, AssetSourceId, AssetSources},
     meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
+    saver::{ErasedPolyAssetSaver, ErasedUniAssetSaver, PolyAssetSaver},
     Asset, AssetApp, AssetDependency, AssetPath, AssetServer, LoaderDependency, PolyAssetLoader,
 };
 use alloc::{
@@ -676,6 +677,7 @@ pub struct DevelopmentActionSourceSettings {
     // XXX TODO: We're using type name for the asset but type path for the action?
     // Might be necessary but double check.
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
+    default_poly_saver: Option<(Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
 }
 
 impl Default for DevelopmentActionSourceSettings {
@@ -698,6 +700,7 @@ impl Default for DevelopmentActionSourceSettings {
             validate_action_cache: Default::default(),
             action_type_path_to_action_function,
             asset_type_name_to_saver: Default::default(),
+            default_poly_saver: None,
         }
     }
 }
@@ -737,13 +740,22 @@ impl DevelopmentActionSourceSettings {
     }
 
     pub fn with_saver<T: AssetSaver>(mut self, saver: T) -> Self {
-        // XXX TODO: Do we need anything more than default?
+        // XXX TODO: Do we ever want custom settings?
         let settings = T::Settings::default();
 
         self.asset_type_name_to_saver.insert(
             type_name::<T::Asset>(),
-            (Box::new(saver), Box::new(settings)),
+            (Box::new(ErasedUniAssetSaver(saver)), Box::new(settings)),
         );
+
+        self
+    }
+
+    pub fn with_default_poly_saver<T: PolyAssetSaver>(mut self, saver: T) -> Self {
+        // XXX TODO: Do we ever want custom settings?
+        let settings = T::Settings::default();
+
+        self.default_poly_saver = Some((Box::new(ErasedPolyAssetSaver(saver)), Box::new(settings)));
 
         self
     }
@@ -785,6 +797,7 @@ pub(crate) struct DevelopmentActionSource {
     settings: Arc<DevelopmentActionSourceSettings>,
     dependency_graph: Option<DependencyGraph>,
     action_cache: Option<MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>>,
+    registry: TypeRegistryArc,
 }
 
 #[derive(Error, Debug)]
@@ -814,13 +827,14 @@ impl DevelopmentActionSource {
             "action_cache",
             settings.file_cache_path.as_ref().map(|p| p.join("action")),
             settings.validate_action_cache,
-            registry,
+            registry.clone(),
         ));
 
         Self {
             settings,
             dependency_graph,
             action_cache,
+            registry,
         }
     }
 
@@ -834,18 +848,40 @@ impl DevelopmentActionSource {
         self.settings
             .action_type_path_to_action_function
             .get(type_path)
-            .map(move |a| &**a)
+            .map(AsRef::as_ref)
             .ok_or(FindActionFunctionError::NotFound(type_path))
     }
 
     pub(crate) fn saver<'a>(
         &'a self,
-        type_name: &str,
+        asset: &ErasedLoadedAsset,
+        registry: &TypeRegistryArc,
     ) -> Option<(&'a dyn ErasedAssetSaver, &'a dyn Settings)> {
-        self.settings
+        // Try to find a saver for the asset type.
+        if let Some((saver, settings)) = self
+            .settings
             .asset_type_name_to_saver
-            .get(type_name)
-            .map(move |s| (&*s.0, &*s.1))
+            .get(asset.asset_type_name())
+        {
+            return Some((saver.as_ref(), settings.as_ref()));
+        }
+
+        // If there's no specific saver for the type and the asset is
+        // reflectable, fall back to the default saver.
+        //
+        // XXX TODO: Relationship between "reflectable = default saver" is
+        // unclear. Review. Is this a naming problem or is the structure wrong?
+        //
+        // XXX TODO: Looking up the partial reflect is annoying as it will
+        // probably be done again in the saver. Any alternatives?
+        if asset.as_partial_reflect(&registry.read()).is_some() {
+            self.settings
+                .default_poly_saver
+                .as_ref()
+                .map(|(saver, settings)| (saver.as_ref(), settings.as_ref()))
+        } else {
+            None
+        }
     }
 }
 
@@ -926,7 +962,7 @@ impl ActionSource for DevelopmentActionSource {
                         let standalone_asset_blob = write_standalone_asset(&saved)?;
                         action_cache.put(action_key, standalone_asset_blob.into(), action);
                     } else if let Some((saver, settings)) =
-                        self.saver(output.asset.asset_type_name())
+                        self.saver(&output.asset, &self.registry)
                     {
                         // XXX TODO: Support action outputs with sub-assets. Could be troublesome
                         // as there's two potential cases:
@@ -942,8 +978,7 @@ impl ActionSource for DevelopmentActionSource {
                         // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
                         let loader = asset_server
                             .get_asset_loader_with_type_name(saver.loader_type_name())
-                            .await
-                            .expect("XXX TODO");
+                            .await?;
 
                         let standalone_asset =
                             save_standalone_asset(&output.asset, &*loader, saver, settings).await?;
@@ -1153,7 +1188,7 @@ impl ActionSource for DevelopmentActionSource {
 
                                 // XXX TODO: Duplicates where `load_action` writes to the cache.
                                 let (saver, saver_settings) =
-                                    self.saver(loaded.asset_type_name()).ok_or_else(|| {
+                                    self.saver(&loaded, &self.registry).ok_or_else(|| {
                                         format!(
                                             "Couldn't find saver for asset type \"{}\".",
                                             loaded.asset_type_name()

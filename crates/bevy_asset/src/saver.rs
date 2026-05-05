@@ -68,7 +68,9 @@ pub trait ErasedAssetSaver: Send + Sync + 'static {
     fn loader_type_name(&self) -> &'static str;
 }
 
-impl<S: AssetSaver> ErasedAssetSaver for S {
+pub(crate) struct ErasedUniAssetSaver<S: AssetSaver>(pub(crate) S);
+
+impl<S: AssetSaver> ErasedAssetSaver for ErasedUniAssetSaver<S> {
     fn save<'a>(
         &'a self,
         writer: &'a mut Writer,
@@ -81,7 +83,7 @@ impl<S: AssetSaver> ErasedAssetSaver for S {
                 .downcast_ref::<S::Settings>()
                 .expect("AssetLoader settings should match the loader type");
             let saved_asset = SavedAsset::<S::Asset>::from_loaded(asset).unwrap();
-            if let Err(err) = self.save(writer, saved_asset, settings, asset_path).await {
+            if let Err(err) = self.0.save(writer, saved_asset, settings, asset_path).await {
                 return Err(err.into());
             }
             Ok(())
@@ -96,6 +98,8 @@ impl<S: AssetSaver> ErasedAssetSaver for S {
 }
 
 // XXX TODO: Document.
+// XXX TODO: Note that this is almost the same interface as `ErasedAssetSaver`.
+// Maybe could unify things the same way we did for `ErasedAssetLoader`.
 pub trait PolyAssetSaver: TypePath + Send + Sync + 'static {
     /// The settings type used by this [`PolyAssetSaver`].
     type Settings: Settings + Default + Serialize + for<'a> Deserialize<'a>;
@@ -111,6 +115,41 @@ pub trait PolyAssetSaver: TypePath + Send + Sync + 'static {
         settings: &Self::Settings,
         asset_path: AssetPath<'_>,
     ) -> impl ConditionalSendFuture<Output = Result<Box<dyn Settings>, Self::Error>>;
+}
+
+pub(crate) struct ErasedPolyAssetSaver<S: PolyAssetSaver>(pub(crate) S);
+
+impl<S: PolyAssetSaver> ErasedAssetSaver for ErasedPolyAssetSaver<S> {
+    fn save<'a>(
+        &'a self,
+        writer: &'a mut Writer,
+        asset: &'a ErasedLoadedAsset,
+        settings: &'a dyn Settings,
+        asset_path: AssetPath<'a>,
+    ) -> BoxedFuture<'a, Result<(), BevyError>> {
+        Box::pin(async move {
+            let settings = settings
+                .downcast_ref::<S::Settings>()
+                .expect("AssetLoader settings should match the loader type");
+            let saved_asset = ErasedSavedAsset::from_loaded(asset);
+            if let Err(err) = self
+                .0
+                .save(writer, &saved_asset, settings, asset_path)
+                .await
+            {
+                return Err(err.into());
+            }
+            Ok(())
+        })
+    }
+
+    fn type_name(&self) -> &'static str {
+        core::any::type_name::<S>()
+    }
+
+    fn loader_type_name(&self) -> &'static str {
+        core::any::type_name::<S::OutputLoader>()
+    }
 }
 
 /// An [`Asset`] (and any labeled "sub assets") intended to be saved.
