@@ -648,27 +648,31 @@ impl<'a> ReflectStruct<'a> {
     pub fn to_info_tokens(&self, is_tuple: bool) -> proc_macro2::TokenStream {
         let bevy_reflect_path = self.meta().bevy_reflect_path();
 
-        let (info_variant, info_struct): (_, Path) = if is_tuple {
-            (
-                Ident::new("TupleStruct", Span::call_site()),
-                parse_str("tuple_struct::TupleStructInfo").expect("should be a valid path"),
-            )
-        } else {
-            (
-                Ident::new("Struct", Span::call_site()),
-                parse_str("structs::StructInfo").expect("should be a valid path"),
-            )
-        };
-
         let field_infos = self
             .active_fields()
             .map(|field| field.to_info_tokens(bevy_reflect_path));
 
-        let mut info = quote! {
-            #bevy_reflect_path::#info_struct::new::<Self>(&[
-                #(#field_infos),*
-            ])
+        let (info_variant, info_struct) = if is_tuple {
+            (
+                Ident::new("TupleStruct", Span::call_site()),
+                quote! {{
+                    let mut __builder = #bevy_reflect_path::tuple_struct::TupleStructInfoBuilder::default();
+                    #(__builder.add(#field_infos);)*
+                    __builder.finish::<Self>()
+                }},
+            )
+        } else {
+            (
+                Ident::new("Struct", Span::call_site()),
+                quote! {{
+                    let mut __builder = #bevy_reflect_path::structs::StructInfoBuilder::default();
+                    #(__builder.add(#field_infos);)*
+                    __builder.finish::<Self>()
+                }},
+            )
         };
+
+        let mut info = info_struct;
 
         let custom_attributes = self.meta.attrs.custom_attributes();
         if !custom_attributes.is_empty() {
@@ -887,11 +891,11 @@ impl<'a> ReflectEnum<'a> {
             .iter()
             .map(|variant| variant.to_info_tokens(bevy_reflect_path));
 
-        let mut info = quote! {
-            #bevy_reflect_path::enums::EnumInfo::new::<Self>(&[
-                #(#variants),*
-            ])
-        };
+        let mut info = quote! {{
+            let mut __enum_builder = #bevy_reflect_path::enums::EnumInfoBuilder::default();
+            #(__enum_builder.add(#variants);)*
+            __enum_builder.finish::<Self>()
+        }};
 
         let custom_attributes = self.meta.attrs.custom_attributes();
         if !custom_attributes.is_empty() {
@@ -988,35 +992,35 @@ impl<'a> EnumVariant<'a> {
     pub fn to_info_tokens(&self, bevy_reflect_path: &Path) -> proc_macro2::TokenStream {
         let variant_name = &self.data.ident.to_string();
 
-        let (info_variant, info_struct) = match &self.fields {
-            EnumVariantFields::Unit => (
-                Ident::new("Unit", Span::call_site()),
-                Ident::new("UnitVariantInfo", Span::call_site()),
-            ),
-            EnumVariantFields::Unnamed(..) => (
-                Ident::new("Tuple", Span::call_site()),
-                Ident::new("TupleVariantInfo", Span::call_site()),
-            ),
-            EnumVariantFields::Named(..) => (
-                Ident::new("Struct", Span::call_site()),
-                Ident::new("StructVariantInfo", Span::call_site()),
-            ),
-        };
-
         let fields = self
             .active_fields()
             .map(|field| field.to_info_tokens(bevy_reflect_path));
 
-        let args = match &self.fields {
-            EnumVariantFields::Unit => quote!(#variant_name),
-            _ => {
-                quote!( #variant_name , &[#(#fields),*] )
-            }
+        let (info_variant, info_struct) = match &self.fields {
+            EnumVariantFields::Unit => (Ident::new("Unit", Span::call_site()), {
+                quote! {
+                    #bevy_reflect_path::enums::UnitVariantInfo::new(#variant_name)
+                }
+            }),
+            EnumVariantFields::Unnamed(..) => (
+                Ident::new("Tuple", Span::call_site()),
+                quote! {{
+                    let mut __variant_builder = #bevy_reflect_path::enums::TupleVariantInfoBuilder::default();
+                    #(__variant_builder.add(#fields);)*
+                    __variant_builder.finish(#variant_name)
+                }},
+            ),
+            EnumVariantFields::Named(..) => (
+                Ident::new("Struct", Span::call_site()),
+                quote! {{
+                    let mut __variant_builder = #bevy_reflect_path::enums::StructVariantInfoBuilder::default();
+                    #(__variant_builder.add(#fields);)*
+                    __variant_builder.finish(#variant_name)
+                }},
+            ),
         };
 
-        let mut info = quote! {
-            #bevy_reflect_path::enums::#info_struct::new(#args)
-        };
+        let mut info = info_struct;
 
         let custom_attributes = &self.attrs.custom_attributes;
         if !custom_attributes.is_empty() {

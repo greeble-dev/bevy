@@ -73,6 +73,28 @@ pub trait TupleStruct: PartialReflect {
     }
 }
 
+/// XXX TODO: Document
+#[derive(Default)]
+pub struct TupleStructInfoBuilder(Vec<UnnamedField>);
+
+impl TupleStructInfoBuilder {
+    /// XXX TODO: Document
+    #[inline(never)]
+    pub fn add(&mut self, field: UnnamedField) {
+        self.0.push(field);
+    }
+
+    /// XXX TODO: Document
+    pub fn finish<T: Reflect + TypePath>(self) -> TupleStructInfo {
+        self.finish_erased(Type::of::<T>())
+    }
+
+    #[inline(never)]
+    fn finish_erased(self, ty: Type) -> TupleStructInfo {
+        TupleStructInfo::from_erased(ty, self.0.into_boxed_slice())
+    }
+}
+
 /// A container for compile-time tuple struct info.
 #[derive(Clone, Debug)]
 pub struct TupleStructInfo {
@@ -91,10 +113,14 @@ impl TupleStructInfo {
     ///
     /// * `fields`: The fields of this struct in the order they are defined
     pub fn new<T: Reflect + TypePath>(fields: &[UnnamedField]) -> Self {
+        Self::from_erased(Type::of::<T>(), fields.to_vec().into_boxed_slice())
+    }
+
+    fn from_erased(ty: Type, fields: Box<[UnnamedField]>) -> Self {
         Self {
-            ty: Type::of::<T>(),
+            ty,
             generics: Generics::new(),
-            fields: fields.to_vec().into_boxed_slice(),
+            fields,
             custom_attributes: None,
             #[cfg(feature = "reflect_documentation")]
             docs: None,

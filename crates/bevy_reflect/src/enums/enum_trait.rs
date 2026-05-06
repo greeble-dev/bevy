@@ -5,7 +5,7 @@ use crate::{
     type_info::impl_type_methods,
     Generics, PartialReflect, Type, TypePath,
 };
-use alloc::{boxed::Box, format, string::String};
+use alloc::{boxed::Box, format, string::String, vec::Vec};
 use bevy_platform::collections::HashMap;
 use bevy_platform::sync::Arc;
 use core::slice::Iter;
@@ -146,6 +146,28 @@ pub trait Enum: PartialReflect {
     }
 }
 
+/// XXX TODO: Document
+#[derive(Default)]
+pub struct EnumInfoBuilder(Vec<VariantInfo>);
+
+impl EnumInfoBuilder {
+    /// XXX TODO: Document
+    #[inline(never)]
+    pub fn add(&mut self, variant: VariantInfo) {
+        self.0.push(variant);
+    }
+
+    /// XXX TODO: Document
+    pub fn finish<TEnum: Enum + TypePath>(self) -> EnumInfo {
+        self.finish_erased(Type::of::<TEnum>())
+    }
+
+    #[inline(never)]
+    fn finish_erased(self, ty: Type) -> EnumInfo {
+        EnumInfo::from_erased(ty, self.0.into_boxed_slice())
+    }
+}
+
 /// A container for compile-time enum info, used by [`TypeInfo`](crate::TypeInfo).
 #[derive(Clone, Debug)]
 pub struct EnumInfo {
@@ -166,6 +188,10 @@ impl EnumInfo {
     ///
     /// * `variants`: The variants of this enum in the order they are defined
     pub fn new<TEnum: Enum + TypePath>(variants: &[VariantInfo]) -> Self {
+        Self::from_erased(Type::of::<TEnum>(), variants.to_vec().into_boxed_slice())
+    }
+
+    fn from_erased(ty: Type, variants: Box<[VariantInfo]>) -> Self {
         let variant_indices = variants
             .iter()
             .enumerate()
@@ -175,9 +201,9 @@ impl EnumInfo {
         let variant_names = variants.iter().map(VariantInfo::name).collect();
 
         Self {
-            ty: Type::of::<TEnum>(),
+            ty,
             generics: Generics::new(),
-            variants: variants.to_vec().into_boxed_slice(),
+            variants,
             variant_names,
             variant_indices,
             custom_attributes: None,

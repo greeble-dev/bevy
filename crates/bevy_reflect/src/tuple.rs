@@ -154,6 +154,28 @@ impl GetTupleField for dyn Tuple {
     }
 }
 
+/// XXX TODO: Document
+#[derive(Default)]
+pub struct TupleInfoBuilder(Vec<UnnamedField>);
+
+impl TupleInfoBuilder {
+    /// XXX TODO: Document
+    #[inline(never)]
+    pub fn add(&mut self, field: UnnamedField) {
+        self.0.push(field);
+    }
+
+    /// XXX TODO: Document
+    pub fn finish<T: Reflect + TypePath>(self) -> TupleInfo {
+        self.finish_erased(Type::of::<T>())
+    }
+
+    #[inline(never)]
+    fn finish_erased(self, ty: Type) -> TupleInfo {
+        TupleInfo::from_erased(ty, self.0.into_boxed_slice())
+    }
+}
+
 /// A container for compile-time tuple info.
 #[derive(Clone, Debug)]
 pub struct TupleInfo {
@@ -171,10 +193,14 @@ impl TupleInfo {
     ///
     /// * `fields`: The fields of this tuple in the order they are defined
     pub fn new<T: Reflect + TypePath>(fields: &[UnnamedField]) -> Self {
+        Self::from_erased(Type::of::<T>(), fields.to_vec().into_boxed_slice())
+    }
+
+    fn from_erased(ty: Type, fields: Box<[UnnamedField]>) -> Self {
         Self {
-            ty: Type::of::<T>(),
+            ty,
             generics: Generics::new(),
-            fields: fields.to_vec().into_boxed_slice(),
+            fields,
             #[cfg(feature = "reflect_documentation")]
             docs: None,
         }
@@ -649,10 +675,9 @@ macro_rules! impl_reflect_tuple {
             fn type_info() -> &'static TypeInfo {
                 static CELL: $crate::utility::GenericTypeInfoCell = $crate::utility::GenericTypeInfoCell::new();
                 CELL.get_or_insert::<Self, _>(|| {
-                    let fields = [
-                        $(UnnamedField::new::<$name>($index),)*
-                    ];
-                    let info = TupleInfo::new::<Self>(&fields);
+                    let mut __builder = TupleInfoBuilder::default();
+                        $(__builder.add(UnnamedField::new::<$name>($index));)*
+                    let info = __builder.finish::<Self>();
                     TypeInfo::Tuple(info)
                 })
             }

@@ -2,7 +2,7 @@ use crate::{
     attributes::{impl_custom_attribute_methods, CustomAttributes},
     NamedField, UnnamedField,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use bevy_platform::collections::HashMap;
 use bevy_platform::sync::Arc;
 use core::slice::Iter;
@@ -150,6 +150,24 @@ impl VariantInfo {
     impl_cast_method!(as_unit_variant: Unit => UnitVariantInfo);
 }
 
+/// XXX TODO: Document.
+#[derive(Default)]
+pub struct StructVariantInfoBuilder(Vec<NamedField>);
+
+impl StructVariantInfoBuilder {
+    /// XXX TODO: Document.
+    #[inline(never)]
+    pub fn add(&mut self, field: NamedField) {
+        self.0.push(field);
+    }
+
+    /// XXX TODO: Document.
+    #[inline(never)]
+    pub fn finish(self, name: &'static str) -> StructVariantInfo {
+        StructVariantInfo::from_boxed(name, self.0.into_boxed_slice())
+    }
+}
+
 /// Type info for struct variants.
 #[derive(Clone, Debug)]
 pub struct StructVariantInfo {
@@ -165,11 +183,15 @@ pub struct StructVariantInfo {
 impl StructVariantInfo {
     /// Create a new [`StructVariantInfo`].
     pub fn new(name: &'static str, fields: &[NamedField]) -> Self {
-        let field_indices = Self::collect_field_indices(fields);
+        Self::from_boxed(name, fields.to_vec().into_boxed_slice())
+    }
+
+    fn from_boxed(name: &'static str, fields: Box<[NamedField]>) -> Self {
+        let field_indices = Self::collect_field_indices(&fields);
         let field_names = fields.iter().map(NamedField::name).collect();
         Self {
             name,
-            fields: fields.to_vec().into_boxed_slice(),
+            fields,
             field_names,
             field_indices,
             custom_attributes: None,
@@ -246,6 +268,24 @@ impl StructVariantInfo {
     impl_custom_attribute_methods!(self.custom_attributes, "variant");
 }
 
+/// XXX TODO: Document.
+#[derive(Default)]
+pub struct TupleVariantInfoBuilder(Vec<UnnamedField>);
+
+impl TupleVariantInfoBuilder {
+    /// XXX TODO: Document.
+    #[inline(never)]
+    pub fn add(&mut self, field: UnnamedField) {
+        self.0.push(field);
+    }
+
+    /// XXX TODO: Document.
+    #[inline(never)]
+    pub fn finish(self, name: &'static str) -> TupleVariantInfo {
+        TupleVariantInfo::from_boxed(name, self.0.into_boxed_slice())
+    }
+}
+
 /// Type info for tuple variants.
 #[derive(Clone, Debug)]
 pub struct TupleVariantInfo {
@@ -259,9 +299,13 @@ pub struct TupleVariantInfo {
 impl TupleVariantInfo {
     /// Create a new [`TupleVariantInfo`].
     pub fn new(name: &'static str, fields: &[UnnamedField]) -> Self {
+        Self::from_boxed(name, fields.to_vec().into_boxed_slice())
+    }
+
+    fn from_boxed(name: &'static str, fields: Box<[UnnamedField]>) -> Self {
         Self {
             name,
-            fields: fields.to_vec().into_boxed_slice(),
+            fields,
             custom_attributes: None,
             #[cfg(feature = "reflect_documentation")]
             docs: None,

@@ -102,6 +102,28 @@ impl<'a> IntoIterator for &'a dyn Struct {
     }
 }
 
+/// XXX TODO: Document
+#[derive(Default)]
+pub struct StructInfoBuilder(Vec<NamedField>);
+
+impl StructInfoBuilder {
+    /// XXX TODO: Document
+    #[inline(never)]
+    pub fn add(&mut self, field: NamedField) {
+        self.0.push(field);
+    }
+
+    /// XXX TODO: Document
+    pub fn finish<T: Reflect + TypePath>(self) -> StructInfo {
+        self.finish_erased(Type::of::<T>())
+    }
+
+    #[inline(never)]
+    fn finish_erased(self, ty: Type) -> StructInfo {
+        StructInfo::from_erased(ty, self.0.into_boxed_slice())
+    }
+}
+
 /// A container for compile-time named struct info.
 #[derive(Clone, Debug)]
 pub struct StructInfo {
@@ -122,6 +144,10 @@ impl StructInfo {
     ///
     /// * `fields`: The fields of this struct in the order they are defined
     pub fn new<T: Reflect + TypePath>(fields: &[NamedField]) -> Self {
+        Self::from_erased(Type::of::<T>(), fields.to_vec().into_boxed_slice())
+    }
+
+    fn from_erased(ty: Type, fields: Box<[NamedField]>) -> Self {
         let field_indices = fields
             .iter()
             .enumerate()
@@ -131,9 +157,9 @@ impl StructInfo {
         let field_names = fields.iter().map(NamedField::name).collect();
 
         Self {
-            ty: Type::of::<T>(),
+            ty,
             generics: Generics::new(),
-            fields: fields.to_vec().into_boxed_slice(),
+            fields,
             field_names,
             field_indices,
             custom_attributes: None,
