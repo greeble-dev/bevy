@@ -226,7 +226,14 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
         type_name: Option<&str>,
         path: AssetRef<'a>,
     ) -> UntypedHandle {
-        let path = path.to_owned();
+        let mut path = path.to_owned();
+
+        // XXX TODO: Review. Arguably should be done by `load_with_meta_transform`
+        // and `get_or_create_path_handle_erased.
+        if let Some(settings) = self.settings {
+            path = path.with_settings(settings);
+        }
+
         // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
         // if path.path() == Path::new("") {
         //     error!("Attempted to load an asset with an empty path \"{path}\"!");
@@ -237,7 +244,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                 path,
                 type_id,
                 type_name,
-                self.settings,
+                None,
                 (),
                 self.override_unapproved,
             )

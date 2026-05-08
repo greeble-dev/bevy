@@ -27,8 +27,9 @@ pub mod experimental {
 mod atmosphere;
 mod cluster;
 pub mod contact_shadows;
+// XXX TODO: Made this `pub` to get at standard material conversion. Review.
 #[cfg(feature = "bevy_gltf")]
-mod gltf;
+pub mod gltf;
 use bevy_light::cluster::GlobalClusterSettings;
 use bevy_render::sync_component::SyncComponent;
 pub use contact_shadows::{

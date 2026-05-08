@@ -2,7 +2,10 @@ mod info;
 mod loaders;
 
 use crate::{
-    basset::{ActionSource, ActionSourceBuilder, MinimalActionSource, RootAssetPath, RootAssetRef},
+    basset::{
+        ActionSource, ActionSourceBuilder, DependencyLoading, MinimalActionSource, RootAssetPath,
+        RootAssetRef,
+    },
     folder::LoadedFolder,
     io::{
         AssetReaderError, AssetSource, AssetSourceEvent, AssetSourceId, AssetSources,
@@ -812,7 +815,11 @@ impl AssetServer {
         // `apply` should handle the label?
         match self
             .basset_action_source()
-            .apply(&RootAssetRef::without_label(path.clone()), self)
+            .apply(
+                &RootAssetRef::without_label(path.clone()),
+                self,
+                DependencyLoading::Yes,
+            )
             .await
         {
             Ok(loaded_asset) => {

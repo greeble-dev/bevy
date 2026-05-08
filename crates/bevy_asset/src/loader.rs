@@ -476,6 +476,10 @@ impl ErasedLoadedAsset {
     // this is `&mut dyn` but `VisitAssetDependencies` is `&mut impl`.
     pub fn visit_dependencies(&self, visit: &mut dyn FnMut(AssetDependency)) {
         self.value.visit_dependencies(visit);
+
+        for labeled_asset in &self.labeled_assets {
+            labeled_asset.asset.visit_dependencies(visit);
+        }
     }
 
     pub fn as_partial_reflect<'b>(

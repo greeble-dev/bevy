@@ -21,7 +21,7 @@ use bevy::{
         TypePath,
     },
     render::render_resource::AsBindGroup,
-    tasks::{block_on, IoTaskPool},
+    tasks::block_on,
     time::common_conditions::on_timer,
 };
 // XXX TODO: Should be in `use bevy` above?
@@ -30,10 +30,10 @@ use bevy_asset::{
         action::LoadPath,
         publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
     },
-    io::{AssetSourceId, VecReader, Writer},
+    io::{AssetSourceId, Writer},
     meta::Settings,
     saver::{ErasedSavedAsset, PolyAssetSaver, SavedAsset},
-    AssetPath, AsyncWriteExt,
+    AssetPath, AsyncWriteExt, EphemeralHandleBehavior, HandleSerializeProcessor,
 };
 use bevy_reflect::{TypeRegistry, TypeRegistryArc};
 use bevy_scene::SceneDependencies;
@@ -144,7 +144,7 @@ mod action {
         ) -> Result<BassetActionOutput, Self::Error> {
             let gltf = context.erased_load_dependee(&action.gltf).await?;
 
-            let scene = acme::from_gltf(&gltf);
+            let scene = acme::from_gltf(&gltf)?;
 
             // XXX TODO: What about dependencies?
 
@@ -162,28 +162,17 @@ mod action {
     }
 
     impl MeshletFromMesh {
-        pub fn new(mesh: impl Into<AssetRef<'static>>) -> Self {
-            Self {
-                mesh: mesh.into(),
-                ..Default::default()
-            }
-        }
+        // XXX TODO?
+        // pub fn new(mesh: impl Into<Handle<Mesh>>) -> Self {
+        //     Self {
+        //         mesh: mesh.into(),
+        //         ..Default::default()
+        //     }
+        // }
 
         fn vertex_position_quantization_factor(&self) -> u8 {
             self.vertex_position_quantization_factor
                 .unwrap_or(MESHLET_DEFAULT_VERTEX_POSITION_QUANTIZATION_FACTOR)
-        }
-    }
-
-    // XXX TODO: This makes it nicer to use in BSN, since we can do
-    // `MeshletMesh3d(MeshletFromMesh::new(...)) without an `AssetRef::new`
-    // inbetween. But it's a pain to set this up for every type of action.
-    // Tried a generic `impl<P: BassetAction> From<P> for AssetRef<'static>`,
-    // but that conflicts with other traits. Maybe try again and see if something
-    // can be made to work.
-    impl From<MeshletFromMesh> for AssetRef<'static> {
-        fn from(value: MeshletFromMesh) -> Self {
-            AssetRef::new(value)
         }
     }
 
@@ -240,13 +229,11 @@ mod action {
 
             for entity in &mut scene.entities {
                 if let Some(mesh) = entity.mesh.take() {
-                    entity.meshlet_mesh = Some(acme::AcmeMeshletMesh {
-                        asset: AssetRef::new(MeshletFromMesh {
-                            mesh: mesh.asset,
-                            vertex_position_quantization_factor: action
-                                .vertex_position_quantization_factor,
-                        }),
-                    });
+                    entity.meshlet_mesh = Some(context.make_handle(MeshletFromMesh {
+                        mesh: mesh.path().expect("XXX TODO").clone(),
+                        vertex_position_quantization_factor:
+                            action.vertex_position_quantization_factor,
+                    }));
                 }
             }
 
@@ -314,8 +301,9 @@ mod action {
 
             let meta_bytes = AssetMetaDyn::serialize(&meta);
 
-            // XXX TODO: Verify dependencies and anything else correctly matches
-            // `ApplyContext::finish`.
+            // XXX TODO: Verify we're correctly handling dependencies. Currently
+            // `finished_erased_saved` overwrites the loader dependencies we
+            // paseed in.
             Ok(context.finish_erased_saved(
                 asset,
                 StandaloneAssetData {
@@ -507,7 +495,7 @@ impl RonAssetSaver {
 impl PolyAssetSaver for RonAssetSaver {
     type Settings = ();
     type OutputLoader = RonAssetLoader;
-    type Error = std::io::Error;
+    type Error = BevyError;
 
     async fn save(
         &self,
@@ -521,12 +509,15 @@ impl PolyAssetSaver for RonAssetSaver {
 
             let reflected_asset = asset.as_partial_reflect(&registry).expect("XXX TODO");
 
+            let processor = HandleSerializeProcessor {
+                ephemeral_handle_behavior: EphemeralHandleBehavior::Error,
+            };
+
             // XXX TODO: Check if we can use `ron::de::to_writer_pretty`.
             ron::ser::to_string_pretty(
-                &ReflectSerializer::new(reflected_asset, &registry),
+                &ReflectSerializer::with_processor(reflected_asset, &registry, &processor),
                 ron::ser::PrettyConfig::default(),
-            )
-            .expect("XXX TODO")
+            )?
         };
 
         writer.write_all(string.as_bytes()).await?;
@@ -540,36 +531,23 @@ mod acme {
     use bevy::pbr::experimental::meshlet::MeshletMesh3d;
     use bevy_asset::VisitAssetDependencies;
 
-    #[derive(Debug, VisitAssetDependencies, Reflect)]
-    pub struct AcmeMesh {
-        #[dependency]
-        pub asset: AssetRef<'static>,
-    }
-
-    #[derive(Debug, VisitAssetDependencies, Reflect)]
-    pub struct AcmeMeshletMesh {
-        #[dependency]
-        pub asset: AssetRef<'static>,
-    }
-
-    #[derive(Debug, VisitAssetDependencies, Reflect)]
-    pub struct AcmeMaterial {
-        #[dependency]
-        pub base_color_texture: Option<AssetRef<'static>>,
-    }
-
     #[derive(Default, Debug, VisitAssetDependencies, Reflect)]
     pub struct AcmeEntity {
         pub transform: Transform,
 
         #[dependency]
-        pub mesh: Option<AcmeMesh>,
+        pub mesh: Option<Handle<Mesh>>,
 
         #[dependency]
-        pub meshlet_mesh: Option<AcmeMeshletMesh>,
+        pub meshlet_mesh: Option<Handle<MeshletMesh>>,
 
+        // XXX TODO: Think through what it would take to make this `Handle<StandardMaterial>`.
+        // Problematic because we're currently converting from `GltfMaterial` to `StandardMaterial`
+        // in the action, so we need to make the material a sub-asset. Or maybe that's the wrong
+        // approach and we should leave it as `GltfMaterial` until later. Or maybe this is all
+        // a red herring - real question is what we do for BSN.
         #[dependency]
-        pub material: Option<AcmeMaterial>,
+        pub material: Option<StandardMaterial>,
     }
 
     #[derive(Asset, Default, Debug, Reflect)]
@@ -581,15 +559,21 @@ mod acme {
     fn get_sub_asset<'a, T: Asset>(
         asset: &'a ErasedLoadedAsset,
         sub_asset_handle: &Handle<T>,
-    ) -> &'a T {
+    ) -> Result<&'a T, BevyError> {
         asset
             .get_labeled_by_id(sub_asset_handle.id().untyped())
-            .unwrap_or_else(|| panic!("XXX TODO {:?}", sub_asset_handle.path()))
+            // XXX TODO: Don't use handle debug?
+            .ok_or_else(|| {
+                BevyError::from(format!("Couldn't find sub-asset {sub_asset_handle:?}"))
+            })?
             .get::<T>()
-            .expect("XXX TODO")
+            // XXX TODO: Better error.
+            .ok_or_else(|| {
+                BevyError::from(format!("Sub-asset was wrong type {sub_asset_handle:?}"))
+            })
     }
 
-    pub fn from_gltf(asset: &ErasedLoadedAsset) -> AcmeScene {
+    pub fn from_gltf(asset: &ErasedLoadedAsset) -> Result<AcmeScene, BevyError> {
         let mut entities = Vec::<AcmeEntity>::new();
 
         let gltf = asset.get::<Gltf>().expect("XXX TODO");
@@ -599,7 +583,7 @@ mod acme {
             .nodes
             .iter()
             .filter_map(|node_handle| {
-                let node = get_sub_asset(asset, node_handle);
+                let node = get_sub_asset(asset, node_handle).expect("XXX TODO");
 
                 if node.children.is_empty() {
                     None
@@ -610,33 +594,23 @@ mod acme {
             .collect::<Vec<_>>();
 
         while let Some((node, transform)) = stack.pop() {
-            if let Some(mesh) = node
-                .mesh
-                .as_ref()
-                .map(|mesh_handle| get_sub_asset(asset, mesh_handle))
-            {
+            if let Some(mesh_handle) = &node.mesh {
+                let mesh = get_sub_asset(asset, mesh_handle)?;
+
                 for primitive in mesh.primitives.iter() {
-                    let mesh = Some(AcmeMesh {
-                        asset: primitive.mesh.path().expect("XXX TODO").clone(),
-                    });
-
-                    let standard_material =
-                        get_sub_asset(asset, primitive.material.as_ref().expect("XXX TODO"));
-
-                    let base_color_texture =
-                        standard_material.base_color_texture.clone().map(|p| {
-                            let path = p.path().expect("XXX TODO");
-
-                            AssetRef::new(action::CompressImage {
-                                image: path.clone(),
-                            })
-                        });
-
-                    let material = Some(AcmeMaterial { base_color_texture });
+                    let primitive_mesh = Some(primitive.mesh.clone());
+                    let material = if let Some(gltf_material) = &primitive.material {
+                        Some(
+                            get_sub_asset(asset, gltf_material)
+                                .map(bevy::pbr::gltf::standard_material_from_gltf_material)?,
+                        )
+                    } else {
+                        None
+                    };
 
                     entities.push(AcmeEntity {
                         transform,
-                        mesh,
+                        mesh: primitive_mesh,
                         material,
                         ..Default::default()
                     });
@@ -644,30 +618,27 @@ mod acme {
             }
 
             // Push children onto the stack.
-            for child in node
-                .children
-                .iter()
-                .map(|child_handle| get_sub_asset(asset, child_handle))
-            {
+            for child_handle in node.children.iter() {
+                let child = get_sub_asset(asset, child_handle)?;
+
                 stack.push((child, transform * child.transform));
             }
         }
 
-        AcmeScene { entities }
+        Ok(AcmeScene { entities })
     }
 
     pub fn spawn(
         commands: &mut Commands,
         scene: &AcmeScene,
         parent_entity: Option<Entity>,
-        asset_server: &AssetServer,
         standard_material_assets: &mut Assets<StandardMaterial>,
         meshlet_debug_material_assets: &mut Assets<MeshletDebugMaterial>,
     ) {
         for scene_entity in &scene.entities {
             let mut world_entity = commands.spawn(scene_entity.transform);
 
-            // XXX TODO: Currently this forces the debug material for meshlets.
+            // XXX TODO: Currently this forces the debug #material for meshlets.
             // Should change that to be a scene conversion action. AcmeMaterial
             // will become an enum of standard/debug materials.
 
@@ -676,27 +647,17 @@ mod acme {
                     meshlet_debug_material_assets.add(MeshletDebugMaterial::default()),
                 ));
             } else if let Some(material) = &scene_entity.material {
-                let standard_material = StandardMaterial {
-                    base_color_texture: material
-                        .base_color_texture
-                        .as_ref()
-                        .map(|p| asset_server.load(p)),
-                    ..Default::default()
-                };
-
                 world_entity.insert(MeshMaterial3d(
-                    standard_material_assets.add(standard_material),
+                    standard_material_assets.add(material.clone()),
                 ));
             }
 
             if let Some(mesh) = &scene_entity.mesh {
-                world_entity.insert(Mesh3d(asset_server.load::<Mesh>(&mesh.asset)));
-            }
-
-            if let Some(meshlet_mesh) = &scene_entity.meshlet_mesh {
-                world_entity.insert(MeshletMesh3d(
-                    asset_server.load::<MeshletMesh>(&meshlet_mesh.asset),
-                ));
+                world_entity.insert(Mesh3d(mesh.clone()));
+            } else if let Some(meshlet_mesh) = &scene_entity.meshlet_mesh {
+                world_entity.insert(MeshletMesh3d(meshlet_mesh.clone()));
+            } else {
+                panic!("Expected mesh or meshlet");
             }
 
             if let Some(parent_entity) = parent_entity {
@@ -718,7 +679,6 @@ mod acme {
         mut commands: Commands,
         spawners: Query<(Entity, &AcmeSceneSpawner)>,
         scene_assets: Res<Assets<AcmeScene>>,
-        asset_server: Res<AssetServer>,
         mut standard_material_assets: ResMut<Assets<StandardMaterial>>,
         mut meshlet_debug_material_assets: ResMut<Assets<MeshletDebugMaterial>>,
     ) {
@@ -737,7 +697,6 @@ mod acme {
                 &mut commands,
                 scene_asset,
                 Some(entity),
-                &asset_server,
                 &mut standard_material_assets,
                 &mut meshlet_debug_material_assets,
             );
@@ -1053,41 +1012,44 @@ fn test_serialization() {
     // }
 }
 
-fn test_reflect_serialization(registry: TypeRegistryArc, asset_server: AssetServer) {
-    let task = IoTaskPool::get().spawn(async move {
-        let saver = RonAssetSaver::new(registry.clone());
-        let loader = RonAssetLoader::new(registry.clone());
+fn test_reflect_serialization(_registry: TypeRegistryArc, _asset_server: AssetServer) {
+    // use io::{VecReader};
+    // use tasks::{IoTaskPool};
 
-        let material_original = StandardMaterial::from(Color::srgba(1.0, 2.0, 3.0, 1.0));
+    // let task = IoTaskPool::get().spawn(async move {
+    //     let saver = RonAssetSaver::new(registry.clone());
+    //     let loader = RonAssetLoader::new(registry.clone());
 
-        let mut material_ron = Vec::<u8>::new();
-        saver
-            .save(
-                &mut material_ron,
-                &SavedAsset::from_asset(&material_original).upcast(),
-                &(),
-                AssetPath::default(),
-            )
-            .await
-            .unwrap();
+    //     let material_original = StandardMaterial::from(Color::srgba(1.0, 2.0, 3.0, 1.0));
 
-        std::dbg!(String::from_utf8(material_ron.clone()).unwrap());
+    //     let mut material_ron = Vec::<u8>::new();
+    //     saver
+    //         .save(
+    //             &mut material_ron,
+    //             &SavedAsset::from_asset(&material_original).upcast(),
+    //             &(),
+    //             AssetPath::default(),
+    //         )
+    //         .await
+    //         .unwrap();
 
-        let material_loaded = loader
-            .load(
-                &mut VecReader::new(material_ron),
-                &(),
-                LoadContext::new(&asset_server, AssetPath::default(), true, false, None),
-            )
-            .await
-            .unwrap()
-            .take::<StandardMaterial>()
-            .unwrap();
+    //     std::dbg!(String::from_utf8(material_ron.clone()).unwrap());
 
-        std::dbg!(&material_loaded);
-    });
+    //     let material_loaded = loader
+    //         .load(
+    //             &mut VecReader::new(material_ron),
+    //             &(),
+    //             LoadContext::new(&asset_server, AssetPath::default(), true, false, None),
+    //         )
+    //         .await
+    //         .unwrap()
+    //         .take::<StandardMaterial>()
+    //         .unwrap();
 
-    task.detach();
+    //     std::dbg!(&material_loaded);
+    // });
+
+    // task.detach();
 }
 
 fn main() {

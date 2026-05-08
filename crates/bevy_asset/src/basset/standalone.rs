@@ -8,6 +8,7 @@ use crate::{
     basset::{
         blob::{BlobReader, BlobWriter},
         cache::DependencyCacheKey,
+        DependencyLoading,
     },
     io::SliceReader,
     meta::{AssetActionMinimal, AssetMetaMinimal, Settings},
@@ -57,6 +58,7 @@ pub(crate) async fn load_standalone_asset(
     data: &StandaloneAssetData,
     asset_server: &AssetServer,
     dependency_key: DependencyCacheKey,
+    dependency_loading: DependencyLoading,
 ) -> Result<ErasedLoadedAsset, BevyError> {
     let minimal_meta = ron::de::from_bytes::<AssetMetaMinimal>(&data.meta).expect("XXX TODO");
 
@@ -78,7 +80,7 @@ pub(crate) async fn load_standalone_asset(
     // context then we shouldn't load dependencies, since we only need the
     // asset value. But if we're a regular load then we do load dependencies.
     // Need to work up the call chain and see what the choice should be made.
-    let load_dependencies = true;
+    let load_dependencies = dependency_loading == DependencyLoading::Yes;
 
     let populate_hashes = false;
 
