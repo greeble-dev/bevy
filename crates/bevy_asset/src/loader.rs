@@ -922,7 +922,6 @@ impl<'a> LoadContext<'a> {
                 reader,
                 self.should_load_dependencies,
                 self.populate_hashes,
-                true,
             )
             .await
             .map_err(|error| LoadDirectError::LoadError {

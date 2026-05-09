@@ -1086,6 +1086,60 @@ impl ActionSource for DevelopmentActionSource {
         })
     }
 
+    fn load_with_settings_loader_and_reader<'a>(
+        &'a self,
+        asset_server: &'a AssetServer,
+        asset_path: &'a AssetPath<'_>,
+        settings: &'a dyn Settings,
+        loader: &'a dyn ErasedAssetLoader,
+        reader: &'a mut dyn Reader,
+        dependency_loading: DependencyLoading,
+        populate_hashes: bool,
+    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, AssetLoadError>> {
+        Box::pin(async move {
+            // XXX TODO: Race condition. `dependency_key` will be reloading the asset,
+            // and we don't know if it matches `reader`. Need to think through how
+            // we can do this efficiently, particularly for the non-development case
+            // where the dependency key isn't needed and we don't want to touch the
+            // reader at all.
+            let dependency_key = if let Some(future) = self.dependency_key(
+                &LoaderDependency::Load(
+                    RootAssetPath::without_label(asset_path.clone_owned()).into(),
+                ),
+                None,
+            ) {
+                future.await
+            } else {
+                None
+            };
+
+            let result = internal_load_with_settings_loader_and_reader(
+                asset_server,
+                asset_path,
+                settings,
+                loader,
+                reader,
+                dependency_loading,
+                populate_hashes,
+                dependency_key,
+            )
+            .await?;
+
+            if let Some(future) = self.register_dependencies(
+                &RootAssetRef::from(
+                    RootAssetPath::try_from(asset_path.clone_owned())
+                        .expect("XXX TODO: Can we assume no label?"),
+                ),
+                Some(settings),
+                &result,
+            ) {
+                future.await;
+            }
+
+            Ok(result)
+        })
+    }
+
     fn dependency_key<'a>(
         &'a self,
         path: &'a LoaderDependency,
@@ -1543,6 +1597,31 @@ pub trait ActionSource: Send + Sync + 'static {
         dependency_loading: DependencyLoading,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
 
+    fn load_with_settings_loader_and_reader<'a>(
+        &'a self,
+        asset_server: &'a AssetServer,
+        asset_path: &'a AssetPath<'_>,
+        settings: &'a dyn Settings,
+        loader: &'a dyn ErasedAssetLoader,
+        reader: &'a mut dyn Reader,
+        dependency_loading: DependencyLoading,
+        populate_hashes: bool,
+    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, AssetLoadError>> {
+        Box::pin(async move {
+            internal_load_with_settings_loader_and_reader(
+                asset_server,
+                asset_path,
+                settings,
+                loader,
+                reader,
+                dependency_loading,
+                populate_hashes,
+                None,
+            )
+            .await
+        })
+    }
+
     fn dependency_key<'a>(
         &'a self,
         _path: &'a LoaderDependency,
@@ -1770,12 +1849,6 @@ impl ActionSource for PublishedActionSource {
             let load_dependencies = dependency_loading == DependencyLoading::Yes;
             let populate_hashes = false;
 
-            // We're in published mode, so no need to update the dependency cache.
-            //
-            // XXX TODO: Review. We're making a fragile assumption. Should this value
-            // even matter if the dependency cache isn't available?
-            let update_dependency_cache = false;
-
             // XXX TODO: Ew? Need to decide if we try to support the original path.
             let fake_path = AssetPath::parse("ERROR - published assets shouldn't use their path");
 
@@ -1787,7 +1860,6 @@ impl ActionSource for PublishedActionSource {
                     &mut readers.asset,
                     load_dependencies,
                     populate_hashes,
-                    update_dependency_cache,
                 )
                 .await?)
         })

@@ -3,8 +3,7 @@ mod loaders;
 
 use crate::{
     basset::{
-        internal_load_with_settings_loader_and_reader, ActionSource, ActionSourceBuilder,
-        DependencyLoading, MinimalActionSource, RootAssetPath, RootAssetRef,
+        ActionSource, ActionSourceBuilder, DependencyLoading, MinimalActionSource, RootAssetRef,
     },
     folder::LoadedFolder,
     io::{
@@ -17,8 +16,8 @@ use crate::{
     path::AssetPath,
     Asset, AssetEvent, AssetHandleProvider, AssetId, AssetIndex, AssetLoadFailedEvent,
     AssetMetaCheck, AssetRef, Assets, DeserializeMetaError, ErasedAssetIndex, ErasedLoadedAsset,
-    Handle, LoadedUntypedAsset, LoaderDependency, PolyAssetLoader, UnapprovedPathMode,
-    UntypedAssetId, UntypedAssetLoadFailedEvent, UntypedHandle, VisitAssetDependencies,
+    Handle, LoadedUntypedAsset, PolyAssetLoader, UnapprovedPathMode, UntypedAssetId,
+    UntypedAssetLoadFailedEvent, UntypedHandle, VisitAssetDependencies,
 };
 use alloc::{borrow::ToOwned, boxed::Box, vec, vec::Vec};
 use alloc::{
@@ -1627,53 +1626,18 @@ impl AssetServer {
         reader: &mut dyn Reader,
         load_dependencies: bool,
         populate_hashes: bool,
-        update_dependency_cache: bool,
     ) -> Result<ErasedLoadedAsset, AssetLoadError> {
-        // XXX TODO: Race condition. `dependency_key` will be reloading the asset,
-        // and we don't know if it matches `reader`. Need to think through how
-        // we can do this efficiently, particularly for the non-development case
-        // where the dependency key isn't needed and we don't want to touch the
-        // reader at all.
-        // XXX TODO: Settings parameter?
-        let dependency_key = if update_dependency_cache
-            && let Some(future) = self.basset_action_source().dependency_key(
-                &LoaderDependency::Load(
-                    RootAssetPath::without_label(asset_path.clone_owned()).into(),
-                ),
-                None,
-            ) {
-            future.await
-        } else {
-            None
-        };
-
-        let result = internal_load_with_settings_loader_and_reader(
-            self,
-            asset_path,
-            settings,
-            loader,
-            reader,
-            DependencyLoading::new(load_dependencies),
-            populate_hashes,
-            dependency_key,
-        )
-        .await;
-
-        if update_dependency_cache
-            && let Ok(asset) = &result
-            && let Some(future) = self.basset_action_source().register_dependencies(
-                &RootAssetRef::from(
-                    RootAssetPath::try_from(asset_path.clone_owned())
-                        .expect("XXX TODO: Can we assume no label?"),
-                ),
-                Some(settings),
-                asset,
+        self.basset_action_source()
+            .load_with_settings_loader_and_reader(
+                self,
+                asset_path,
+                settings,
+                loader,
+                reader,
+                DependencyLoading::new(load_dependencies),
+                populate_hashes,
             )
-        {
-            future.await;
-        }
-
-        result
+            .await
     }
 
     /// Returns a future that will suspend until the specified asset and its dependencies finish
