@@ -20,8 +20,8 @@ use crate::{
     io::{AssetReaderError, AssetSourceId, AssetSources},
     meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
     saver::{ErasedPolyAssetSaver, ErasedUniAssetSaver, PolyAssetSaver},
-    Asset, AssetApp, AssetDependency, AssetPath, AssetServer, Handle, LoaderDependency,
-    PolyAssetLoader,
+    Asset, AssetApp, AssetDependency, AssetLoadError, AssetLoaderError, AssetPath, AssetServer,
+    ErasedAssetLoader, Handle, LoaderDependency, PolyAssetLoader,
 };
 use alloc::{
     boxed::Box,
@@ -55,6 +55,7 @@ use core::{
     fmt::{Debug, Display},
     hash::{Hash, Hasher},
     ops::Deref,
+    panic::AssertUnwindSafe,
     result::Result,
 };
 use downcast_rs::{impl_downcast, Downcast};
@@ -1107,11 +1108,10 @@ impl ActionSource for DevelopmentActionSource {
         _settings: Option<&'a dyn Settings>,
         asset: &'a ErasedLoadedAsset,
     ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
-        Some(Box::pin(async move {
-            // XXX TODO: Can move branch outside of `Box::pin`?
-            if let Some(dependency_key) = asset.dependency_key
-                && let Some(dependency_graph) = &self.dependency_graph
-            {
+        if let Some(dependency_key) = asset.dependency_key
+            && let Some(dependency_graph) = &self.dependency_graph
+        {
+            Some(Box::pin(async move {
                 let mut loader_dependencies =
                     Vec::<CacheLoaderDependency>::with_capacity(asset.loader_dependencies.len());
 
@@ -1149,10 +1149,10 @@ impl ActionSource for DevelopmentActionSource {
                 );
 
                 dependency_graph.register_dependencies_load(path, dependency_key, dependency_value)
-            } else {
-                None
-            }
-        }))
+            }))
+        } else {
+            None
+        }
     }
 
     fn register_bytes_dependency<'a>(
@@ -1160,16 +1160,15 @@ impl ActionSource for DevelopmentActionSource {
         path: &'a RootAssetPath<'static>,
         dependency_key: Option<DependencyCacheKey>,
     ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
-        Some(Box::pin(async move {
-            // XXX TODO: Can move branch outside of `Box::pin`?
-            if let Some(dependency_key) = dependency_key
-                && let Some(dependency_graph) = &self.dependency_graph
-            {
+        if let Some(dependency_key) = dependency_key
+            && let Some(dependency_graph) = &self.dependency_graph
+        {
+            Some(Box::pin(async move {
                 dependency_graph.register_dependencies_file(path, dependency_key)
-            } else {
-                None
-            }
-        }))
+            }))
+        } else {
+            None
+        }
     }
 
     // XXX TODO: Less hacky debugging.
@@ -1515,6 +1514,20 @@ pub enum DependencyLoading {
     No,
 }
 
+impl DependencyLoading {
+    pub fn new(value: bool) -> Self {
+        if value {
+            Self::Yes
+        } else {
+            Self::No
+        }
+    }
+
+    pub fn as_bool(&self) -> bool {
+        *self == Self::Yes
+    }
+}
+
 // XXX TODO: Review name? Does have some similarities to `AssetSource` but not
 // that much. `ActionHandler`?
 //
@@ -1578,7 +1591,10 @@ pub trait ActionSource: Send + Sync + 'static {
         tracing::error!("dump_dependency_graph not implemented");
     }
 
-    // XXX TODO: Should this be here?
+    // XXX TODO: This shouldn't be here - only one source can actually publish.
+    // Publishing kinda duplicates a lot of `DevelopmentActionSource`, so probably
+    // needs refactoring to pull out that duplication and make publishing its
+    // own action source?
     fn publish<'a>(
         &'a self,
         _input: PublishInput,
@@ -1778,11 +1794,53 @@ impl ActionSource for PublishedActionSource {
     }
 }
 
+pub(crate) async fn internal_load_with_settings_loader_and_reader(
+    asset_server: &AssetServer,
+    asset_path: &AssetPath<'_>,
+    settings: &dyn Settings,
+    loader: &dyn ErasedAssetLoader,
+    reader: &mut dyn Reader,
+    dependency_loading: DependencyLoading,
+    populate_hashes: bool,
+    dependency_key: Option<DependencyCacheKey>,
+) -> Result<ErasedLoadedAsset, AssetLoadError> {
+    // XXX TODO: Just take by value?
+    let asset_path = asset_path.clone_owned();
+
+    let load_context = LoadContext::new(
+        asset_server,
+        asset_path.clone(),
+        dependency_loading.as_bool(),
+        populate_hashes,
+        dependency_key,
+    );
+    let load = AssertUnwindSafe(loader.load(reader, settings, load_context)).catch_unwind();
+    #[cfg(feature = "trace")]
+    let load = {
+        use tracing::Instrument;
+
+        let span = tracing::info_span!(
+            "asset loading",
+            loader = loader.type_path(),
+            asset = asset_path.to_string()
+        );
+        load.instrument(span)
+    };
+    load.await
+        .map_err(|_| AssetLoadError::AssetLoaderPanic {
+            path: asset_path.clone_owned().into(),
+            loader_name: loader.type_path(),
+        })?
+        .map_err(|e| {
+            AssetLoadError::AssetLoaderError(AssetLoaderError {
+                path: asset_path.clone_owned().into(),
+                loader_name: loader.type_path(),
+                error: e.into(),
+            })
+        })
+}
+
 pub mod action {
-    use core::panic::AssertUnwindSafe;
-
-    use crate::{AssetLoadError, AssetLoaderError};
-
     use super::*;
     use alloc::string::String;
 
@@ -1861,51 +1919,17 @@ pub mod action {
                 future.await;
             };
 
-            // XXX TODO: This is mostly a copy and paste of `load_with_settings_loader_and_reader`,
-            // minus dependency registration. Investigate refactoring.
-
-            // XXX TODO: Not loading dependencies can be wrong? Should be context
-            // dependent - if we're a loader dependency of another action then we
-            // shouldn't be loading dependencies. But if we're a regular load
-            // then we should?
-            let load_dependencies = context.dependency_loading() == DependencyLoading::Yes;
-
-            let populate_hashes = false;
-
-            let load_context = LoadContext::new(
+            let mut asset = internal_load_with_settings_loader_and_reader(
                 asset_server,
-                path.clone(),
-                load_dependencies,
-                populate_hashes,
+                &path,
+                settings,
+                &*loader,
+                &mut reader,
+                context.dependency_loading(),
+                false,
                 context.dependency_key,
-            );
-            let load =
-                AssertUnwindSafe(loader.load(&mut reader, settings, load_context)).catch_unwind();
-            #[cfg(feature = "trace")]
-            let load = {
-                use tracing::Instrument;
-
-                let span = tracing::info_span!(
-                    "asset loading",
-                    loader = loader.type_path(),
-                    asset = path.to_string()
-                );
-                load.instrument(span)
-            };
-            let mut asset = load
-                .await
-                .map_err(|_| AssetLoadError::AssetLoaderPanic {
-                    path: path.clone_owned().into(),
-                    loader_name: loader.type_path(),
-                })?
-                .map_err(|e| {
-                    AssetLoadError::AssetLoaderError(AssetLoaderError {
-                        path: path.clone_owned().into(),
-                        loader_name: loader.type_path(),
-                        error: e.into(),
-                    })
-                })
-                .map_err(Into::<BevyError>::into)?;
+            )
+            .await?;
 
             // XXX TODO: Justify. Change to error rather than panic.
             assert_eq!(context.dependency_key, asset.dependency_key);

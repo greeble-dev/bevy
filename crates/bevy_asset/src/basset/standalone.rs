@@ -8,7 +8,7 @@ use crate::{
     basset::{
         blob::{BlobReader, BlobWriter},
         cache::DependencyCacheKey,
-        DependencyLoading,
+        internal_load_with_settings_loader_and_reader, DependencyLoading,
     },
     io::SliceReader,
     meta::{AssetActionMinimal, AssetMetaMinimal, Settings},
@@ -76,44 +76,23 @@ pub(crate) async fn load_standalone_asset(
 
     let mut reader = SliceReader::new(&data.asset);
 
-    // XXX TODO: What's the correct value here? If we're in an action apply
-    // context then we shouldn't load dependencies, since we only need the
-    // asset value. But if we're a regular load then we do load dependencies.
-    // Need to work up the call chain and see what the choice should be made.
-    let load_dependencies = dependency_loading == DependencyLoading::Yes;
-
     let populate_hashes = false;
-
-    // Don't update the dependency cache. If we're loading from the action cache
-    // then the dependencies must be already known, otherwise we wouldn't have
-    // been able to calculate the action key.
-    //
-    // XXX TODO: This feels janky. Maybe we should be sidestepping
-    // `load_with_settings_loader_and_reader` for clarity? Or generally rethink
-    // how the dependency cache gets filled out.
-    let update_dependency_cache = false;
 
     // XXX TODO: Ew? Need to decide if we try to support the original path.
     let fake_path = AssetPath::parse("ERROR - Standalone assets shouldn't use their path");
 
-    let mut asset = asset_server
-        .load_with_settings_loader_and_reader(
-            &fake_path,
-            meta.loader_settings().expect("meta is set to Load"),
-            &*loader,
-            &mut reader,
-            load_dependencies,
-            populate_hashes,
-            update_dependency_cache,
-        )
-        .await
-        .map_err(Into::<BevyError>::into)?;
-
-    // XXX TODO: Janky. Need to review as this isn't the only place with some
-    // fragile poking of dependency stuff (see `BassetLoader`, `LoadPath`).
-    asset.dependency_key = Some(dependency_key);
-
-    Ok(asset)
+    internal_load_with_settings_loader_and_reader(
+        asset_server,
+        &fake_path,
+        meta.loader_settings().expect("meta is set to Load"),
+        &*loader,
+        &mut reader,
+        dependency_loading,
+        populate_hashes,
+        Some(dependency_key),
+    )
+    .await
+    .map_err(Into::<BevyError>::into)
 }
 
 // XXX TODO: More specific error type?

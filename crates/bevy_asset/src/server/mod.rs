@@ -3,8 +3,8 @@ mod loaders;
 
 use crate::{
     basset::{
-        ActionSource, ActionSourceBuilder, DependencyLoading, MinimalActionSource, RootAssetPath,
-        RootAssetRef,
+        internal_load_with_settings_loader_and_reader, ActionSource, ActionSourceBuilder,
+        DependencyLoading, MinimalActionSource, RootAssetPath, RootAssetRef,
     },
     folder::LoadedFolder,
     io::{
@@ -12,7 +12,7 @@ use crate::{
         AssetWriterError, ErasedAssetReader, MissingAssetSourceError, MissingAssetWriterError,
         MissingProcessedAssetReaderError, Reader,
     },
-    loader::{AssetLoader, ErasedAssetLoader, LoadContext, LoadedAsset},
+    loader::{AssetLoader, ErasedAssetLoader, LoadedAsset},
     meta::{AssetActionMinimal, AssetMetaDyn, AssetMetaMinimal, MetaTransform, Settings},
     path::AssetPath,
     Asset, AssetEvent, AssetHandleProvider, AssetId, AssetIndex, AssetLoadFailedEvent,
@@ -38,11 +38,10 @@ use bevy_tasks::IoTaskPool;
 use core::{
     any::{type_name, TypeId},
     future::Future,
-    panic::AssertUnwindSafe,
     task::Poll,
 };
 use crossbeam_channel::{Receiver, Sender};
-use futures_lite::{FutureExt, StreamExt};
+use futures_lite::StreamExt;
 use info::*;
 use loaders::*;
 use serde::Serialize;
@@ -1620,7 +1619,6 @@ impl AssetServer {
         Ok((meta, loader, reader))
     }
 
-    // XXX TODO: Review change from pub(crate) -> pub.
     pub(crate) async fn load_with_settings_loader_and_reader(
         &self,
         asset_path: &AssetPath<'_>,
@@ -1649,46 +1647,24 @@ impl AssetServer {
             None
         };
 
-        // TODO: experiment with this
-        let asset_path = asset_path.clone_owned();
-        let load_context = LoadContext::new(
+        let result = internal_load_with_settings_loader_and_reader(
             self,
-            asset_path.clone(),
-            load_dependencies,
+            asset_path,
+            settings,
+            loader,
+            reader,
+            DependencyLoading::new(load_dependencies),
             populate_hashes,
             dependency_key,
-        );
-        let load = AssertUnwindSafe(loader.load(reader, settings, load_context)).catch_unwind();
-        #[cfg(feature = "trace")]
-        let load = {
-            use tracing::Instrument;
-
-            let span = tracing::info_span!(
-                "asset loading",
-                loader = loader.type_path(),
-                asset = asset_path.to_string()
-            );
-            load.instrument(span)
-        };
-        let result = load
-            .await
-            .map_err(|_| AssetLoadError::AssetLoaderPanic {
-                path: asset_path.clone_owned().into(),
-                loader_name: loader.type_path(),
-            })?
-            .map_err(|e| {
-                AssetLoadError::AssetLoaderError(AssetLoaderError {
-                    path: asset_path.clone_owned().into(),
-                    loader_name: loader.type_path(),
-                    error: e.into(),
-                })
-            });
+        )
+        .await;
 
         if update_dependency_cache
             && let Ok(asset) = &result
             && let Some(future) = self.basset_action_source().register_dependencies(
                 &RootAssetRef::from(
-                    RootAssetPath::try_from(asset_path).expect("XXX TODO: Can we assume no label?"),
+                    RootAssetPath::try_from(asset_path.clone_owned())
+                        .expect("XXX TODO: Can we assume no label?"),
                 ),
                 Some(settings),
                 asset,
