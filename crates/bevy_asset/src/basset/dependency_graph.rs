@@ -6,11 +6,10 @@ use crate::{
         },
         RootAssetPath, RootAssetRef,
     },
-    io::AssetSources,
-    meta::Settings,
-    LoaderDependency,
+    io::{AssetSources, Reader, VecReader},
+    LoaderDependency, ReadAssetBytesError,
 };
-use alloc::{string::ToString, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, string::ToString, sync::Arc, vec, vec::Vec};
 use bevy_platform::{collections::HashMap, hash::FixedHasher};
 use bevy_reflect::TypeRegistryArc;
 use core::{
@@ -328,20 +327,9 @@ impl DependencyGraph {
 
     // XXX TODO: If we know the path is an action then we don't need async? Is that
     // worth optimizing for?
-    pub(crate) async fn dependency_key(
-        &self,
-        path: &LoaderDependency,
-        _settings: Option<&dyn Settings>,
-    ) -> DependencyCacheKey {
+    pub(crate) async fn dependency_key(&self, path: &LoaderDependency) -> DependencyCacheKey {
         // XXX TODO: Seed hash?
         let mut hasher = blake3::Hasher::new();
-
-        // XXX TODO: Should we be including settings in the dependency key? Unclear
-        // if needed now with that we have the `LoadPath` action.
-        //
-        // if let Some(meta) = meta {
-        //     hasher.update(&meta.serialize());
-        // }
 
         // XXX TODO: Should we also mix in something here to make sure that the two
         // `LoaderDependency` variants are separate?
@@ -364,6 +352,32 @@ impl DependencyGraph {
         // XXX TODO: if `LoaderDependency::Load` then we should include the loader versions.
 
         DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
+    }
+
+    pub(crate) async fn read_asset_bytes(
+        &self,
+        path: &RootAssetPath<'static>,
+        reader: &mut dyn Reader,
+    ) -> Result<(Box<dyn Reader>, DependencyCacheKey), ReadAssetBytesError> {
+        let (bytes, content_hash) = self.content_cache.read_asset_bytes(path, reader).await?;
+
+        // XXX TODO: Review this function and check that we're matching the other
+        // `dependency_key` function. Maybe factor out shared logic?
+        let dependency_key = {
+            let mut hasher = blake3::Hasher::new();
+
+            hasher.update(path.to_string().as_bytes());
+            hasher.update(&content_hash.as_bytes());
+
+            DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
+        };
+
+        self.graph
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .set_file(path.clone(), dependency_key);
+
+        Ok((Box::new(VecReader::new(bytes)), dependency_key))
     }
 
     pub(crate) async fn action_key(
@@ -403,8 +417,7 @@ impl DependencyGraph {
                     continue;
                 };
 
-                // XXX TODO: Settings parameter?
-                let current_dependency_key = self.dependency_key(&path, None).await;
+                let current_dependency_key = self.dependency_key(&path).await;
 
                 // The tentative dependency key came from the dependency cache. Check
                 // if it matches the current file state. If not then invalidate the
@@ -509,17 +522,6 @@ impl DependencyGraph {
         }
 
         action_key
-    }
-
-    pub(crate) fn register_dependencies_file(
-        &self,
-        path: &RootAssetPath<'static>,
-        dependency_key: DependencyCacheKey,
-    ) -> Option<ActionCacheKey> {
-        self.graph
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .set_file(path.clone(), dependency_key)
     }
 }
 

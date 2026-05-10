@@ -21,7 +21,7 @@ use crate::{
     meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
     saver::{ErasedPolyAssetSaver, ErasedUniAssetSaver, PolyAssetSaver},
     Asset, AssetApp, AssetDependency, AssetLoadError, AssetLoaderError, AssetPath, AssetServer,
-    ErasedAssetLoader, Handle, LoaderDependency, PolyAssetLoader,
+    ErasedAssetLoader, Handle, LoaderDependency, PolyAssetLoader, ReadAssetBytesError,
 };
 use alloc::{
     boxed::Box,
@@ -961,6 +961,61 @@ impl DevelopmentActionSource {
             None
         }
     }
+
+    // XXX TODO: Settings?
+    fn register_dependencies<'a>(
+        &'a self,
+        path: &'a RootAssetRef,
+        // XXX TODO: Settings?
+        _settings: Option<&'a dyn Settings>,
+        asset: &'a ErasedLoadedAsset,
+    ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
+        if let Some(dependency_key) = asset.dependency_key
+            && let Some(dependency_graph) = &self.dependency_graph
+        {
+            Some(Box::pin(async move {
+                let mut loader_dependencies =
+                    Vec::<CacheLoaderDependency>::with_capacity(asset.loader_dependencies.len());
+
+                for (loader_dependency, (_, dependency_key)) in &asset.loader_dependencies {
+                    if let Some(dependency_key) = dependency_key {
+                        loader_dependencies.push(CacheLoaderDependency::new(
+                            loader_dependency.clone(),
+                            *dependency_key,
+                        ));
+                    } else {
+                        warn!("Missing dependency key for loader dependency. path: {path:?} dependency: {loader_dependency:?}");
+                        return None;
+                    }
+                }
+
+                let mut external_dependees = HashSet::<RootAssetRef>::new();
+
+                asset.visit_dependencies(&mut |dependency| {
+                    if let Some(path) = match dependency {
+                        AssetDependency::Id(_) => todo!(
+                            "Decide if we disallow ids. Dependency tracking requires the path."
+                        ),
+                        AssetDependency::Handle(handle) => handle.path().cloned(),
+                        AssetDependency::Path(path) => Some(path.clone()),
+                    } {
+                        external_dependees.insert(RootAssetRef::without_label(path));
+                    }
+                });
+
+                // XXX TODO: Are we accounting for sub-asset dependencies?
+
+                let dependency_value = DependencyCacheValue::new(
+                    loader_dependencies.into_iter(),
+                    external_dependees.into_iter(),
+                );
+
+                dependency_graph.register_dependencies_load(path, dependency_key, dependency_value)
+            }))
+        } else {
+            None
+        }
+    }
 }
 
 impl ActionSource for DevelopmentActionSource {
@@ -979,7 +1034,7 @@ impl ActionSource for DevelopmentActionSource {
             let dependency_key = if let Some(dependency_graph) = &self.dependency_graph {
                 Some(
                     dependency_graph
-                        .dependency_key(&LoaderDependency::Load(action.clone()), None)
+                        .dependency_key(&LoaderDependency::Load(action.clone()))
                         .await,
                 )
             } else {
@@ -1102,12 +1157,15 @@ impl ActionSource for DevelopmentActionSource {
             // we can do this efficiently, particularly for the non-development case
             // where the dependency key isn't needed and we don't want to touch the
             // reader at all.
-            let dependency_key = if let Some(future) = self.dependency_key(
-                &LoaderDependency::Load(
-                    RootAssetPath::without_label(asset_path.clone_owned()).into(),
-                ),
-                None,
-            ) {
+            //
+            // Also need to think through if we even support the custom reader
+            // case - our dependency tracking won't work with it. Perhaps the
+            // real fix is to restructure things to choose between loading a reader
+            // and loading a path, and then our dependency tracking just ignores
+            // the reader case. Means some annoying changes to stuff like `NestedLoadBuilder`.
+            let dependency_key = if let Some(future) = self.dependency_key(&LoaderDependency::Load(
+                RootAssetPath::without_label(asset_path.clone_owned()).into(),
+            )) {
                 future.await
             } else {
                 None
@@ -1140,85 +1198,32 @@ impl ActionSource for DevelopmentActionSource {
         })
     }
 
+    fn read_asset_bytes<'a>(
+        &'a self,
+        path: RootAssetPath<'static>,
+        reader: &'a mut dyn Reader,
+    ) -> BoxedFuture<'a, Result<Option<(Box<dyn Reader>, DependencyCacheKey)>, ReadAssetBytesError>>
+    {
+        // XXX TODO: Make future optional when there's no dependency graph?
+        Box::pin(async move {
+            if let Some(dependency_graph) = &self.dependency_graph {
+                let (reader, dependency_key) =
+                    dependency_graph.read_asset_bytes(&path, reader).await?;
+
+                Ok(Some((reader, dependency_key)))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
     fn dependency_key<'a>(
         &'a self,
         path: &'a LoaderDependency,
-        settings: Option<&'a dyn Settings>,
     ) -> Option<BoxedFuture<'a, Option<DependencyCacheKey>>> {
         if let Some(dependency_graph) = &self.dependency_graph {
             Some(Box::pin(async move {
-                Some(dependency_graph.dependency_key(path, settings).await)
-            }))
-        } else {
-            None
-        }
-    }
-
-    // XXX TODO: Settings?
-    fn register_dependencies<'a>(
-        &'a self,
-        path: &'a RootAssetRef,
-        // XXX TODO: Settings?
-        _settings: Option<&'a dyn Settings>,
-        asset: &'a ErasedLoadedAsset,
-    ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
-        if let Some(dependency_key) = asset.dependency_key
-            && let Some(dependency_graph) = &self.dependency_graph
-        {
-            Some(Box::pin(async move {
-                let mut loader_dependencies =
-                    Vec::<CacheLoaderDependency>::with_capacity(asset.loader_dependencies.len());
-
-                for (loader_dependency, (_, dependency_key)) in &asset.loader_dependencies {
-                    if let Some(dependency_key) = dependency_key {
-                        loader_dependencies.push(CacheLoaderDependency::new(
-                            loader_dependency.clone(),
-                            *dependency_key,
-                        ));
-                    } else {
-                        warn!("Missing dependency key for loader dependency. path: {path:?} dependency: {loader_dependency:?}");
-                        return None;
-                    }
-                }
-
-                let mut external_dependees = HashSet::<RootAssetRef>::new();
-
-                asset.visit_dependencies(&mut |dependency| {
-                    if let Some(path) = match dependency {
-                        AssetDependency::Id(_) => todo!(
-                            "Decide if we disallow ids. Dependency tracking requires the path."
-                        ),
-                        AssetDependency::Handle(handle) => handle.path().cloned(),
-                        AssetDependency::Path(path) => Some(path.clone()),
-                    } {
-                        external_dependees.insert(RootAssetRef::without_label(path));
-                    }
-                });
-
-                // XXX TODO: Are we accounting for sub-asset dependencies?
-
-                let dependency_value = DependencyCacheValue::new(
-                    loader_dependencies.into_iter(),
-                    external_dependees.into_iter(),
-                );
-
-                dependency_graph.register_dependencies_load(path, dependency_key, dependency_value)
-            }))
-        } else {
-            None
-        }
-    }
-
-    fn register_bytes_dependency<'a>(
-        &'a self,
-        path: &'a RootAssetPath<'static>,
-        dependency_key: Option<DependencyCacheKey>,
-    ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
-        if let Some(dependency_key) = dependency_key
-            && let Some(dependency_graph) = &self.dependency_graph
-        {
-            Some(Box::pin(async move {
-                dependency_graph.register_dependencies_file(path, dependency_key)
+                Some(dependency_graph.dependency_key(path).await)
             }))
         } else {
             None
@@ -1622,45 +1627,21 @@ pub trait ActionSource: Send + Sync + 'static {
         })
     }
 
+    // XXX TODO: Review name. In practice it's more like `register_file_dependency`?
+    fn read_asset_bytes<'a>(
+        &'a self,
+        _path: RootAssetPath<'static>,
+        _reader: &'a mut dyn Reader,
+    ) -> BoxedFuture<'a, Result<Option<(Box<dyn Reader>, DependencyCacheKey)>, ReadAssetBytesError>>
+    {
+        // XXX TODO: Make future optional?
+        Box::pin(async move { Ok(None) })
+    }
+
     fn dependency_key<'a>(
         &'a self,
         _path: &'a LoaderDependency,
-        _settings: Option<&'a dyn Settings>,
     ) -> Option<BoxedFuture<'a, Option<DependencyCacheKey>>> {
-        None
-    }
-
-    // XXX TODO: Try and avoid exposing this. It's currently only for development
-    // mode to fill out the dependency graph from `AssetServer::load_with_settings_loader_and_reader`.
-    //
-    // XXX TODO: Review return type. Returning an option is a faff, but avoids
-    // redundantly created a boxed future it's a noop.
-    fn register_dependencies<'a>(
-        &'a self,
-        // XXX TODO: Consider `RootAssetRef<'a>`?
-        _path: &'a RootAssetRef,
-        _settings: Option<&'a dyn Settings>,
-        _asset: &'a ErasedLoadedAsset,
-    ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
-        None
-    }
-
-    // Registers a dependency on the given file, which is only loaded as raw
-    // bytes - not through an `AssetLoader`. This means the file itself cannot
-    // have dependencies.
-    //
-    // XXX TODO: Try to avoid exposing this, same as `register_dependencies`.
-    //
-    // XXX TODO: Review return type. Returning an option is a faff, but avoids
-    // redundantly created a boxed future it's a noop.
-    //
-    // XXX TODO: Review name. Compare to `LoaderDependency::File`.
-    fn register_bytes_dependency<'a>(
-        &'a self,
-        // XXX TODO: Consider `RootAssetRef<'a>`?
-        _path: &'a RootAssetPath<'static>,
-        _dependency_key: Option<DependencyCacheKey>,
-    ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
         None
     }
 
@@ -1707,7 +1688,7 @@ async fn try_load_path_action(
         // XXX TODO: Could have a fast path here since we know the dependency
         // key is for an action?
         let dependency_key = if let Some(future) =
-            action_source.dependency_key(&LoaderDependency::Load(action.clone()), None)
+            action_source.dependency_key(&LoaderDependency::Load(action.clone()))
         {
             future.await
         } else {
@@ -1962,41 +1943,48 @@ pub mod action {
                 .await
                 .map_err(Into::<BevyError>::into)?;
 
+            // XXX TODO: If we didn't override the settings then we're now dependent
+            // on the meta's settings. These aren't currently expressed in the dependency
+            // key or dependency graph. Decide if we make this happen or drop support
+            // for metas.
             if let Some(override_settings) = &action.loader_settings {
                 meta = loader.meta_from_settings(override_settings.as_bytes())?;
             }
 
             let settings = meta
                 .loader_settings()
-                .expect("XXX TODO: We should only support load metas");
-
-            let file_dependency_path = RootAssetPath::without_label(path.clone());
+                .expect("XXX TODO: Sensible error message. We only support AssetAction::Load.");
 
             // XXX TODO: Avoid clone?
-            let file_dependency = LoaderDependency::File(file_dependency_path.clone());
+            let file_dependency =
+                LoaderDependency::File(RootAssetPath::without_label(path.clone()));
 
-            let file_dependency_key = if let Some(future) = asset_server
+            let (mut replacement_reader, file_dependency_key) = match context
+                .asset_server()
                 .basset_action_source()
-                .dependency_key(&file_dependency, None)
+                .read_asset_bytes(
+                    // XXX TODO: Review `clone_owned`. Are we really losing much by
+                    // not doing fine grained lifetimes?
+                    RootAssetPath::without_label(path.clone_owned()),
+                    &mut reader,
+                )
+                .await?
             {
-                future.await
-            } else {
-                None
+                // XXX TODO: Ugly destructuring. Review.
+                Some((replacement_reader, dependency_key)) => {
+                    (Some(replacement_reader), Some(dependency_key))
+                }
+                None => (None, None),
             };
 
-            if let Some(future) = asset_server
-                .basset_action_source()
-                .register_bytes_dependency(&file_dependency_path, file_dependency_key)
-            {
-                future.await;
-            };
+            let chosen_reader = replacement_reader.as_mut().unwrap_or(&mut reader);
 
             let mut asset = internal_load_with_settings_loader_and_reader(
                 asset_server,
                 &path,
                 settings,
                 &*loader,
-                &mut reader,
+                chosen_reader,
                 context.dependency_loading(),
                 false,
                 context.dependency_key,

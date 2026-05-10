@@ -818,6 +818,7 @@ impl<'a> LoadContext<'a> {
             AssetServerMode::Unprocessed => source.reader(),
             AssetServerMode::Processed => source.processed_reader()?,
         };
+        // XXX TODO: See comment below about breaking processing.
         let mut reader = asset_reader.read(path.path()).await?;
         let hash = if self.populate_hashes {
             // NOTE: ensure meta is read while the asset bytes reader is still active to ensure transactionality
@@ -832,8 +833,29 @@ impl<'a> LoadContext<'a> {
         } else {
             Default::default()
         };
+
+        let (mut replacement_reader, dependency_key) = match self
+            .asset_server
+            .basset_action_source()
+            .read_asset_bytes(
+                // XXX TODO: Review `clone_owned`. Are we really losing much by
+                // not doing fine grained lifetimes?
+                RootAssetPath::without_label(path.clone_owned()),
+                &mut reader,
+            )
+            .await?
+        {
+            // XXX TODO: Ugly destructuring. Review.
+            Some((replacement_reader, dependency_key)) => {
+                (Some(replacement_reader), Some(dependency_key))
+            }
+            None => (None, None),
+        };
+
+        let chosen_reader = replacement_reader.as_mut().unwrap_or(&mut reader);
+
         let mut bytes = Vec::new();
-        reader
+        chosen_reader
             .read_to_end(&mut bytes)
             .await
             .map_err(|source| ReadAssetBytesError::Io {
@@ -841,35 +863,11 @@ impl<'a> LoadContext<'a> {
                 source,
             })?;
 
-        // XXX TODO: Race condition. See notes on same race condition in
-        // `AssetServer::load_with_settings_loader_and_reader`.
-        // XXX TODO: Settings parameter?
-        let dependency_key = if let Some(future) =
-            self.asset_server.basset_action_source().dependency_key(
-                &LoaderDependency::File(RootAssetPath::without_label(path.clone_owned())),
-                None,
-            ) {
-            future.await
-        } else {
-            None
-        };
-
         self.loader_dependencies.insert(
             LoaderDependency::File(RootAssetPath::without_label(path.clone_owned())),
             (hash, dependency_key),
         );
 
-        // XXX TODO: Document.
-        if let Some(future) = self
-            .asset_server
-            .basset_action_source()
-            .register_bytes_dependency(
-                &RootAssetPath::without_label(path.clone_owned()),
-                dependency_key,
-            )
-        {
-            future.await;
-        }
         Ok(bytes)
     }
 

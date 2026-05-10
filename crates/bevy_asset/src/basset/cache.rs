@@ -2,8 +2,8 @@
 
 use crate::{
     basset::{RootAssetPath, RootAssetRef},
-    io::AssetSources,
-    AsyncWriteExt, LoaderDependency,
+    io::{AssetSources, Reader},
+    AsyncWriteExt, LoaderDependency, ReadAssetBytesError,
 };
 use alloc::{boxed::Box, string::String, string::ToString, sync::Arc, vec::Vec};
 // XXX TODO: Try and replace `async_fs` with `AssetSource`.
@@ -389,6 +389,14 @@ impl<K: CacheKey, V: FileCacheValue> MemoryAndFileCache<K, V> {
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub(crate) struct ContentHash(BassetHash);
 
+impl ContentHash {
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(bytes);
+        Self(BassetHash::new(*hasher.finalize().as_bytes()))
+    }
+}
+
 pub(crate) struct ContentCache {
     path_to_hash: RwLock<HashMap<RootAssetPath<'static>, ContentHash>>,
     sources: Arc<AssetSources>,
@@ -429,28 +437,53 @@ impl ContentCache {
         // XXX TODO: Review. Too spammy for now.
         //info!(?path, "Content cache miss.");
 
-        let source = self.sources.get(path.source()).map_err(BevyError::from)?;
-
-        let mut reader = source
+        let mut reader = self
+            .sources
+            .get(path.source())?
             .reader()
             .read(path.path())
-            .await
-            .map_err(BevyError::from)?;
+            .await?;
 
+        // XXX TODO: Don't read to end if possible, break into chunks.
         let mut bytes = Vec::<u8>::new();
         reader
             .read_to_end(&mut bytes)
             .await
             .map_err(BevyError::from)?;
 
-        let hash = content_hash(&bytes);
+        let hash = ContentHash::from_bytes(&bytes);
 
+        self.put(path, hash);
+
+        Ok(hash)
+    }
+
+    pub(crate) async fn read_asset_bytes(
+        &self,
+        path: &RootAssetPath<'static>,
+        reader: &mut dyn Reader,
+    ) -> Result<(Vec<u8>, ContentHash), ReadAssetBytesError> {
+        let mut bytes = Vec::<u8>::new();
+        reader
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|source| ReadAssetBytesError::Io {
+                path: path.path().to_path_buf(),
+                source,
+            })?;
+
+        let hash = ContentHash::from_bytes(&bytes);
+
+        self.put(path, hash);
+
+        Ok((bytes, hash))
+    }
+
+    fn put(&self, path: &RootAssetPath<'static>, hash: ContentHash) {
         self.path_to_hash
             .write()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(path.clone(), hash);
-
-        Ok(hash)
     }
 }
 
@@ -560,12 +593,6 @@ impl FileCacheValue for Arc<DependencyCacheValue> {
                 .expect("XXX TODO"),
         )
     }
-}
-
-fn content_hash(bytes: &[u8]) -> ContentHash {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(bytes);
-    ContentHash(BassetHash::new(*hasher.finalize().as_bytes()))
 }
 
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Reflect)]
