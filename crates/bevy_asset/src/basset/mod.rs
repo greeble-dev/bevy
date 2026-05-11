@@ -546,43 +546,6 @@ impl ApplyContext<'_> {
         // our own `loader_dependencies`?
     }
 
-    // XXX TODO: Should this be somewhere more generic?
-    fn load_dependencies(
-        asset: &ErasedLoadedAsset,
-        asset_server: &AssetServer,
-        dependency_loading: DependencyLoading,
-    ) {
-        // We don't want to load our own subassets, so make a list to check against.
-        // XXX TODO: Inefficient and annoying. Reconsider.
-        // XXX TODO: Actually... can we just early out if the handle's load status
-        // is loaded? What is the status of our sub-assets at this point?
-        let subasset_handles = asset
-            .labeled_assets
-            .iter()
-            .map(|labeled_asset| labeled_asset.handle.clone())
-            .collect::<Vec<_>>();
-
-        if dependency_loading == DependencyLoading::Yes {
-            asset.visit_dependencies(&mut |dependency| {
-                match dependency {
-                    AssetDependency::Id(_) => panic!("XXX TODO: Not supported"),
-                    AssetDependency::Path(_) => (),
-                    AssetDependency::Handle(handle) => {
-                        if !subasset_handles.contains(handle)
-                            && let Some(path) = handle.path()
-                        {
-                            // XXX TODO: Review if there's a better way to load directly from
-                            // a handle. Also check if this correctly early outs when the asset is loaded.
-                            let _ = asset_server
-                                .load_builder()
-                                .load_erased(handle.type_id(), path.clone());
-                        }
-                    }
-                }
-            });
-        }
-    }
-
     pub fn finish<A: Asset>(self, asset: A) -> BassetActionOutput {
         let mut loaded_asset = LoadedAsset::new_with_dependencies(asset);
 
@@ -591,7 +554,7 @@ impl ApplyContext<'_> {
 
         let erased_asset = ErasedLoadedAsset::from(loaded_asset);
 
-        Self::load_dependencies(&erased_asset, self.asset_server, self.dependency_loading);
+        load_dependencies(&erased_asset, self.asset_server, self.dependency_loading);
 
         BassetActionOutput {
             asset: erased_asset,
@@ -609,12 +572,49 @@ impl ApplyContext<'_> {
         asset.loader_dependencies = self.loader_dependencies;
         asset.dependency_key = self.dependency_key;
 
-        Self::load_dependencies(&asset, self.asset_server, self.dependency_loading);
+        load_dependencies(&asset, self.asset_server, self.dependency_loading);
 
         BassetActionOutput {
             asset,
             saved: Some(saved),
         }
+    }
+}
+
+// XXX TODO: Move this to a utility file?
+fn load_dependencies(
+    asset: &ErasedLoadedAsset,
+    asset_server: &AssetServer,
+    dependency_loading: DependencyLoading,
+) {
+    // We don't want to load our own subassets, so make a list to check against.
+    // XXX TODO: Inefficient and annoying. Reconsider.
+    // XXX TODO: Actually... can we just early out if the handle's load status
+    // is loaded? What is the status of our sub-assets at this point?
+    let subasset_handles = asset
+        .labeled_assets
+        .iter()
+        .map(|labeled_asset| labeled_asset.handle.clone())
+        .collect::<Vec<_>>();
+
+    if dependency_loading == DependencyLoading::Yes {
+        asset.visit_dependencies(&mut |dependency| {
+            match dependency {
+                AssetDependency::Id(_) => panic!("XXX TODO: Not supported"),
+                AssetDependency::Path(_) => (),
+                AssetDependency::Handle(handle) => {
+                    if !subasset_handles.contains(handle)
+                        && let Some(path) = handle.path()
+                    {
+                        // XXX TODO: Review if there's a better way to load directly from
+                        // a handle. Also check if this correctly early outs when the asset is loaded.
+                        let _ = asset_server
+                            .load_builder()
+                            .load_erased(handle.type_id(), path.clone());
+                    }
+                }
+            }
+        });
     }
 }
 
