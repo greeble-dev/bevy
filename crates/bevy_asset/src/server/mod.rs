@@ -3,7 +3,8 @@ mod loaders;
 
 use crate::{
     basset::{
-        ActionSource, ActionSourceBuilder, DependencyLoading, MinimalActionSource, RootAssetRef,
+        ActionApplyError, ActionSource, ActionSourceBuilder, DependencyLoading,
+        MinimalActionSource, MissingActionFunctionError, RootAssetRef,
     },
     folder::LoadedFolder,
     io::{
@@ -891,11 +892,6 @@ impl AssetServer {
                 Ok(final_handle)
             }
             Err(err) => {
-                let err = AssetLoadError::AssetLoaderError(AssetLoaderError {
-                    path: path.clone_owned(),
-                    loader_name: "XXX TODO",
-                    error: err.into(),
-                });
                 self.send_asset_event(InternalAssetEvent::Failed {
                     index: asset_id,
                     error: err.clone(),
@@ -2393,6 +2389,14 @@ pub enum AssetLoadError {
         label: String,
         all_labels: Vec<String>,
     },
+    #[error(transparent)]
+    MissingActionFunctionError(#[from] MissingActionFunctionError),
+    #[error(transparent)]
+    ActionApplyError(#[from] ActionApplyError),
+    // XXX TODO: This is a placeholder for errors that I haven't decided what to
+    // do with yet.
+    #[error("{0}")]
+    TodoError(Arc<BevyError>),
 }
 
 /// An error that can occur during asset loading.
@@ -2401,13 +2405,26 @@ pub enum AssetLoadError {
 pub struct AssetLoaderError {
     // XXX TODO: Should this be `AssetRef` or `AssetPath`? Loaders can't load refs.
     // See also `AssetLoadError::AssetLoaderPanic`.
-    // XXX TODO: Made these `pub(crate)` for use in `LoadPath::apply`. Review?
-    pub(crate) path: AssetRef<'static>,
-    pub(crate) loader_name: &'static str,
-    pub(crate) error: Arc<BevyError>,
+    path: AssetRef<'static>,
+    loader_name: &'static str,
+    error: Arc<BevyError>,
 }
 
 impl AssetLoaderError {
+    // XXX TODO: This was added to allow `basset/mod.rs` to make them. Document
+    // and review if it should be `pub`.
+    pub(crate) fn new(
+        path: AssetRef<'static>,
+        loader_name: &'static str,
+        error: Arc<BevyError>,
+    ) -> Self {
+        Self {
+            path,
+            loader_name,
+            error,
+        }
+    }
+
     /// The path of the asset that failed to load.
     pub fn path(&self) -> &AssetRef<'static> {
         &self.path

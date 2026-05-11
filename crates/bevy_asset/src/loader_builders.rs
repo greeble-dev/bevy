@@ -2,21 +2,27 @@
 //! [`LoadContext::load_builder`].
 
 use crate::{
-    io::Reader, meta::Settings, Asset, AssetLoadError, AssetPath, AssetRef, ErasedAssetLoader,
-    ErasedLoadedAsset, Handle, LoadContext, LoadDirectError, LoadedAsset, LoadedUntypedAsset,
-    UntypedHandle,
+    basset::RootAssetRef,
+    io::Reader,
+    meta::{ProcessedInfo, Settings},
+    Asset, AssetLoadError, AssetPath, AssetRef, ErasedAssetLoader, ErasedLoadedAsset, Handle,
+    LoadContext, LoadDirectError, LoadedAsset, LoadedUntypedAsset, UntypedHandle,
 };
 use alloc::{borrow::ToOwned, boxed::Box, string::String, sync::Arc};
 use core::any::{type_name, TypeId};
 use serde::Serialize;
+use std::path::Path;
+use tracing::error;
 
 // Utility type for handling the sources of reader references
+#[expect(unused, reason = "XXX TODO: Decide if this is needed.")]
 enum ReaderRef<'a> {
     Borrowed(&'a mut dyn Reader),
     Boxed(Box<dyn Reader + 'a>),
 }
 
 impl ReaderRef<'_> {
+    #[expect(unused, reason = "XXX TODO: Decide if this is needed.")]
     pub fn as_mut(&mut self) -> &mut dyn Reader {
         match self {
             ReaderRef::Borrowed(r) => &mut **r,
@@ -142,7 +148,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
         self,
         path: impl Into<AssetRef<'a>>,
     ) -> Result<LoadedAsset<A>, LoadDirectError> {
-        self.load_typed_value_internal(path.into().into_owned(), None)
+        self.load_typed_value_internal(path.into().into_owned())
             .await
     }
 
@@ -154,7 +160,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
         type_id: TypeId,
         path: impl Into<AssetRef<'a>>,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
-        self.load_value_internal(Some(type_id), &path.into().into_owned(), None)
+        self.load_value_internal(Some(type_id), &path.into().into_owned())
             .await
             .map(|(_, asset)| asset)
     }
@@ -167,7 +173,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
         self,
         path: impl Into<AssetRef<'a>>,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
-        self.load_value_internal(None, &path.into().into_owned(), None)
+        self.load_value_internal(None, &path.into().into_owned())
             .await
             .map(|(_, asset)| asset)
     }
@@ -179,10 +185,10 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     /// paths of assets used by the nested loader.
     pub async fn load_value_from_reader<'a, A: Asset>(
         self,
-        path: impl Into<AssetRef<'a>>,
+        path: impl Into<AssetPath<'a>>,
         reader: &'builder mut dyn Reader,
     ) -> Result<LoadedAsset<A>, LoadDirectError> {
-        self.load_typed_value_internal(path.into().into_owned(), Some(reader))
+        self.load_typed_value_from_reader_internal(path.into().into_owned(), reader)
             .await
     }
 
@@ -194,10 +200,10 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     pub async fn load_erased_value_from_reader<'a>(
         self,
         type_id: TypeId,
-        path: impl Into<AssetRef<'a>>,
+        path: impl Into<AssetPath<'a>>,
         reader: &'builder mut dyn Reader,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
-        self.load_value_internal(Some(type_id), &path.into().into_owned(), Some(reader))
+        self.load_value_from_reader_internal(Some(type_id), &path.into().into_owned(), reader)
             .await
             .map(|(_, asset)| asset)
     }
@@ -210,10 +216,10 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     /// paths of assets used by the nested loader.
     pub async fn load_untyped_value_from_reader<'a>(
         self,
-        path: impl Into<AssetRef<'a>>,
+        path: impl Into<AssetPath<'a>>,
         reader: &'builder mut dyn Reader,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
-        self.load_value_internal(None, &path.into().into_owned(), Some(reader))
+        self.load_value_from_reader_internal(None, &path.into().into_owned(), reader)
             .await
             .map(|(_, asset)| asset)
     }
@@ -268,68 +274,83 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     /// `path`.
     async fn load_value_internal(
         self,
-        type_id: Option<TypeId>,
+        // XXX TODO: Check if we need to support this. Probably should be handled
+        // by `LoadPath` having an optional type name so this can all be resolved
+        // earlier.
+        _type_id: Option<TypeId>,
         path: &AssetRef<'static>,
-        reader: Option<&'builder mut dyn Reader>,
-    ) -> Result<(Arc<dyn ErasedAssetLoader>, ErasedLoadedAsset), LoadDirectError> {
-        // XXX TODO: Support `AssetRef`.
-        let path = &path.temporary_path_workaround();
-
+    ) -> Result<(Option<Arc<dyn ErasedAssetLoader>>, ErasedLoadedAsset), LoadDirectError> {
         // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
         // if path.path() == Path::new("") {
         //     error!("Attempted to load an asset with an empty path \"{path}\"!");
         //     return Err(LoadDirectError::EmptyPath(path.clone_owned()));
         // }
-        if path.label().is_some() {
+        let Ok(path) = RootAssetRef::try_from(path.clone()) else {
             return Err(LoadDirectError::RequestedSubasset(path.clone()));
+        };
+
+        // XXX TODO: We dropped support for processed info here since we're no longer
+        // looking up the meta. Decide if we need a solution.
+        let processed_info = Option::<&ProcessedInfo>::None;
+
+        let asset = self
+            .load_context
+            .load_direct_internal(path.clone(), processed_info)
+            .await?;
+
+        // TODO: We dropped support for returning the loader here, which means
+        // callers get less info for errors. Review alternatives.
+        Ok((None, asset))
+    }
+
+    async fn load_value_from_reader_internal(
+        self,
+        type_id: Option<TypeId>,
+        path: &AssetPath<'static>,
+        reader: &'builder mut dyn Reader,
+    ) -> Result<(Arc<dyn ErasedAssetLoader>, ErasedLoadedAsset), LoadDirectError> {
+        if path.path() == Path::new("") {
+            error!("Attempted to load an asset with an empty path \"{path}\"!");
+            return Err(LoadDirectError::EmptyPath(path.clone_owned()));
+        }
+        if path.label().is_some() {
+            return Err(LoadDirectError::RequestedSubasset(AssetRef::from(
+                path.clone(),
+            )));
         }
         self.load_context
             .asset_server
             .write_infos()
             .stats
             .started_load_tasks += 1;
-        let (meta, loader, mut reader) = if let Some(reader) = reader {
-            let loader = if let Some(type_id) = type_id {
-                self.load_context
-                    .asset_server
-                    .get_asset_loader_with_asset_type_id(type_id)
-                    .await
-                    .map_err(|error| LoadDirectError::LoadError {
-                        dependency: path.clone().into(),
-                        error: error.into(),
-                    })?
-            } else {
-                self.load_context
-                    .asset_server
-                    .get_path_asset_loader(path)
-                    .await
-                    .map_err(|error| LoadDirectError::LoadError {
-                        dependency: path.clone().into(),
-                        error: error.into(),
-                    })?
-            };
-            let meta = loader.default_meta();
-            (meta, loader, ReaderRef::Borrowed(reader))
-        } else {
-            let (meta, loader, reader) = self
-                .load_context
+        let loader = if let Some(type_id) = type_id {
+            self.load_context
                 .asset_server
-                .get_meta_loader_and_reader(path, type_id)
+                .get_asset_loader_with_asset_type_id(type_id)
                 .await
                 .map_err(|error| LoadDirectError::LoadError {
                     dependency: path.clone().into(),
-                    error,
-                })?;
-            (meta, loader, ReaderRef::Boxed(reader))
+                    error: error.into(),
+                })?
+        } else {
+            self.load_context
+                .asset_server
+                .get_path_asset_loader(path)
+                .await
+                .map_err(|error| LoadDirectError::LoadError {
+                    dependency: path.clone().into(),
+                    error: error.into(),
+                })?
         };
+        let meta = loader.default_meta();
 
         let asset = self
             .load_context
-            .load_direct_internal(
+            .load_direct_from_reader_internal(
                 path.clone(),
                 meta.loader_settings().expect("meta corresponds to a load"),
                 &*loader,
-                reader.as_mut(),
+                reader,
                 meta.processed_info().as_ref(),
             )
             .await?;
@@ -345,9 +366,8 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     async fn load_typed_value_internal<A: Asset>(
         self,
         path: AssetRef<'static>,
-        reader: Option<&'builder mut dyn Reader>,
     ) -> Result<LoadedAsset<A>, LoadDirectError> {
-        self.load_value_internal(Some(TypeId::of::<A>()), &path, reader)
+        self.load_value_internal(Some(TypeId::of::<A>()), &path)
             .await
             .and_then(move |(loader, untyped_asset)| {
                 untyped_asset
@@ -356,6 +376,40 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                         dependency: path.clone(),
                         error: AssetLoadError::RequestedHandleTypeMismatch {
                             path,
+                            requested: TypeId::of::<A>(),
+                            // XXX TODO: Needs work now that asset_type_name is Option.
+                            // Could use untyped_asset.asset_type_name()? But needs
+                            // refactoring as that's already been moved.
+                            actual_asset_name: "", // loader.asset_type_name(),
+                            // XXX TODO: Similarly, we lost support for the loader path
+                            // due to changes ins `load_value_internal`. Review alternatives.
+                            loader_name: loader.map(|l| l.type_path()).unwrap_or("XXX TODO"),
+                        },
+                    })
+            })
+    }
+
+    // XXX TODO: Document.
+    // XXX TODO: Refactor? Somewhat duplicates `load_typed_value_internal`, although
+    // takes `AssetPath` instead of `AssetRef`.
+    #[expect(
+        clippy::result_large_err,
+        reason = "we need to give the user the correct error type"
+    )]
+    async fn load_typed_value_from_reader_internal<A: Asset>(
+        self,
+        path: AssetPath<'static>,
+        reader: &'builder mut dyn Reader,
+    ) -> Result<LoadedAsset<A>, LoadDirectError> {
+        self.load_value_from_reader_internal(Some(TypeId::of::<A>()), &path, reader)
+            .await
+            .and_then(move |(loader, untyped_asset)| {
+                untyped_asset
+                    .downcast::<A>()
+                    .map_err(|_| LoadDirectError::LoadError {
+                        dependency: AssetRef::from(path.clone()),
+                        error: AssetLoadError::RequestedHandleTypeMismatch {
+                            path: AssetRef::from(path),
                             requested: TypeId::of::<A>(),
                             // XXX TODO: Needs work now that asset_type_name is Option. Could use untyped_asset.asset_type_name()? But needs refactoring as that's already been moved.
                             actual_asset_name: "", // loader.asset_type_name(),

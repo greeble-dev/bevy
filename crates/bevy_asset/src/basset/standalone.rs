@@ -13,9 +13,9 @@ use crate::{
     io::SliceReader,
     meta::{AssetActionMinimal, AssetMetaMinimal, Settings},
     saver::ErasedAssetSaver,
-    AssetPath, AssetServer, ErasedAssetLoader, ErasedLoadedAsset,
+    AssetLoadError, AssetPath, AssetServer, ErasedAssetLoader, ErasedLoadedAsset,
 };
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use bevy_ecs::error::BevyError;
 
 const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
@@ -29,19 +29,19 @@ pub struct StandaloneAssetData {
 }
 
 // XXX TODO: More specific error type?
-pub(crate) fn read_standalone_asset(blob: &[u8]) -> Result<StandaloneAssetData, BevyError> {
+pub(crate) fn read_standalone_asset(blob: &[u8]) -> Result<StandaloneAssetData, AssetLoadError> {
     let mut blob = BlobReader::new(blob);
 
     let magic = blob.bytes(STANDALONE_MAGIC.len()).expect("XXX TODO");
 
     if magic != STANDALONE_MAGIC {
-        return Err("XXX TODO".into());
+        return Err(AssetLoadError::TodoError(Arc::new("XXX TODO".into())));
     }
 
     let version = blob.u16().expect("XXX TODO");
 
     if version != STANDALONE_VERSION {
-        return Err("XXX TODO".into());
+        return Err(AssetLoadError::TodoError(Arc::new("XXX TODO".into())));
     }
 
     let meta = blob.bytes_sized().expect("XXX TODO");
@@ -59,7 +59,7 @@ pub(crate) async fn load_standalone_asset(
     asset_server: &AssetServer,
     dependency_key: DependencyCacheKey,
     dependency_loading: DependencyLoading,
-) -> Result<ErasedLoadedAsset, BevyError> {
+) -> Result<ErasedLoadedAsset, AssetLoadError> {
     let minimal_meta = ron::de::from_bytes::<AssetMetaMinimal>(&data.meta).expect("XXX TODO");
 
     let loader_name = match &minimal_meta.asset {
@@ -92,7 +92,6 @@ pub(crate) async fn load_standalone_asset(
         Some(dependency_key),
     )
     .await
-    .map_err(Into::<BevyError>::into)
 }
 
 // XXX TODO: More specific error type?

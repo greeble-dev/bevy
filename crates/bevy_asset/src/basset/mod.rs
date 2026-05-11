@@ -746,6 +746,24 @@ where
     }
 }
 
+#[derive(Error, Debug, Clone)]
+#[error("Failed to apply action '{path}': {error}")]
+pub struct ActionApplyError {
+    // XXX TODO: Should this be `AssetRef` or `RootAssetRef`?
+    pub path: AssetRef<'static>,
+    pub error: Arc<BevyError>,
+}
+
+impl ActionApplyError {
+    pub fn path(&self) -> &AssetRef<'static> {
+        &self.path
+    }
+
+    pub fn error(&self) -> &BevyError {
+        &self.error
+    }
+}
+
 pub struct DevelopmentActionSourceSettings {
     file_cache_path: Option<PathBuf>,
     validate_dependency_cache: bool,
@@ -878,8 +896,8 @@ pub(crate) struct DevelopmentActionSource {
     registry: TypeRegistryArc,
 }
 
-#[derive(Error, Debug)]
-pub(crate) enum FindActionFunctionError {
+#[derive(Error, Debug, Copy, Clone)]
+pub enum MissingActionFunctionError {
     #[error("Couldn't find action \"{0}\"")]
     NotFound(&'static str),
 }
@@ -920,14 +938,14 @@ impl DevelopmentActionSource {
     pub(crate) fn action_function<'a>(
         &'a self,
         action: &ErasedBassetAction,
-    ) -> Result<&'a dyn ErasedBassetActionFunction, FindActionFunctionError> {
+    ) -> Result<&'a dyn ErasedBassetActionFunction, MissingActionFunctionError> {
         let type_path = action.type_path();
 
         self.settings
             .action_type_path_to_action_function
             .get(type_path)
             .map(AsRef::as_ref)
-            .ok_or(FindActionFunctionError::NotFound(type_path))
+            .ok_or(MissingActionFunctionError::NotFound(type_path))
     }
 
     pub(crate) fn saver<'a>(
@@ -1024,7 +1042,7 @@ impl ActionSource for DevelopmentActionSource {
         action: &'a RootAssetRef,
         asset_server: &'a AssetServer,
         dependency_loading: DependencyLoading,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, AssetLoadError>> {
         Box::pin(async move {
             let action_function = self.action_function(action.action())?;
 
@@ -1070,7 +1088,11 @@ impl ActionSource for DevelopmentActionSource {
 
             let output = action_function
                 .apply(apply_context, action.action())
-                .await?;
+                .await
+                .map_err(|e| ActionApplyError {
+                    path: AssetRef::from(action.clone()),
+                    error: e.into(),
+                })?;
 
             // XXX TODO: Review logging. Bit spammy right now.
             /*
@@ -1098,7 +1120,8 @@ impl ActionSource for DevelopmentActionSource {
                 {
                     if let Some(saved) = output.saved {
                         // XXX TODO: Slightly duplicates the other path. Refactor?
-                        let standalone_asset_blob = write_standalone_asset(&saved)?;
+                        let standalone_asset_blob = write_standalone_asset(&saved)
+                            .map_err(|e| AssetLoadError::TodoError(e.into()))?;
                         action_cache.put(action_key, standalone_asset_blob.into(), action);
                     } else if let Some((saver, settings)) =
                         self.saver(&output.asset, &self.registry)
@@ -1120,9 +1143,12 @@ impl ActionSource for DevelopmentActionSource {
                             .await?;
 
                         let standalone_asset =
-                            save_standalone_asset(&output.asset, &*loader, saver, settings).await?;
+                            save_standalone_asset(&output.asset, &*loader, saver, settings)
+                                .await
+                                .map_err(|e| AssetLoadError::TodoError(e.into()))?;
 
-                        let standalone_asset_blob = write_standalone_asset(&standalone_asset)?;
+                        let standalone_asset_blob = write_standalone_asset(&standalone_asset)
+                            .map_err(|e| AssetLoadError::TodoError(e.into()))?;
 
                         action_cache.put(action_key, standalone_asset_blob.into(), action);
                     } else {
@@ -1600,7 +1626,7 @@ pub trait ActionSource: Send + Sync + 'static {
         // entire asset server.
         asset_server: &'a AssetServer,
         dependency_loading: DependencyLoading,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
+    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, AssetLoadError>>;
 
     fn load_with_settings_loader_and_reader<'a>(
         &'a self,
@@ -1679,7 +1705,7 @@ async fn try_load_path_action(
     asset_server: &AssetServer,
     action_source: &dyn ActionSource,
     dependency_loading: DependencyLoading,
-) -> Option<Result<ErasedLoadedAsset, BevyError>> {
+) -> Option<Result<ErasedLoadedAsset, AssetLoadError>> {
     // XXX TODO: Check if there's a better way to handle this.
     if action.action.type_path() == LoadPath::type_path() {
         // XXX TODO: Is there ever a situation where the dependency key will be found
@@ -1702,7 +1728,14 @@ async fn try_load_path_action(
                 &action.action,
             )
             .await
-            .map(|output| output.asset),
+            .map(|output| output.asset)
+            .map_err(|e| {
+                ActionApplyError {
+                    path: AssetRef::from(action.clone()),
+                    error: e.into(),
+                }
+                .into()
+            }),
         )
     } else {
         None
@@ -1735,7 +1768,7 @@ impl ActionSource for MinimalActionSource {
         // entire asset server.
         asset_server: &'a AssetServer,
         dependency_loading: DependencyLoading,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, AssetLoadError>> {
         Box::pin(async move {
             try_load_path_action(action, asset_server, self, dependency_loading)
                 .await
@@ -1779,7 +1812,7 @@ impl ActionSource for PublishedActionSource {
         action: &'a RootAssetRef,
         asset_server: &'a AssetServer,
         dependency_loading: DependencyLoading,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
+    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, AssetLoadError>> {
         Box::pin(async move {
             // Early out if we've got a load path action. They're guaranteed to
             // not be published - only the file they're loading and the loader
@@ -1806,11 +1839,16 @@ impl ActionSource for PublishedActionSource {
                 // for actions so it's clear that a meta is required. Also a
                 // possibility that we don't need the full meta for actions,
                 // just the loader name?
-                return Err("Actions require a meta. XXX TODO: Improve".into());
+                return Err(AssetLoadError::TodoError(Arc::new(
+                    "Actions require a meta. XXX TODO: Improve".into(),
+                )));
             };
 
             let mut meta_bytes = Vec::<u8>::new();
-            meta_reader.read_to_end(&mut meta_bytes).await?;
+            meta_reader
+                .read_to_end(&mut meta_bytes)
+                .await
+                .map_err(AssetReaderError::from)?;
 
             let minimal_meta =
                 ron::de::from_bytes::<AssetMetaMinimal>(&meta_bytes).expect("XXX TODO");
@@ -1833,7 +1871,7 @@ impl ActionSource for PublishedActionSource {
             // XXX TODO: Ew? Need to decide if we try to support the original path.
             let fake_path = AssetPath::parse("ERROR - published assets shouldn't use their path");
 
-            Ok(asset_server
+            asset_server
                 .load_with_settings_loader_and_reader(
                     &fake_path,
                     meta.loader_settings().expect("meta is set to Load"),
@@ -1842,7 +1880,7 @@ impl ActionSource for PublishedActionSource {
                     load_dependencies,
                     populate_hashes,
                 )
-                .await?)
+                .await
         })
     }
 }
@@ -1885,11 +1923,11 @@ pub(crate) async fn internal_load_with_settings_loader_and_reader(
             loader_name: loader.type_path(),
         })?
         .map_err(|e| {
-            AssetLoadError::AssetLoaderError(AssetLoaderError {
-                path: asset_path.clone_owned().into(),
-                loader_name: loader.type_path(),
-                error: e.into(),
-            })
+            AssetLoadError::AssetLoaderError(AssetLoaderError::new(
+                asset_path.clone_owned().into(),
+                loader.type_path(),
+                e.into(),
+            ))
         })
 }
 
@@ -1959,6 +1997,7 @@ pub mod action {
             let file_dependency =
                 LoaderDependency::File(RootAssetPath::without_label(path.clone()));
 
+            // XXX TODO: Replacement reader stuff is ugly. Compare against `ReaderRef`.
             let (mut replacement_reader, file_dependency_key) = match context
                 .asset_server()
                 .basset_action_source()

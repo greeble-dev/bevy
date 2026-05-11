@@ -1,5 +1,5 @@
 use crate::{
-    basset::{cache::DependencyCacheKey, RootAssetPath, RootAssetRef},
+    basset::{cache::DependencyCacheKey, DependencyLoading, RootAssetPath, RootAssetRef},
     io::{AssetReaderError, MissingAssetSourceError, MissingProcessedAssetReaderError, Reader},
     loader_builders::NestedLoadBuilder,
     meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfo, ProcessedInfoMinimal, Settings},
@@ -536,7 +536,7 @@ pub enum LoadDirectError {
     #[error("Attempted to load an asset with an empty path \"{0}\"")]
     EmptyPath(AssetPath<'static>),
     #[error("Requested to load an asset path ({0:?}) with a subasset, but this is unsupported. See issue #18291")]
-    RequestedSubasset(AssetPath<'static>),
+    RequestedSubasset(AssetRef<'static>),
     #[error("Failed to load dependency {dependency:?} {error}")]
     LoadError {
         dependency: AssetRef<'static>,
@@ -905,6 +905,36 @@ impl<'a> LoadContext<'a> {
 
     pub(crate) async fn load_direct_internal(
         &mut self,
+        path: RootAssetRef,
+        processed_info: Option<&ProcessedInfo>,
+    ) -> Result<ErasedLoadedAsset, LoadDirectError> {
+        let loaded_asset = self
+            .asset_server
+            .basset_action_source()
+            // XXX TODO: Review if `DependencyLoading::Yes` is correct? Seems
+            // wrong when we're loading values.
+            .apply(
+                &path,
+                self.asset_server,
+                DependencyLoading::new(self.should_load_dependencies),
+            )
+            .await
+            .map_err(|error| LoadDirectError::LoadError {
+                dependency: path.clone().into(),
+                error,
+            })?;
+
+        let hash = processed_info.map(|i| i.full_hash).unwrap_or_default();
+
+        self.loader_dependencies.insert(
+            LoaderDependency::Load(path),
+            (hash, loaded_asset.dependency_key),
+        );
+        Ok(loaded_asset)
+    }
+
+    pub(crate) async fn load_direct_from_reader_internal(
+        &mut self,
         path: AssetPath<'static>,
         settings: &dyn Settings,
         loader: &dyn ErasedAssetLoader,
@@ -926,11 +956,19 @@ impl<'a> LoadContext<'a> {
                 dependency: path.clone().into(),
                 error,
             })?;
-        let hash = processed_info.map(|i| i.full_hash).unwrap_or_default();
-        self.loader_dependencies.insert(
-            LoaderDependency::Load(RootAssetPath::without_label(path.clone()).into()),
-            (hash, loaded_asset.dependency_key),
-        );
+        let _hash = processed_info.map(|i| i.full_hash).unwrap_or_default();
+
+        // XXX TODO: Review and decide what to do here. Registering the dependency
+        // doesn't make any sense - we don't know where that reader came from. Maybe
+        // we simply don't support dependencies on `from_reader` loads? So it's up to
+        // the user to make sure that they only read from within the asset, so the
+        // dependency is effectively already tracked.
+        error!("load_direct_from_reader_internal can't handle dependencies");
+        // self.loader_dependencies.insert(
+        //     LoaderDependency::Load(RootAssetPath::without_label(path.clone()).into()),
+        //     (hash, loaded_asset.dependency_key),
+        // );
+
         Ok(loaded_asset)
     }
 
