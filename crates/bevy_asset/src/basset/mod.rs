@@ -1167,63 +1167,6 @@ impl ActionSource for DevelopmentActionSource {
         })
     }
 
-    fn load_with_settings_loader_and_reader<'a>(
-        &'a self,
-        asset_server: &'a AssetServer,
-        asset_path: &'a AssetPath<'_>,
-        settings: &'a dyn Settings,
-        loader: &'a dyn ErasedAssetLoader,
-        reader: &'a mut dyn Reader,
-        dependency_loading: DependencyLoading,
-        populate_hashes: bool,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, AssetLoadError>> {
-        Box::pin(async move {
-            // XXX TODO: Race condition. `dependency_key` will be reloading the asset,
-            // and we don't know if it matches `reader`. Need to think through how
-            // we can do this efficiently, particularly for the non-development case
-            // where the dependency key isn't needed and we don't want to touch the
-            // reader at all.
-            //
-            // Also need to think through if we even support the custom reader
-            // case - our dependency tracking won't work with it. Perhaps the
-            // real fix is to restructure things to choose between loading a reader
-            // and loading a path, and then our dependency tracking just ignores
-            // the reader case. Means some annoying changes to stuff like `NestedLoadBuilder`.
-            let dependency_key = if let Some(future) = self.dependency_key(&LoaderDependency::Load(
-                RootAssetPath::without_label(asset_path.clone_owned()).into(),
-            )) {
-                future.await
-            } else {
-                None
-            };
-
-            let result = internal_load_with_settings_loader_and_reader(
-                asset_server,
-                asset_path,
-                settings,
-                loader,
-                reader,
-                dependency_loading,
-                populate_hashes,
-                dependency_key,
-            )
-            .await?;
-
-            if let Some(future) = self.register_dependencies(
-                &RootAssetRef::from(
-                    RootAssetPath::try_from(asset_path.clone_owned())
-                        .expect("XXX TODO: Can we assume no label?"),
-                ),
-                Some(settings),
-                &result,
-            ) {
-                future.await;
-            }
-
-            Ok(result)
-        })
-    }
-
     fn read_asset_bytes<'a>(
         &'a self,
         path: RootAssetPath<'static>,
@@ -1628,31 +1571,6 @@ pub trait ActionSource: Send + Sync + 'static {
         dependency_loading: DependencyLoading,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, AssetLoadError>>;
 
-    fn load_with_settings_loader_and_reader<'a>(
-        &'a self,
-        asset_server: &'a AssetServer,
-        asset_path: &'a AssetPath<'_>,
-        settings: &'a dyn Settings,
-        loader: &'a dyn ErasedAssetLoader,
-        reader: &'a mut dyn Reader,
-        dependency_loading: DependencyLoading,
-        populate_hashes: bool,
-    ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, AssetLoadError>> {
-        Box::pin(async move {
-            internal_load_with_settings_loader_and_reader(
-                asset_server,
-                asset_path,
-                settings,
-                loader,
-                reader,
-                dependency_loading,
-                populate_hashes,
-                None,
-            )
-            .await
-        })
-    }
-
     // XXX TODO: Review name. In practice it's more like `register_file_dependency`?
     fn read_asset_bytes<'a>(
         &'a self,
@@ -1865,22 +1783,22 @@ impl ActionSource for PublishedActionSource {
 
             let meta = loader.deserialize_meta(&meta_bytes).expect("XXX TODO");
 
-            let load_dependencies = dependency_loading == DependencyLoading::Yes;
             let populate_hashes = false;
 
             // XXX TODO: Ew? Need to decide if we try to support the original path.
             let fake_path = AssetPath::parse("ERROR - published assets shouldn't use their path");
 
-            asset_server
-                .load_with_settings_loader_and_reader(
-                    &fake_path,
-                    meta.loader_settings().expect("meta is set to Load"),
-                    &*loader,
-                    &mut readers.asset,
-                    load_dependencies,
-                    populate_hashes,
-                )
-                .await
+            internal_load_with_settings_loader_and_reader(
+                asset_server,
+                &fake_path,
+                meta.loader_settings().expect("meta is set to Load"),
+                &*loader,
+                &mut readers.asset,
+                dependency_loading,
+                populate_hashes,
+                None, // XXX TODO: Double check we don't need dependency key.
+            )
+            .await
         })
     }
 }

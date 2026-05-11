@@ -17,7 +17,7 @@ use crate::{
     path::AssetPath,
     Asset, AssetEvent, AssetHandleProvider, AssetId, AssetIndex, AssetLoadFailedEvent,
     AssetMetaCheck, AssetRef, Assets, DeserializeMetaError, ErasedAssetIndex, ErasedLoadedAsset,
-    Handle, LoadedUntypedAsset, PolyAssetLoader, UnapprovedPathMode, UntypedAssetId,
+    Handle, LoadContext, LoadedUntypedAsset, PolyAssetLoader, UnapprovedPathMode, UntypedAssetId,
     UntypedAssetLoadFailedEvent, UntypedHandle, VisitAssetDependencies,
 };
 use alloc::{borrow::ToOwned, boxed::Box, vec, vec::Vec};
@@ -38,10 +38,11 @@ use bevy_tasks::IoTaskPool;
 use core::{
     any::{type_name, TypeId},
     future::Future,
+    panic::AssertUnwindSafe,
     task::Poll,
 };
 use crossbeam_channel::{Receiver, Sender};
-use futures_lite::StreamExt;
+use futures_lite::{FutureExt, StreamExt};
 use info::*;
 use loaders::*;
 use serde::Serialize;
@@ -1623,17 +1624,42 @@ impl AssetServer {
         load_dependencies: bool,
         populate_hashes: bool,
     ) -> Result<ErasedLoadedAsset, AssetLoadError> {
-        self.basset_action_source()
-            .load_with_settings_loader_and_reader(
-                self,
-                asset_path,
-                settings,
-                loader,
-                reader,
-                DependencyLoading::new(load_dependencies),
-                populate_hashes,
-            )
-            .await
+        // XXX TODO: Decide what to do here. See similar comment in `LoadContext::load_direct_from_reader_internal`.
+        error!("load_with_settings_loader_and_reader can't handle dependencies");
+
+        // TODO: experiment with this
+        let asset_path = asset_path.clone_owned();
+        let load_context = LoadContext::new(
+            self,
+            asset_path.clone(),
+            load_dependencies,
+            populate_hashes,
+            None,
+        );
+        let load = AssertUnwindSafe(loader.load(reader, settings, load_context)).catch_unwind();
+        #[cfg(feature = "trace")]
+        let load = {
+            use tracing::Instrument;
+
+            let span = tracing::info_span!(
+                "asset loading",
+                loader = loader.type_path(),
+                asset = asset_path.to_string()
+            );
+            load.instrument(span)
+        };
+        load.await
+            .map_err(|_| AssetLoadError::AssetLoaderPanic {
+                path: AssetRef::from(asset_path.clone_owned()),
+                loader_name: loader.type_path(),
+            })?
+            .map_err(|e| {
+                AssetLoadError::AssetLoaderError(AssetLoaderError {
+                    path: AssetRef::from(asset_path.clone_owned()),
+                    loader_name: loader.type_path(),
+                    error: e.into(),
+                })
+            })
     }
 
     /// Returns a future that will suspend until the specified asset and its dependencies finish
