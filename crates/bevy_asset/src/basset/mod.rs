@@ -649,7 +649,14 @@ fn load_dependencies(
 
 // XXX TODO: Review `Debug` bound.
 #[reflect_trait]
-pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {}
+pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {
+    // XXX TODO: Proper error type?
+    // XXX TODO: Review where else we should be using this. Currently just used
+    // to replace the various places that were checking for empty paths.
+    fn validate(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
 
 // XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
 impl_downcast!(BassetAction);
@@ -681,6 +688,10 @@ impl ErasedBassetAction {
             .get_represented_type_info()
             .map(TypeInfo::type_path)
             .unwrap_or("ERROR") // XXX TODO: What should this do?
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        self.0.validate()
     }
 }
 
@@ -1882,7 +1893,17 @@ pub mod action {
         //loader_name: Option<String>,
     }
 
-    impl BassetAction for LoadPath {}
+    impl BassetAction for LoadPath {
+        fn validate(&self) -> Result<(), String> {
+            if self.path.path().as_os_str().is_empty() {
+                // XXX TODO: Change message? This was copy and pasted from
+                // `AssetServer::load_with_meta_transform` so doesn't quite fit here.
+                Err("Attempted to load an asset with an empty path!".to_string())
+            } else {
+                Ok(())
+            }
+        }
+    }
 
     impl BassetActionFunction for LoadPathFunction {
         type Action = LoadPath;

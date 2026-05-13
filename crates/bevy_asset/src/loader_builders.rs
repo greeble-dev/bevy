@@ -113,11 +113,10 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     /// access the loaded data, use [`Self::load_untyped_value`].
     pub fn load_untyped<'a>(self, path: impl Into<AssetPath<'a>>) -> Handle<LoadedUntypedAsset> {
         let path = path.into().to_owned();
-        // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
-        // if path.path() == Path::new("") {
-        //     error!("Attempted to load an asset with an empty path \"{path}\"!");
-        //     return Handle::default();
-        // }
+        if path.path() == Path::new("") {
+            error!("Attempted to load an asset with an empty path \"{path}\"!");
+            return Handle::default();
+        }
         let handle = if self.load_context.should_load_dependencies {
             self.load_context
                 .asset_server
@@ -240,11 +239,10 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
             path = path.with_settings(settings);
         }
 
-        // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
-        // if path.path() == Path::new("") {
-        //     error!("Attempted to load an asset with an empty path \"{path}\"!");
-        //     return UntypedHandle::default_for_type(type_id);
-        // }
+        if let Err(err) = path.action().validate() {
+            error!("{}", err);
+            return UntypedHandle::default_for_type(type_id);
+        }
         let handle = if self.load_context.should_load_dependencies {
             self.load_context.asset_server.load_with_meta_transform(
                 path,
@@ -280,7 +278,8 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
         _type_id: Option<TypeId>,
         path: &AssetRef<'static>,
     ) -> Result<(Option<Arc<dyn ErasedAssetLoader>>, ErasedLoadedAsset), LoadDirectError> {
-        // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
+        // XXX TODO: How to restore this? We now have `BassetAction::validate()`, but
+        // how do we map this onto a `LoadDirectError`?
         // if path.path() == Path::new("") {
         //     error!("Attempted to load an asset with an empty path \"{path}\"!");
         //     return Err(LoadDirectError::EmptyPath(path.clone_owned()));

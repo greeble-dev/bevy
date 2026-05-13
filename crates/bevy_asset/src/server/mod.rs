@@ -570,11 +570,10 @@ impl AssetServer {
             path = path.with_settings(settings);
         }
 
-        // XXX TODO: How to restore this? Do we need a way to validate `AssetRef`?
-        // if path.path() == Path::new("") {
-        //     error!("Attempted to load an asset with an empty path \"{path}\"!");
-        //     return UntypedHandle::default_for_type(type_id);
-        // }
+        if let Err(err) = path.action().validate() {
+            error!("{}", err);
+            return UntypedHandle::default_for_type(type_id);
+        }
 
         if path.is_unapproved() {
             match (&self.data.unapproved_path_mode, override_unapproved) {
