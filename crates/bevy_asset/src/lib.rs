@@ -2137,7 +2137,7 @@ mod tests {
             LoadState::Loading => None,
             LoadState::Failed(err) => {
                 let error_message = format!("{err}");
-                assert!(error_message.contains("Requested to load an asset path (a.cool.ron#A) with a subasset, but this is unsupported"), "what? \"{error_message}\"");
+                assert!(error_message.contains("Requested to load an asset path ((label: \"A\", action: LoadPath { path: a.cool.ron, loader_settings: None })) with a subasset, but this is unsupported"), "what? \"{error_message}\"");
                 Some(())
             }
             state => panic!("Unexpected asset state: {state:?}"),
