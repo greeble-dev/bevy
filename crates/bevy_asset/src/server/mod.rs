@@ -17,8 +17,9 @@ use crate::{
     path::AssetPath,
     Asset, AssetEvent, AssetHandleProvider, AssetId, AssetIndex, AssetLoadFailedEvent,
     AssetMetaCheck, AssetRef, Assets, DeserializeMetaError, ErasedAssetIndex, ErasedLoadedAsset,
-    Handle, LoadContext, LoadedUntypedAsset, PolyAssetLoader, UnapprovedPathMode, UntypedAssetId,
-    UntypedAssetLoadFailedEvent, UntypedHandle, VisitAssetDependencies,
+    Handle, LoadContext, LoadedUntypedAsset, PolyAssetLoader, ReadAssetBytesError,
+    UnapprovedPathMode, UntypedAssetId, UntypedAssetLoadFailedEvent, UntypedHandle,
+    VisitAssetDependencies,
 };
 use alloc::{borrow::ToOwned, boxed::Box, vec, vec::Vec};
 use alloc::{
@@ -2419,6 +2420,11 @@ pub enum AssetLoadError {
     // do with yet.
     #[error("{0}")]
     TodoError(Arc<BevyError>),
+    #[error(transparent)]
+    // XXX TODO: Another placeholder until I work out what to do with it. Note
+    // that ReadAssetBytesError has a lot of overlap with AssetLoadError, so
+    // maybe an `impl Into<AssetLoader> for ReadAssetBytesError` has potential.
+    ReadAssetBytesError(#[from] Arc<ReadAssetBytesError>),
 }
 
 /// An error that can occur during asset loading.

@@ -21,7 +21,8 @@ use crate::{
     meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
     saver::{ErasedPolyAssetSaver, ErasedUniAssetSaver, PolyAssetSaver},
     Asset, AssetApp, AssetDependency, AssetLoadError, AssetLoaderError, AssetPath, AssetServer,
-    ErasedAssetLoader, Handle, LoaderDependency, PolyAssetLoader, ReadAssetBytesError,
+    ErasedAssetLoader, Handle, LoaderDependency, ParseAssetPathError, PolyAssetLoader,
+    ReadAssetBytesError,
 };
 use alloc::{
     boxed::Box,
@@ -93,7 +94,7 @@ impl Plugin for BassetPlugin {
 // XXX TODO: Maybe think more about the name. "root asset" does match other parts
 // of the asset system, but it's a bit ambiguous. E.g. publishing wants a list
 // of "root assets", but they're the roots of the publishing tree.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Reflect)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Default, Reflect)]
 #[reflect(opaque)]
 #[reflect(Serialize, Deserialize)]
 pub struct RootAssetPath<'a> {
@@ -121,6 +122,19 @@ impl<'a> RootAssetPath<'a> {
     pub fn path(&self) -> &Path {
         self.path.deref()
     }
+
+    pub fn into_owned(self) -> RootAssetPath<'static> {
+        RootAssetPath {
+            source: self.source.into_owned(),
+            path: self.path.into_owned(),
+        }
+    }
+
+    pub fn clone_owned(&self) -> RootAssetPath<'static> {
+        self.clone().into_owned()
+    }
+
+    // XXX TODO: Review if we're missing any other common methods from `AssetPath`.
 }
 
 impl<'a> Debug for RootAssetPath<'a> {
@@ -167,23 +181,45 @@ impl<'a> From<RootAssetPath<'a>> for AssetPath<'a> {
     }
 }
 
+#[derive(Error, Debug, PartialEq, Eq)]
+pub enum TryRootAssetPathError {
+    #[error("Asset path must not contain a label: \"{0}\"")]
+    UnexpectedLabel(AssetPath<'static>),
+    #[error(transparent)]
+    ParseError(#[from] ParseAssetPathError),
+}
+
 impl<'a> TryFrom<AssetPath<'a>> for RootAssetPath<'a> {
-    type Error = (); // XXX TODO?
+    type Error = TryRootAssetPathError;
 
     fn try_from(value: AssetPath<'a>) -> Result<Self, Self::Error> {
         if value.label().is_some() {
-            Err(())
+            Err(TryRootAssetPathError::UnexpectedLabel(value.clone_owned()))
         } else {
             Ok(Self::without_label(value))
         }
     }
 }
 
-impl From<String> for RootAssetPath<'static> {
-    fn from(value: String) -> Self {
+impl TryFrom<String> for RootAssetPath<'static> {
+    type Error = TryRootAssetPathError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
         // XXX TODO: Avoid going via `AssetPath`. Although that might mean
         // reimplementing `AssetPath::parse`, which is annoying.
-        AssetPath::from(value).try_into().expect("XXX TODO")
+        // XXX TODO: Avoid `clone_owned`?
+        AssetPath::try_parse(&value)?.clone_owned().try_into()
+    }
+}
+
+// XXX TODO: Support other lifetimes?
+impl TryFrom<&'static str> for RootAssetPath<'static> {
+    type Error = TryRootAssetPathError;
+
+    fn try_from(value: &'static str) -> Result<Self, Self::Error> {
+        // XXX TODO: Avoid going via `AssetPath`. Although that might mean
+        // reimplementing `AssetPath::parse`, which is annoying.
+        AssetPath::try_parse(value)?.try_into()
     }
 }
 
@@ -218,7 +254,7 @@ impl RootAssetRef {
             && action.loader_settings.is_none()
         {
             // XXX TODO: Should use `try_parse`?
-            Some(AssetPath::parse(&action.path).clone_owned())
+            Some(AssetPath::from(action.path.clone()))
         } else {
             None
         }
@@ -275,14 +311,16 @@ impl<'de> DeserializeWithRegistry<'de> for RootAssetRef {
             where
                 E: serde::de::Error,
             {
-                Ok(RootAssetPath::from(v.to_string()).into())
+                Ok(RootAssetPath::try_from(v.to_string())
+                    .expect("XXX TODO")
+                    .into())
             }
 
             fn visit_string<E>(self, v: String) -> Result<RootAssetRef, E>
             where
                 E: serde::de::Error,
             {
-                Ok(RootAssetPath::from(v).into())
+                Ok(RootAssetPath::try_from(v).expect("XXX TODO").into())
             }
 
             fn visit_seq<V>(self, mut seq: V) -> Result<RootAssetRef, V::Error>
@@ -415,7 +453,7 @@ impl TryFrom<AssetRef<'_>> for RootAssetRef {
 impl From<RootAssetPath<'_>> for RootAssetRef {
     fn from(value: RootAssetPath) -> Self {
         RootAssetRef::new(LoadPath {
-            path: value.to_string(),
+            path: value.clone_owned(),
             ..Default::default()
         })
     }
@@ -685,7 +723,7 @@ pub trait BassetActionFunction: Send + Sync + 'static {
     type Action: BassetAction + TypePath + Default;
 
     /// XXX TODO: Document.
-    type Error: Into<BevyError>;
+    type Error: ExtractActionApplyError;
 
     /// XXX TODO: Document.
     /// XXX TODO: Reconsider returning `ErasedLoadedAsset`. Currently the return
@@ -708,10 +746,8 @@ pub trait ErasedBassetActionFunction: Send + Sync + 'static {
     fn apply<'a>(
         &'a self,
         context: ApplyContext<'a>,
-        // XXX TODO: Could consider taking `&' dyn BassetAction`? More general,
-        // but also more risk if we need something from `ErasedBassetAction` like a debug type name.
-        action: &'a ErasedBassetAction,
-    ) -> BoxedFuture<'a, Result<BassetActionOutput, BevyError>>;
+        action: &'a RootAssetRef,
+    ) -> BoxedFuture<'a, Result<BassetActionOutput, AssetLoadError>>;
 
     fn cacheable(&self) -> bool;
 }
@@ -723,12 +759,18 @@ where
     fn apply<'a>(
         &'a self,
         context: ApplyContext<'a>,
-        action: &'a ErasedBassetAction,
-    ) -> BoxedFuture<'a, Result<BassetActionOutput, BevyError>> {
+        action: &'a RootAssetRef,
+    ) -> BoxedFuture<'a, Result<BassetActionOutput, AssetLoadError>> {
         Box::pin(async move {
-            let action = action.0.downcast_ref::<T::Action>().expect("XXX TODO");
+            let typed_action = action
+                .action()
+                .0
+                .downcast_ref::<T::Action>()
+                .expect("XXX TODO");
 
-            T::apply(self, context, action).await.map_err(Into::into)
+            T::apply(self, context, typed_action)
+                .await
+                .map_err(|err| ExtractActionApplyError::extract(err, action.clone()))
         })
     }
 
@@ -737,17 +779,39 @@ where
     }
 }
 
+// Trait for handling errors in `BassetAction::apply`. This allows actions to
+// return a specific `AssetLoadError` or a more general `BevyError`. The
+// `BevyError` will be turned into `AssetLoadError::ActionApplyError`.
+pub trait ExtractActionApplyError {
+    fn extract(self, action: RootAssetRef) -> AssetLoadError;
+}
+
+impl ExtractActionApplyError for BevyError {
+    fn extract(self, action: RootAssetRef) -> AssetLoadError {
+        AssetLoadError::ActionApplyError(ActionApplyError {
+            action,
+            error: self.into(),
+        })
+    }
+}
+
+impl ExtractActionApplyError for AssetLoadError {
+    fn extract(self, _action: RootAssetRef) -> AssetLoadError {
+        self
+    }
+}
+
 #[derive(Error, Debug, Clone)]
-#[error("Failed to apply action '{path}': {error}")]
+#[error("Failed to apply action '{action}': {error}")]
 pub struct ActionApplyError {
     // XXX TODO: Should this be `AssetRef` or `RootAssetRef`?
-    pub path: AssetRef<'static>,
+    pub action: RootAssetRef,
     pub error: Arc<BevyError>,
 }
 
 impl ActionApplyError {
-    pub fn path(&self) -> &AssetRef<'static> {
-        &self.path
+    pub fn action(&self) -> &RootAssetRef {
+        &self.action
     }
 
     pub fn error(&self) -> &BevyError {
@@ -1075,13 +1139,7 @@ impl ActionSource for DevelopmentActionSource {
 
             let apply_context = ApplyContext::new(asset_server, dependency_loading);
 
-            let output = action_function
-                .apply(apply_context, action.action())
-                .await
-                .map_err(|e| ActionApplyError {
-                    path: AssetRef::from(action.clone()),
-                    error: e.into(),
-                })?;
+            let output = action_function.apply(apply_context, action).await?;
 
             // XXX TODO: Review logging. Bit spammy right now.
             /*
@@ -1595,17 +1653,10 @@ async fn try_load_path_action(
             ErasedBassetActionFunction::apply(
                 &LoadPathFunction,
                 ApplyContext::new(asset_server, dependency_loading),
-                &action.action,
+                action,
             )
             .await
-            .map(|output| output.asset)
-            .map_err(|e| {
-                ActionApplyError {
-                    path: AssetRef::from(action.clone()),
-                    error: e.into(),
-                }
-                .into()
-            }),
+            .map(|output| output.asset),
         )
     } else {
         None
@@ -1742,12 +1793,14 @@ impl ActionSource for PublishedActionSource {
             let populate_hashes = false;
 
             // XXX TODO: Ew? Need to decide if we try to support the original path.
-            let fake_path = AssetPath::parse("ERROR - published assets shouldn't use their path");
+            let fake_path = RootAssetPath::without_label(AssetPath::parse(
+                "ERROR - published assets shouldn't use their path",
+            ));
 
             Ok((
                 internal_load_with_settings_loader_and_reader(
                     asset_server,
-                    &fake_path,
+                    fake_path,
                     meta.loader_settings().expect("XXX TODO"),
                     &*loader,
                     &mut readers.asset,
@@ -1763,7 +1816,7 @@ impl ActionSource for PublishedActionSource {
 
 pub(crate) async fn internal_load_with_settings_loader_and_reader(
     asset_server: &AssetServer,
-    asset_path: &AssetPath<'_>,
+    asset_path: RootAssetPath<'static>,
     settings: &dyn Settings,
     loader: &dyn ErasedAssetLoader,
     reader: &mut dyn Reader,
@@ -1771,7 +1824,7 @@ pub(crate) async fn internal_load_with_settings_loader_and_reader(
     populate_hashes: bool,
 ) -> Result<ErasedLoadedAsset, AssetLoadError> {
     // XXX TODO: Just take by value?
-    let asset_path = asset_path.clone_owned();
+    let asset_path = AssetPath::from(asset_path);
 
     let load_context = LoadContext::new(
         asset_server,
@@ -1793,12 +1846,12 @@ pub(crate) async fn internal_load_with_settings_loader_and_reader(
     };
     load.await
         .map_err(|_| AssetLoadError::AssetLoaderPanic {
-            path: asset_path.clone_owned().into(),
+            path: asset_path.clone().into(),
             loader_name: loader.type_path(),
         })?
         .map_err(|e| {
             AssetLoadError::AssetLoaderError(AssetLoaderError::new(
-                asset_path.clone_owned().into(),
+                asset_path.into(),
                 loader.type_path(),
                 e.into(),
             ))
@@ -1815,7 +1868,7 @@ pub mod action {
     #[reflect(BassetAction, Hash, PartialEq)]
     pub struct LoadPath {
         // XXX TODO: Should be `RootAssetPath`? Avoiding for now to simplify lifetimes and defaults.
-        pub path: String,
+        pub path: RootAssetPath<'static>,
         // XXX TODO: Currently the settings are simply serialized RON, which means we're
         // going to get duplication due to being non-canonical. Ideally it would
         // be a `Box<dyn Settings>`, but serializing that will be a challenge.
@@ -1833,34 +1886,32 @@ pub mod action {
 
     impl BassetActionFunction for LoadPathFunction {
         type Action = LoadPath;
-        type Error = BevyError;
+        type Error = AssetLoadError;
 
         async fn apply(
             &self,
             context: ApplyContext<'_>,
             action: &Self::Action,
         ) -> Result<BassetActionOutput, Self::Error> {
-            // XXX TODO: Try to avoid clones? But will mean changing lifetimes
-            // of `BassetAction::apply`.
-            let path = AssetPath::try_parse(&action.path)?.into_owned();
-
-            // XXX TODO: Selecting a subasset should be done by the `RootAssetRef::label`,
-            // not here. How do we make this more robust?
-            assert!(path.label().is_none());
-
             let asset_server = context.asset_server();
 
+            let full_path = AssetPath::from(action.path.clone());
+
             let (mut meta, loader, mut reader) = asset_server
-                .get_meta_loader_and_reader(&path, None)
-                .await
-                .map_err(Into::<BevyError>::into)?;
+                .get_meta_loader_and_reader(&full_path, None)
+                .await?;
 
             // XXX TODO: If we didn't override the settings then we're now dependent
             // on the meta's settings. These aren't currently expressed in the dependency
             // key or dependency graph. Decide if we make this happen or drop support
             // for metas.
             if let Some(override_settings) = &action.loader_settings {
-                meta = loader.meta_from_settings(override_settings.as_bytes())?;
+                meta = loader
+                    .meta_from_settings(override_settings.as_bytes())
+                    .map_err(|err| AssetLoadError::DeserializeMeta {
+                        path: action.path.clone().into(),
+                        error: err.into(),
+                    })?;
             }
 
             let settings = meta
@@ -1868,20 +1919,15 @@ pub mod action {
                 .expect("XXX TODO: Sensible error message. We only support AssetAction::Load.");
 
             // XXX TODO: Avoid clone?
-            let file_dependency =
-                LoaderDependency::File(RootAssetPath::without_label(path.clone()));
+            let file_dependency = LoaderDependency::File(action.path.clone());
 
             // XXX TODO: Replacement reader stuff is ugly. Compare against `ReaderRef`.
             let (mut replacement_reader, file_dependency_key) = match context
                 .asset_server()
                 .basset_action_source()
-                .read_asset_bytes(
-                    // XXX TODO: Review `clone_owned`. Are we really losing much by
-                    // not doing fine grained lifetimes?
-                    RootAssetPath::without_label(path.clone_owned()),
-                    &mut reader,
-                )
-                .await?
+                .read_asset_bytes(action.path.clone(), &mut reader)
+                .await
+                .map_err(|err| AssetLoadError::ReadAssetBytesError(Arc::new(err)))?
             {
                 // XXX TODO: Ugly destructuring. Review.
                 Some((replacement_reader, dependency_key)) => {
@@ -1894,7 +1940,7 @@ pub mod action {
 
             let mut asset = internal_load_with_settings_loader_and_reader(
                 asset_server,
-                &path,
+                action.path.clone(),
                 settings,
                 &*loader,
                 chosen_reader,
@@ -1911,14 +1957,7 @@ pub mod action {
                 .loader_dependencies
                 .insert(file_dependency, (hash, file_dependency_key));
 
-            // XXX TODO: Should we be resolving the label here? See also comment
-            // on `LoadPath` - we should probably rely on the `AssetRef` to handle that.
-            Ok(BassetActionOutput {
-                asset: asset.take_labeled(path.label_cow()).map_err(|_| {
-                    BevyError::from(format!("Couldn't find labeled asset \"{path:?}\"."))
-                })?,
-                saved: None,
-            })
+            Ok(BassetActionOutput { asset, saved: None })
         }
 
         fn cacheable(&self) -> bool {

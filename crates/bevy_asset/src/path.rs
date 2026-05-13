@@ -1,5 +1,7 @@
 use crate::{
-    basset::{action::LoadPath, BassetAction, ErasedBassetAction, ReflectBassetAction},
+    basset::{
+        action::LoadPath, BassetAction, ErasedBassetAction, ReflectBassetAction, RootAssetPath,
+    },
     io::AssetSourceId,
 };
 use alloc::{
@@ -600,13 +602,13 @@ impl<'a> AssetPath<'a> {
     }
 
     // XXX TODO: See `AssetRef::with_settings`.
-    pub fn with_settings(self, settings_ron: String) -> AssetRef<'a> {
+    pub fn with_settings(self, settings_ron: String) -> AssetRef<'static> {
         AssetRef::new_with_label(
             LoadPath {
-                path: self.without_label().to_string(),
+                path: RootAssetPath::new(self.source.into_owned(), self.path.into_owned()),
                 loader_settings: Some(settings_ron),
             },
-            self.label,
+            self.label.map(CowArc::into_owned),
         )
     }
 }
@@ -823,20 +825,7 @@ impl<'a> AssetRef<'a> {
     // panicking if not. This is for temporary backwards compatibility. Need to
     // work through where it's used and consider alternatives.
     pub fn temporary_path_workaround(&self) -> AssetPath<'static> {
-        if let Some(action) = self.action.0.downcast_ref::<LoadPath>()
-            && action.loader_settings.is_none()
-        {
-            // XXX TODO: Should use `try_parse`?
-            let path = AssetPath::parse(&action.path).clone_owned();
-
-            if let Some(label) = &self.label {
-                path.with_label(label.clone_owned())
-            } else {
-                path
-            }
-        } else {
-            todo!("This is a temporary workaround")
-        }
+        self.try_temporary_path_workaround().expect("XXX TODO")
     }
 
     // XXX TODO: Converts the action back to an `AssetPath` if possible,
@@ -848,8 +837,7 @@ impl<'a> AssetRef<'a> {
         if let Some(action) = self.action.0.downcast_ref::<LoadPath>()
             && action.loader_settings.is_none()
         {
-            // XXX TODO: Should use `try_parse`?
-            let path = AssetPath::parse(&action.path).clone_owned();
+            let path = AssetPath::from(action.path.clone());
 
             if let Some(label) = &self.label {
                 Some(path.with_label(label.clone_owned()))
@@ -1082,7 +1070,7 @@ impl<'a> From<AssetPath<'a>> for AssetRef<'a> {
     fn from(value: AssetPath<'a>) -> Self {
         Self::new_with_label(
             LoadPath {
-                path: value.without_label().to_string(),
+                path: RootAssetPath::without_label(value.clone_owned()),
                 loader_settings: None,
             },
             value.label,

@@ -980,7 +980,7 @@ fn test_serialization() {
         let b = dbg!(ser::to_string(&ReflectSerializer::new(
             &AssetRef::new_with_label(
                 LoadPath {
-                    path: "asdf.txt".into(),
+                    path: "asdf.txt".try_into().expect("XXX TODO"),
                     ..Default::default()
                 },
                 Some("subasset".into()),
