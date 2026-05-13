@@ -7,7 +7,6 @@
 use crate::{
     basset::{
         blob::{BlobReader, BlobWriter},
-        cache::DependencyCacheKey,
         internal_load_with_settings_loader_and_reader, DependencyLoading,
     },
     io::SliceReader,
@@ -57,7 +56,6 @@ pub(crate) fn read_standalone_asset(blob: &[u8]) -> Result<StandaloneAssetData, 
 pub(crate) async fn load_standalone_asset(
     data: &StandaloneAssetData,
     asset_server: &AssetServer,
-    dependency_key: DependencyCacheKey,
     dependency_loading: DependencyLoading,
 ) -> Result<ErasedLoadedAsset, AssetLoadError> {
     let minimal_meta = ron::de::from_bytes::<AssetMetaMinimal>(&data.meta).expect("XXX TODO");
@@ -89,7 +87,6 @@ pub(crate) async fn load_standalone_asset(
         &mut reader,
         dependency_loading,
         populate_hashes,
-        Some(dependency_key),
     )
     .await
 }

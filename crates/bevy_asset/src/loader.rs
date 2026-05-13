@@ -269,8 +269,6 @@ pub struct LoadedAsset<A: Asset> {
     /// This is entirely redundant with [`Self::labeled_assets`], but it allows looking up the
     /// labeled asset by its asset ID.
     pub(crate) asset_id_to_asset_index: HashMap<UntypedAssetId, usize>,
-    /// XXX TODO: Document.
-    pub(crate) dependency_key: Option<DependencyCacheKey>,
 }
 
 impl<A: Asset> LoadedAsset<A> {
@@ -293,9 +291,6 @@ impl<A: Asset> LoadedAsset<A> {
             labeled_assets: Default::default(),
             label_to_asset_index: Default::default(),
             asset_id_to_asset_index: Default::default(),
-            // XXX TODO: Review used cases of `new_with_dependencies`. Do any
-            // want to pass the dependency key?
-            dependency_key: None,
         }
     }
 
@@ -366,8 +361,6 @@ pub struct ErasedLoadedAsset {
     /// This is entirely redundant with [`Self::labeled_assets`], but it allows looking up the
     /// labeled asset by its asset ID.
     pub(crate) asset_id_to_asset_index: HashMap<UntypedAssetId, usize>,
-    /// XXX TODO: Document.
-    pub(crate) dependency_key: Option<DependencyCacheKey>,
 }
 
 impl<A: Asset> From<LoadedAsset<A>> for ErasedLoadedAsset {
@@ -379,7 +372,6 @@ impl<A: Asset> From<LoadedAsset<A>> for ErasedLoadedAsset {
             labeled_assets: asset.labeled_assets,
             label_to_asset_index: asset.label_to_asset_index,
             asset_id_to_asset_index: asset.asset_id_to_asset_index,
-            dependency_key: asset.dependency_key,
         }
     }
 }
@@ -463,7 +455,6 @@ impl ErasedLoadedAsset {
                 labeled_assets: self.labeled_assets,
                 label_to_asset_index: self.label_to_asset_index,
                 asset_id_to_asset_index: self.asset_id_to_asset_index,
-                dependency_key: self.dependency_key,
             }),
             Err(value) => {
                 self.value = value;
@@ -578,9 +569,6 @@ pub struct LoadContext<'a> {
     /// This is entirely redundant with [`Self::labeled_assets`], but it allows looking up the
     /// labeled asset by its asset ID.
     pub(crate) asset_id_to_asset_index: HashMap<UntypedAssetId, usize>,
-
-    // XXX TODO: Shouldn't be `pub(crate)`? Review where it's used in `BassetLoader`.
-    pub(crate) dependency_key: Option<DependencyCacheKey>,
 }
 
 impl<'a> LoadContext<'a> {
@@ -591,7 +579,6 @@ impl<'a> LoadContext<'a> {
         asset_path: AssetPath<'static>,
         should_load_dependencies: bool,
         populate_hashes: bool,
-        dependency_key: Option<DependencyCacheKey>,
     ) -> Self {
         Self {
             asset_server,
@@ -603,7 +590,6 @@ impl<'a> LoadContext<'a> {
             labeled_assets: Default::default(),
             label_to_asset_index: Default::default(),
             asset_id_to_asset_index: Default::default(),
-            dependency_key,
         }
     }
 
@@ -642,7 +628,6 @@ impl<'a> LoadContext<'a> {
             self.asset_path.clone(),
             self.should_load_dependencies,
             self.populate_hashes,
-            None, // XXX TODO: Review? Seems correct that sub-assets don't have a dependency key.
         )
     }
 
@@ -754,7 +739,6 @@ impl<'a> LoadContext<'a> {
             labeled_assets: self.labeled_assets,
             label_to_asset_index: self.label_to_asset_index,
             asset_id_to_asset_index: self.asset_id_to_asset_index,
-            dependency_key: self.dependency_key,
         }
     }
 
@@ -792,7 +776,6 @@ impl<'a> LoadContext<'a> {
             labeled_assets: self.labeled_assets,
             label_to_asset_index: self.label_to_asset_index,
             asset_id_to_asset_index: self.asset_id_to_asset_index,
-            dependency_key: self.dependency_key,
         })
     }
 
@@ -908,7 +891,7 @@ impl<'a> LoadContext<'a> {
         path: RootAssetRef,
         processed_info: Option<&ProcessedInfo>,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
-        let loaded_asset = self
+        let (loaded_asset, dependency_key) = self
             .asset_server
             .basset_action_source()
             // XXX TODO: Review if `DependencyLoading::Yes` is correct? Seems
@@ -926,10 +909,8 @@ impl<'a> LoadContext<'a> {
 
         let hash = processed_info.map(|i| i.full_hash).unwrap_or_default();
 
-        self.loader_dependencies.insert(
-            LoaderDependency::Load(path),
-            (hash, loaded_asset.dependency_key),
-        );
+        self.loader_dependencies
+            .insert(LoaderDependency::Load(path), (hash, dependency_key));
         Ok(loaded_asset)
     }
 

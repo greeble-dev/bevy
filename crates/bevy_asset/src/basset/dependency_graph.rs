@@ -325,31 +325,42 @@ impl DependencyGraph {
         }
     }
 
-    // XXX TODO: If we know the path is an action then we don't need async? Is that
-    // worth optimizing for?
     pub(crate) async fn dependency_key(&self, path: &LoaderDependency) -> DependencyCacheKey {
-        // XXX TODO: Seed hash?
+        match path {
+            LoaderDependency::Load(action) => self.action_dependency_key(action),
+            LoaderDependency::File(path) => self.file_dependency_key(path).await,
+        }
+    }
+
+    pub(crate) fn action_dependency_key(&self, action: &RootAssetRef) -> DependencyCacheKey {
+        // XXX TODO: Seed hash? Also consider using separate seeds for actions
+        // and files just in case.
         let mut hasher = blake3::Hasher::new();
 
-        // XXX TODO: Should we also mix in something here to make sure that the two
-        // `LoaderDependency` variants are separate?
+        // XXX TODO: Is this the best way to hash actions?
+        let mut action_hasher = FixedHasher.build_hasher();
+        Hash::hash(&action, &mut action_hasher);
+        hasher.update(&action_hasher.finish().to_le_bytes());
 
-        match path {
-            LoaderDependency::Load(action) => {
-                // XXX TODO: Is this the best way to hash actions?
-                let mut action_hasher = FixedHasher.build_hasher();
-                Hash::hash(&action, &mut action_hasher);
-                hasher.update(&action_hasher.finish().to_le_bytes());
-            }
-            LoaderDependency::File(path) => {
-                hasher.update(path.to_string().as_bytes());
+        // XXX TODO: Include the loader/action versions.
 
-                let content_hash = self.content_cache.get(path).await.expect("XXX TODO");
-                hasher.update(&content_hash.as_bytes());
-            }
-        }
+        DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
+    }
 
-        // XXX TODO: if `LoaderDependency::Load` then we should include the loader versions.
+    // XXX TODO: Review where this is used and make sure we're not introducing
+    // any file read race conditions.
+    pub(crate) async fn file_dependency_key(
+        &self,
+        path: &RootAssetPath<'static>,
+    ) -> DependencyCacheKey {
+        // XXX TODO: Seed hash? Also consider using separate seeds for actions
+        // and files just in case.
+        let mut hasher = blake3::Hasher::new();
+
+        hasher.update(path.to_string().as_bytes());
+
+        let content_hash = self.content_cache.get(path).await.expect("XXX TODO");
+        hasher.update(&content_hash.as_bytes());
 
         DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
     }

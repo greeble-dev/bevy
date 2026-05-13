@@ -822,7 +822,7 @@ impl AssetServer {
             )
             .await
         {
-            Ok(loaded_asset) => {
+            Ok((loaded_asset, _)) => {
                 let (final_handle, base_asset_id) = if let Some(label) = path.label_cow() {
                     match loaded_asset.label_to_asset_index.get(&label) {
                         Some(labeled_asset) => {
@@ -1629,13 +1629,8 @@ impl AssetServer {
 
         // TODO: experiment with this
         let asset_path = asset_path.clone_owned();
-        let load_context = LoadContext::new(
-            self,
-            asset_path.clone(),
-            load_dependencies,
-            populate_hashes,
-            None,
-        );
+        let load_context =
+            LoadContext::new(self, asset_path.clone(), load_dependencies, populate_hashes);
         let load = AssertUnwindSafe(loader.load(reader, settings, load_context)).catch_unwind();
         #[cfg(feature = "trace")]
         let load = {
@@ -2415,6 +2410,7 @@ pub enum AssetLoadError {
         label: String,
         all_labels: Vec<String>,
     },
+    // XXX TODO: Maybe should be `MissingActionError`?
     #[error(transparent)]
     MissingActionFunctionError(#[from] MissingActionFunctionError),
     #[error(transparent)]
