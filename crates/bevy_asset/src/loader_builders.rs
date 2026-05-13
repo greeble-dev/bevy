@@ -289,6 +289,12 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
             return Err(LoadDirectError::RequestedSubasset(path.clone()));
         };
 
+        self.load_context
+            .asset_server
+            .write_infos()
+            .stats
+            .started_load_tasks += 1;
+
         // XXX TODO: We dropped support for processed info here since we're no longer
         // looking up the meta. Decide if we need a solution.
         let processed_info = Option::<&ProcessedInfo>::None;

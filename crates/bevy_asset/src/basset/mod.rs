@@ -1748,7 +1748,7 @@ impl ActionSource for PublishedActionSource {
                 internal_load_with_settings_loader_and_reader(
                     asset_server,
                     &fake_path,
-                    meta.loader_settings().expect("meta is set to Load"),
+                    meta.loader_settings().expect("XXX TODO"),
                     &*loader,
                     &mut readers.asset,
                     dependency_loading,
