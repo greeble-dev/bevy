@@ -242,7 +242,7 @@ impl SerializeWithRegistry for RootAssetRef {
         if let Some(path) = self.try_temporary_path_workaround() {
             path.serialize(serializer)
         } else {
-            let mut s = serializer.serialize_struct("AssetRef", 3)?;
+            let mut s = serializer.serialize_struct("AssetRef", 1)?;
 
             s.serialize_field(
                 "action",
