@@ -1415,7 +1415,10 @@ impl ActionSource for DevelopmentActionSource {
                                         AssetDependency::Handle(handle) => handle.path().cloned(),
                                         AssetDependency::Path(path) => Some(path.clone()),
                                     } {
-                                        // XXX TODO: Similar to case above - shouldn't assume PublishDependency::Load.
+                                        // XXX TODO: Skip sub-assets and self references?
+                                        // XXX TODO: Can we assume `PublishDependency::Load`? Technically the path
+                                        // could have been used by `read_asset_bytes`. Maybe just have to accept
+                                        // that we don't know or `#[dependency]` needs some annotation.
                                         input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
                                     };
                                 });
