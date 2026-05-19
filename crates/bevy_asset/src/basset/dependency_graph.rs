@@ -23,7 +23,7 @@ use petgraph::{
 };
 use std::{
     path::PathBuf,
-    sync::{Mutex, PoisonError},
+    sync::{Mutex, MutexGuard, PoisonError},
 };
 use tracing::warn;
 
@@ -36,22 +36,21 @@ enum InternalGraphNode {
 #[derive(Default)]
 struct InternalGraph {
     graph: Acyclic<StableDiGraph<InternalGraphNode, ()>>,
-    load_to_node: HashMap<RootAssetRef, (NodeIndex, Arc<DependencyCacheValue>)>,
+    action_to_node: HashMap<RootAssetRef, (NodeIndex, Arc<DependencyCacheValue>)>,
     file_to_node: HashMap<RootAssetPath<'static>, NodeIndex>,
 }
 
 impl InternalGraph {
     fn get_node_id(&self, dependency: &LoaderDependency) -> Option<NodeIndex> {
         match dependency {
-            LoaderDependency::Load(load) => {
-                self.load_to_node.get(load).map(|(node_id, _)| *node_id)
+            LoaderDependency::Action(action) => {
+                self.action_to_node.get(action).map(|(node_id, _)| *node_id)
             }
             LoaderDependency::File(file) => self.file_to_node.get(file).copied(),
         }
     }
 
-    // XXX TODO: Document and reconsider name. Corresponds to `LoaderDependency::Load`.
-    fn set_load(
+    fn set_action(
         &mut self,
         path: RootAssetRef,
         dependency_key: DependencyCacheKey,
@@ -60,7 +59,8 @@ impl InternalGraph {
         // XXX TODO: Validate the existing entry? Or is it an error to set twice?
         // XXX TODO: Try to optimize this by reusing the entry?
         // XXX TODO: Avoid clone?
-        if let Some(existing_node_id) = self.load_to_node.get(&path).map(|(node_id, _)| *node_id) {
+        if let Some(existing_node_id) = self.action_to_node.get(&path).map(|(node_id, _)| *node_id)
+        {
             return match self
                 .graph
                 .node_weight(existing_node_id)
@@ -144,7 +144,8 @@ impl InternalGraph {
             (node_id, None)
         };
 
-        self.load_to_node.insert(path, (node_id, dependency_value));
+        self.action_to_node
+            .insert(path, (node_id, dependency_value));
 
         action_key
     }
@@ -189,7 +190,7 @@ impl InternalGraph {
     }
 
     fn get(&self, path: &RootAssetRef) -> Option<(ActionCacheKey, Arc<DependencyCacheValue>)> {
-        self.load_to_node
+        self.action_to_node
             .get(path)
             .and_then(|(node_id, dependency_value)| {
                 match self.graph.node_weight(*node_id).expect("XXX TODO") {
@@ -203,7 +204,7 @@ impl InternalGraph {
 
     fn contains(&self, path: &LoaderDependency) -> bool {
         match path {
-            LoaderDependency::Load(load) => self.load_to_node.contains_key(load),
+            LoaderDependency::Action(action) => self.action_to_node.contains_key(action),
             LoaderDependency::File(file) => self.file_to_node.contains_key(file),
         }
     }
@@ -227,9 +228,9 @@ impl InternalGraph {
 impl Debug for InternalGraph {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let node_to_path: HashMap<NodeIndex, LoaderDependency> = HashMap::from_iter(
-            self.load_to_node
+            self.action_to_node
                 .iter()
-                .map(|(path, (node, _))| (*node, LoaderDependency::Load(path.clone())))
+                .map(|(path, (node, _))| (*node, LoaderDependency::Action(path.clone())))
                 .chain(
                     self.file_to_node
                         .iter()
@@ -257,7 +258,7 @@ impl Debug for InternalGraph {
             let root_node_id = self.get_node_id(&root_node_path).unwrap();
 
             // Skip spammy embedded assets. XXX TODO: Rethink at some point.
-            if let LoaderDependency::Load(path) = root_node_path
+            if let LoaderDependency::Action(path) = root_node_path
                 && path.to_string().contains("embedded://")
             {
                 continue;
@@ -325,9 +326,13 @@ impl DependencyGraph {
         }
     }
 
+    fn graph(&self) -> MutexGuard<'_, InternalGraph> {
+        self.graph.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub(crate) async fn dependency_key(&self, path: &LoaderDependency) -> DependencyCacheKey {
         match path {
-            LoaderDependency::Load(action) => self.action_dependency_key(action),
+            LoaderDependency::Action(action) => self.action_dependency_key(action),
             LoaderDependency::File(path) => self.file_dependency_key(path).await,
         }
     }
@@ -393,125 +398,139 @@ impl DependencyGraph {
 
     pub(crate) async fn action_key(
         &self,
-        path: &RootAssetRef,
+        root_action: &RootAssetRef,
+        root_dependency_key: Option<DependencyCacheKey>,
     ) -> Option<(ActionCacheKey, Arc<DependencyCacheValue>)> {
-        if let Some(cache) = &self.dependency_cache {
-            let mut stack = Vec::<(LoaderDependency, Option<DependencyCacheKey>)>::new();
+        let Some(cache) = &self.dependency_cache else {
+            return None;
+        };
 
-            // XXX TODO: Document that `IndexMap` is for consistent ordering.
-            let mut pending_loads = IndexMap::<
-                RootAssetRef,
-                Option<(DependencyCacheKey, Arc<DependencyCacheValue>)>,
-            >::new();
+        let root_dependency_key =
+            root_dependency_key.unwrap_or_else(|| self.action_dependency_key(root_action));
 
-            let mut pending_files =
-                IndexMap::<RootAssetPath<'static>, Option<DependencyCacheKey>>::new();
+        // Early out if possible.
+        if let Some(existing) = self.graph().get(root_action) {
+            return Some(existing);
+        };
 
-            stack.push((LoaderDependency::Load(path.clone()), None));
+        let mut stack = Vec::<(LoaderDependency, DependencyCacheKey)>::new();
 
-            while let Some((path, tentative_dependency_key)) = stack.pop() {
-                // Early out if we've already hit this path.
-                if match &path {
-                    LoaderDependency::Load(path) => pending_loads.contains_key(path),
-                    LoaderDependency::File(path) => pending_files.contains_key(path),
-                } {
-                    continue;
-                }
+        // XXX TODO: Document that `IndexMap` is for consistent ordering.
+        let mut pending_actions =
+            IndexMap::<RootAssetRef, Option<(DependencyCacheKey, Arc<DependencyCacheValue>)>>::new(
+            );
 
-                // Early out if we already have a graph node for this path.
-                if self
-                    .graph
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .contains(&path)
-                {
-                    continue;
-                };
+        let mut pending_files =
+            IndexMap::<RootAssetPath<'static>, Option<DependencyCacheKey>>::new();
 
-                let current_dependency_key = self.dependency_key(&path).await;
-
-                // The tentative dependency key came from the dependency cache. Check
-                // if it matches the current file state. If not then invalidate the
-                // node.
-                if tentative_dependency_key.is_some_and(|e| e != current_dependency_key) {
-                    match path {
-                        LoaderDependency::Load(path) => {
-                            pending_loads.insert(path.clone(), None);
-                        }
-                        LoaderDependency::File(path) => {
-                            pending_files.insert(path.clone(), None);
-                        }
-                    }
-
-                    continue;
-                }
-
-                match path {
-                    LoaderDependency::Load(path) => {
-                        // XXX TODO: Keep?
-                        assert!(!pending_loads.contains_key(&path));
-
-                        if let Some(dependency_value) =
-                            cache.get(&current_dependency_key, &path).await
-                        {
-                            for CacheLoaderDependency(dependee_path, dependee_key) in
-                                dependency_value.loader_dependees()
-                            {
-                                stack.push((dependee_path.clone(), Some(*dependee_key)));
-                            }
-
-                            pending_loads.insert(
-                                path.clone(),
-                                Some((current_dependency_key, dependency_value)),
-                            );
-                        } else {
-                            pending_loads.insert(path.clone(), None);
-                        }
-                    }
-                    LoaderDependency::File(path) => {
-                        // XX TODO: Keep?
-                        assert!(!pending_files.contains_key(&path));
-
-                        pending_files.insert(path.clone(), Some(current_dependency_key));
-                    }
-                }
+        // XXX TODO: This duplicates a similar block within the loop below. Refactor?
+        let root_pending_action = if let Some(root_dependency_value) =
+            cache.get(&root_dependency_key, root_action).await
+        {
+            for CacheLoaderDependency(dependee_path, dependee_key) in
+                root_dependency_value.loader_dependees()
+            {
+                stack.push((dependee_path.clone(), *dependee_key));
             }
 
-            if !pending_loads.is_empty() || !pending_files.is_empty() {
-                let mut graph = self.graph.lock().unwrap_or_else(PoisonError::into_inner);
+            Some((root_dependency_key, root_dependency_value))
+        } else {
+            None
+        };
 
-                // XXX TODO: Document reverse order reasoning.
-                for (path, potential) in pending_files.into_iter().rev() {
-                    match potential {
-                        Some(dependency_key) => {
-                            graph.set_file(path, dependency_key);
-                        }
-                        None => {
-                            graph.invalidate(&LoaderDependency::File(path));
-                        }
-                    };
+        pending_actions.insert(root_action.clone(), root_pending_action);
+
+        while let Some((dependency, predicted_dependency_key)) = stack.pop() {
+            // Skip if we've already hit this dependency.
+            if match &dependency {
+                LoaderDependency::Action(action) => pending_actions.contains_key(action),
+                LoaderDependency::File(file) => pending_files.contains_key(file),
+            } {
+                continue;
+            }
+
+            // Skip if we already have a node for this dependency.
+            if self.graph().contains(&dependency) {
+                continue;
+            };
+
+            let current_dependency_key = self.dependency_key(&dependency).await;
+
+            // If the predicted key doesn't match the current file state then
+            // invalidate the node.
+            if predicted_dependency_key != current_dependency_key {
+                match dependency {
+                    LoaderDependency::Action(path) => {
+                        pending_actions.insert(path.clone(), None);
+                    }
+                    LoaderDependency::File(path) => {
+                        pending_files.insert(path.clone(), None);
+                    }
                 }
 
-                // XXX TODO: Document reverse order reasoning.
-                for (path, potential) in pending_loads.into_iter().rev() {
-                    match potential {
-                        Some((dependency_key, dependency_value)) => {
-                            graph.set_load(path, dependency_key, dependency_value.clone());
+                continue;
+            }
+
+            match dependency {
+                LoaderDependency::Action(action) => {
+                    // XXX TODO: Keep?
+                    assert!(!pending_actions.contains_key(&action));
+
+                    let pending_action = if let Some(dependency_value) =
+                        cache.get(&current_dependency_key, &action).await
+                    {
+                        for CacheLoaderDependency(dependee_path, dependee_key) in
+                            dependency_value.loader_dependees()
+                        {
+                            stack.push((dependee_path.clone(), *dependee_key));
                         }
-                        None => {
-                            graph.invalidate(&LoaderDependency::Load(path));
-                        }
+
+                        Some((current_dependency_key, dependency_value))
+                    } else {
+                        None
                     };
+
+                    pending_actions.insert(action.clone(), pending_action);
+                }
+                LoaderDependency::File(file) => {
+                    // XX TODO: Keep?
+                    assert!(!pending_files.contains_key(&file));
+
+                    pending_files.insert(file.clone(), Some(current_dependency_key));
                 }
             }
         }
 
-        // XXX TODO: Check that we're correct to assume `LoaderDependency::Load`.
+        if !pending_actions.is_empty() || !pending_files.is_empty() {
+            let mut graph = self.graph();
+
+            // XXX TODO: Document reverse order reasoning.
+            for (path, potential) in pending_files.into_iter().rev() {
+                match potential {
+                    Some(dependency_key) => {
+                        graph.set_file(path, dependency_key);
+                    }
+                    None => {
+                        graph.invalidate(&LoaderDependency::File(path));
+                    }
+                };
+            }
+
+            // XXX TODO: Document reverse order reasoning.
+            for (path, potential) in pending_actions.into_iter().rev() {
+                match potential {
+                    Some((dependency_key, dependency_value)) => {
+                        graph.set_action(path, dependency_key, dependency_value.clone());
+                    }
+                    None => {
+                        graph.invalidate(&LoaderDependency::Action(path));
+                    }
+                };
+            }
+        }
+
         // XXX TODO: Avoid clone?
-        self.graph
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(path)
+        self.graph().get(root_action)
     }
 
     pub(crate) fn register_dependencies_load(
@@ -522,11 +541,9 @@ impl DependencyGraph {
     ) -> Option<ActionCacheKey> {
         let dependency_value = Arc::new(dependency_value);
 
-        let action_key = self
-            .graph
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .set_load(path.clone(), dependency_key, dependency_value.clone());
+        let action_key =
+            self.graph()
+                .set_action(path.clone(), dependency_key, dependency_value.clone());
 
         if let Some(cache) = &self.dependency_cache {
             cache.put(dependency_key, dependency_value, path);

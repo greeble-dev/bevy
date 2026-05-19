@@ -337,15 +337,13 @@ impl<A: Asset> From<A> for LoadedAsset<A> {
     }
 }
 
-/// Describes how an asset loader depends on paths and actions.
+/// Describes how an asset loader depended on actions and files.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Reflect)]
 pub enum LoaderDependency {
-    /// The loader will apply this action through a normal load call. This means
-    /// the action might itself have dependencies.
-    Load(RootAssetRef),
-    /// The loader will only read the bytes of the file at this path (usually
-    /// through `LoaderContext::read_asset_bytes`). This means it has no further
-    /// dependencies.
+    /// The loader applied this action.
+    Action(RootAssetRef),
+    /// The loader read the bytes of the file at this path (usually through
+    /// `LoaderContext::read_asset_bytes`).
     File(RootAssetPath<'static>),
 }
 
@@ -916,7 +914,7 @@ impl<'a> LoadContext<'a> {
         let hash = processed_info.map(|i| i.full_hash).unwrap_or_default();
 
         self.loader_dependencies
-            .insert(LoaderDependency::Load(path), (hash, dependency_key));
+            .insert(LoaderDependency::Action(path), (hash, dependency_key));
         Ok(loaded_asset)
     }
 

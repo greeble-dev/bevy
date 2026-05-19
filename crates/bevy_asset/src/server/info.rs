@@ -517,7 +517,7 @@ impl AssetInfos {
                     for loader_dependency in loaded_asset.loader_dependencies.keys() {
                         // XXX TODO: Review if we're correct to ignore `LoaderDependency::File`.
                         // Might be correct depending on reload semantics.
-                        if let LoaderDependency::Load(path) = loader_dependency {
+                        if let LoaderDependency::Action(path) = loader_dependency {
                             let dependents = self
                                 .loader_dependents
                                 .entry(AssetRef::from(path.clone()))
@@ -697,7 +697,7 @@ impl AssetInfos {
         for loader_dependency in info.loader_dependencies.keys() {
             // XXX TODO: Review if we're correct to ignore `LoaderDependency::File`.
             // See similar comment in `process_asset_load`.
-            if let LoaderDependency::Load(loader_dependency) = loader_dependency
+            if let LoaderDependency::Action(loader_dependency) = loader_dependency
                 && let Some(dependents) =
                     loader_dependents.get_mut(&AssetRef::from(loader_dependency.clone()))
             {

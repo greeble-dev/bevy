@@ -43,7 +43,7 @@ pub enum PublishDependency {
 impl From<LoaderDependency> for PublishDependency {
     fn from(value: LoaderDependency) -> Self {
         match value {
-            LoaderDependency::Load(path) => PublishDependency::Load(path),
+            LoaderDependency::Action(path) => PublishDependency::Load(path),
             LoaderDependency::File(path) => PublishDependency::File(path),
         }
     }

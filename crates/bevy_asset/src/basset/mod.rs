@@ -513,7 +513,7 @@ impl ApplyContext<'_> {
         let hash = [0u8; 32];
 
         self.loader_dependencies.insert(
-            LoaderDependency::Load(RootAssetRef::without_label(path.clone())),
+            LoaderDependency::Action(RootAssetRef::without_label(path.clone())),
             (hash, dependency_key),
         );
 
@@ -1118,8 +1118,6 @@ impl ActionSource for DevelopmentActionSource {
             let action_function = self.action_function(action.action())?;
 
             // XXX TODO: Avoid clone?
-            // XXX TODO: Could have a fast path here since we know the dependency key
-            // is for an action?
             let dependency_key = self
                 .dependency_graph
                 .as_ref()
@@ -1134,7 +1132,9 @@ impl ActionSource for DevelopmentActionSource {
                 // up in a situation where the saver has been compiled out but we still
                 // want to read from the cache.
 
-                if let Some((action_key, _)) = dependency_graph.action_key(action).await
+                if let Some((action_key, _)) = dependency_graph
+                    .action_key(action, Some(dependency_key))
+                    .await
                     && let Some(cached_standalone_asset) =
                         action_cache.get(&action_key, action).await
                 {
@@ -1311,7 +1311,7 @@ impl ActionSource for DevelopmentActionSource {
                         if action_function.cacheable() {
                             if let Some(dependency_graph) = &self.dependency_graph
                                 && let Some((action_key, dependency_value)) =
-                                    dependency_graph.action_key(action).await
+                                    dependency_graph.action_key(action, None).await
                                 && let Some(action_cache) = &self.action_cache
                                 && let Some(cached_standalone_asset) =
                                     action_cache.get(&action_key, action).await
@@ -1390,7 +1390,7 @@ impl ActionSource for DevelopmentActionSource {
                         } else {
                             if let Some(dependency_graph) = &self.dependency_graph
                                 && let Some((_, dependency_value)) =
-                                    dependency_graph.action_key(action).await
+                                    dependency_graph.action_key(action, None).await
                             {
                                 for dependency in dependency_value.loader_dependees() {
                                     input_stack.push(dependency.0.clone().into());
@@ -1564,7 +1564,7 @@ impl PolyAssetLoader for BassetLoader {
                 // XXX TODO: Justify this dependency replacement.
                 asset.loader_dependencies.clear();
                 asset.loader_dependencies.insert(
-                    LoaderDependency::Load(RootAssetRef::without_label(basset.root.clone())),
+                    LoaderDependency::Action(RootAssetRef::without_label(basset.root.clone())),
                     (hash, dependency_key),
                 );
 
