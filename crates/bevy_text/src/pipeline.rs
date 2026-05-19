@@ -224,6 +224,10 @@ impl TextPipeline {
                 );
                 builder.push(
                     StyleProperty::FontFeatures((&section.text_font.font_features).into()),
+                    range.clone(),
+                );
+                builder.push(
+                    StyleProperty::FontVariations((&section.text_font.font_variations).into()),
                     range,
                 );
             }
@@ -318,7 +322,7 @@ impl TextPipeline {
         for (line_index, line) in layout.lines().enumerate() {
             for item in line.items() {
                 if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
-                    let section_index = glyph_run.style().brush.section_index as usize;
+                    let section_index = glyph_run.style().brush.section_index;
                     let font_smoothing = glyph_run.style().brush.font_smoothing;
                     let run = glyph_run.run();
                     let font = run.font();
@@ -381,18 +385,16 @@ impl TextPipeline {
                                 + atlas_info.offset,
                             atlas_info,
                             section_index,
-                            line_index,
+                            line_index: line_index as u32,
                         });
                     }
 
                     layout_info.run_geometry.push(RunGeometry {
                         section_index,
                         bounds: Rect::new(
-                            line.metrics().inline_min_coord + glyph_run.offset(),
+                            glyph_run.offset(),
                             line.metrics().block_min_coord,
-                            line.metrics().inline_min_coord
-                                + glyph_run.offset()
-                                + glyph_run.advance(),
+                            glyph_run.offset() + glyph_run.advance(),
                             line.metrics().block_max_coord,
                         ),
                         strikethrough_y: glyph_run.baseline() - run.metrics().strikethrough_offset,
@@ -469,8 +471,8 @@ pub struct TextLayoutInfo {
     pub run_geometry: Vec<RunGeometry>,
     /// The glyphs resulting size
     pub size: Vec2,
-    /// Cursor size and position for editing
-    pub cursor: Option<Rect>,
+    /// Cursor visibility, size and position for editing
+    pub cursor: Option<(bool, Rect)>,
     /// Selection rects
     pub selection_rects: Vec<Rect>,
     /// Underline rects for the active IME preedit/compose region.
@@ -497,7 +499,7 @@ impl TextLayoutInfo {
 #[derive(Default, Debug, Clone, Reflect)]
 pub struct RunGeometry {
     /// The index of the text entity in [`ComputedTextBlock`] that this run belongs to.
-    pub section_index: usize,
+    pub section_index: u32,
     /// Bounding box around the text run.
     pub bounds: Rect,
     /// Y position of the strikethrough in the text layout.

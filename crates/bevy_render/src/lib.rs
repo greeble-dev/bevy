@@ -72,8 +72,8 @@ pub mod view;
 pub mod prelude {
     #[doc(hidden)]
     pub use crate::{
-        camera::NormalizedRenderTargetExt as _, texture::ManualTextureViews, view::Msaa,
-        ExtractSchedule,
+        camera::NormalizedRenderTargetExt as _, renderer::RenderGraph, texture::ManualTextureViews,
+        view::Msaa, ExtractSchedule,
     };
 }
 
@@ -564,6 +564,19 @@ pub fn get_mali_driver_version(adapter_info: &RenderAdapterInfo) -> Option<u32> 
     }
 
     None
+}
+
+pub fn get_pixel10_driver_version(adapter_info: &RenderAdapterInfo) -> Option<u32> {
+    if !cfg!(target_os = "android") {
+        return None;
+    }
+
+    if adapter_info.name != "PowerVR D-Series DXT-48-1536 MC1" {
+        return None;
+    }
+
+    let (_, driver_version) = adapter_info.driver_info.split_once('@')?;
+    driver_version.parse::<u32>().ok()
 }
 
 /// Returns true if storage buffers are unsupported on this platform or false

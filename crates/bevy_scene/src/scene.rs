@@ -8,9 +8,7 @@ use bevy_ecs::{
     name::Name,
     relationship::Relationship,
     system::IntoObserverSystem,
-    template::{
-        EntityScopes, FnTemplate, FromTemplate, ScopedEntityIndex, Template, TemplateContext,
-    },
+    template::{FnTemplate, FromTemplate, SceneEntityReference, Template, TemplateContext},
 };
 use core::{any::TypeId, marker::PhantomData};
 use thiserror::Error;
@@ -176,30 +174,6 @@ pub struct ResolveContext<'a> {
     pub patches: &'a Assets<ScenePatch>,
     /// The currently inherited [`ScenePatch`], if there is one.
     pub inherited: Option<&'a ScenePatch>,
-    pub(crate) entity_scopes: &'a mut EntityScopes,
-    pub(crate) current_scope: usize,
-}
-
-impl<'a> ResolveContext<'a> {
-    /// The current entity scope.
-    #[inline]
-    pub fn current_entity_scope(&self) -> usize {
-        self.current_scope
-    }
-
-    /// Creates a new entity scope, which is active for the duration of `func`. When this function returns,
-    /// the original scope will be returned to.
-    pub fn new_entity_scope<T>(&mut self, func: impl FnOnce(&mut ResolveContext) -> T) -> T {
-        let current_scope = self.entity_scopes.add_scope();
-        let mut context = ResolveContext {
-            assets: self.assets,
-            patches: self.patches,
-            inherited: None,
-            entity_scopes: self.entity_scopes,
-            current_scope,
-        };
-        (func)(&mut context)
-    }
 }
 
 macro_rules! scene_impl {
@@ -421,18 +395,26 @@ impl<F: (Fn(&mut TemplateContext) -> Result<O>) + Clone + Send + Sync + 'static,
 }
 
 /// Sets up a given name as an "entity reference" for the current entity. This pairs the [`Self::name`] field
-/// to a given [`Self::index`] field.
+/// to a given [`Self::reference`] field.
 ///
-/// The `index` should be a dense, unique identifier (within the current "entity scope") that can be used to reference this entity.
-/// Usually this is not set manually by a user. Instead this is generally done by a macro (such as the [`bsn!`] macro) or an asset loader
+/// Usually the reference is not set manually by a user. Instead this is generally done by a macro (such as the [`bsn!`] macro) or an asset loader
 /// (such as the BSN asset loader).
 ///
 /// [`bsn!`]: crate::bsn
 pub struct NameEntityReference {
     /// The name to give this entity.
     pub name: Name,
-    /// The index (within the current "entity scope") of this entity reference.
-    pub index: usize,
+    /// A unique entity reference.
+    pub reference: SceneEntityReference,
+}
+
+impl NameEntityReference {
+    /// Resolves this reference "inline" without going through a [`Scene`] impl.
+    pub fn resolve_inline(self, context: &mut ResolveContext, scene: &mut ResolvedScene) {
+        scene.entity_references.push(self.reference);
+        let name = scene.get_or_insert_template::<Name>(context);
+        *name = self.name;
+    }
 }
 
 impl Scene for NameEntityReference {
@@ -441,25 +423,14 @@ impl Scene for NameEntityReference {
         context: &mut ResolveContext,
         scene: &mut ResolvedScene,
     ) -> Result<(), ResolveSceneError> {
-        let this_index = ScopedEntityIndex {
-            scope: context.current_entity_scope(),
-            index: self.index,
-        };
-        if let Some(first_index) = scene.entity_indices.first().copied() {
-            let consolidated_index = context.entity_scopes.get(first_index).unwrap();
-            context.entity_scopes.assign(this_index, consolidated_index);
-        } else {
-            context.entity_scopes.alloc(this_index);
-        }
-        scene.entity_indices.push(this_index);
-        let name = scene.get_or_insert_template::<Name>(context);
-        *name = self.name;
+        self.resolve_inline(context, scene);
         Ok(())
     }
 }
 
 /// A [`Scene`] that will create a new "entity scope" and fully resolve the given scene `S` on top of the current [`ResolvedScene`] (using that scope).
 /// It is not "inherited" or cached.
+#[must_use]
 pub struct SceneScope<S: Scene>(pub S);
 
 impl<S: Scene> Scene for SceneScope<S> {
@@ -468,7 +439,7 @@ impl<S: Scene> Scene for SceneScope<S> {
         context: &mut ResolveContext,
         scene: &mut ResolvedScene,
     ) -> Result<(), ResolveSceneError> {
-        context.new_entity_scope(|context| self.0.resolve(context, scene))
+        self.0.resolve(context, scene)
     }
 
     fn register_dependencies(&self, dependencies: &mut SceneDependencies) {
@@ -478,6 +449,7 @@ impl<S: Scene> Scene for SceneScope<S> {
 
 /// A [`SceneList`] that will create a new "entity scope" and fully resolve the given scene list `L` on top of the current [`Vec<ResolvedScene>`]
 /// (using that scope). It is not "inherited" or cached.
+#[must_use]
 pub struct SceneListScope<L: SceneList>(pub L);
 
 impl<L: SceneList> SceneList for SceneListScope<L> {
@@ -486,7 +458,7 @@ impl<L: SceneList> SceneList for SceneListScope<L> {
         context: &mut ResolveContext,
         scenes: &mut Vec<ResolvedScene>,
     ) -> Result<(), ResolveSceneError> {
-        context.new_entity_scope(|context| self.0.resolve_list(context, scenes))
+        self.0.resolve_list(context, scenes)
     }
 
     fn register_dependencies(&self, dependencies: &mut SceneDependencies) {
@@ -539,4 +511,53 @@ pub fn on<I: IntoObserverSystem<E, B, M>, E: EntityEvent, B: Bundle, M: 'static>
     observer: I,
 ) -> OnTemplate<I, E, B, M> {
     OnTemplate(observer, PhantomData)
+}
+
+impl<S: Scene> From<SceneScope<S>> for Box<dyn Scene> {
+    fn from(value: SceneScope<S>) -> Self {
+        Box::new(value)
+    }
+}
+
+impl<S: SceneList> From<SceneListScope<S>> for Box<dyn SceneList> {
+    fn from(value: SceneListScope<S>) -> Self {
+        Box::new(value)
+    }
+}
+
+impl<S: Scene> From<SceneScope<S>> for Box<dyn SceneList> {
+    fn from(value: SceneScope<S>) -> Self {
+        Box::new(value)
+    }
+}
+
+/// A [`Scene`] that initializes a template if it doesn't yet exist.
+#[derive(Default)]
+pub struct InitTemplate<T>(PhantomData<T>);
+
+impl<T: Template<Output: Component> + Default + Send + Sync + 'static> Scene for InitTemplate<T> {
+    fn resolve(
+        self,
+        context: &mut ResolveContext,
+        scene: &mut ResolvedScene,
+    ) -> Result<(), ResolveSceneError> {
+        let _ = scene.get_or_insert_template::<T>(context);
+        Ok(())
+    }
+}
+
+/// A [`Scene`] that uses a function `F` to perform arbitrary [`Scene`] logic.
+pub struct SceneFunction<F: FnOnce(&mut ResolveContext, &mut ResolvedScene)>(pub F);
+
+impl<F: FnOnce(&mut ResolveContext, &mut ResolvedScene) + Send + Sync + 'static> Scene
+    for SceneFunction<F>
+{
+    fn resolve(
+        self,
+        context: &mut ResolveContext,
+        scene: &mut ResolvedScene,
+    ) -> Result<(), ResolveSceneError> {
+        (self.0)(context, scene);
+        Ok(())
+    }
 }

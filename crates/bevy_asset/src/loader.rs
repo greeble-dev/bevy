@@ -14,7 +14,10 @@ use bevy_ecs::{error::BevyError, world::World};
 use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
 use bevy_reflect::{PartialReflect, Reflect, TypePath, TypeRegistry};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
-use core::any::{Any, TypeId};
+use core::{
+    any::{Any, TypeId},
+    convert::Infallible,
+};
 use downcast_rs::{impl_downcast, Downcast};
 use ron::error::SpannedError;
 use serde::{Deserialize, Serialize};
@@ -442,9 +445,12 @@ impl ErasedLoadedAsset {
 
     /// Cast this loaded asset as the given type. If the type does not match,
     /// the original type-erased asset is returned.
-    #[expect(
-        clippy::result_large_err,
-        reason = "Returning the passed in ErasedLoadedAsset"
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        expect(
+            clippy::result_large_err,
+            reason = "Returning the passed in ErasedLoadedAsset"
+        )
     )]
     pub fn downcast<A: Asset>(mut self) -> Result<LoadedAsset<A>, ErasedLoadedAsset> {
         match self.value.downcast::<A>() {
@@ -665,8 +671,8 @@ impl<'a> LoadContext<'a> {
         label: impl Into<CowArc<'static, str>>,
         asset: A,
     ) -> Handle<A> {
-        self.labeled_asset_scope(label, |_| Ok::<_, ()>(asset))
-            .expect("the closure returns Ok")
+        let Ok(handle) = self.labeled_asset_scope(label, |_| Ok::<_, Infallible>(asset));
+        handle
     }
 
     /// Add a [`LoadedAsset`] that is a "labeled sub asset" of the root path of this load context.
