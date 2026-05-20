@@ -603,11 +603,14 @@ impl ActionCacheKey {
         self.0.as_bytes()
     }
 
-    pub(crate) fn new(dependency_key: DependencyCacheKey, dependees: &[ActionCacheKey]) -> Self {
-        // Sort and de-dupe the keys for consistency.
-        let mut sorted_dependee_keys = dependees.to_vec();
-        sorted_dependee_keys.sort();
-        sorted_dependee_keys.dedup();
+    pub(crate) fn new(
+        dependency_key: DependencyCacheKey,
+        dependee_action_keys: &[ActionCacheKey],
+    ) -> Self {
+        // Sort and de-dupe the dependee keys for consistency.
+        let mut sorted_dependee_action_keys = dependee_action_keys.to_vec();
+        sorted_dependee_action_keys.sort();
+        sorted_dependee_action_keys.dedup();
 
         // XXX TODO: In theory we could make the action key the same as the
         // dependency key if there's zero dependees.
@@ -625,7 +628,7 @@ impl ActionCacheKey {
 
         hasher.update(&dependency_key.as_bytes());
 
-        for dependee in sorted_dependee_keys {
+        for dependee in sorted_dependee_action_keys {
             hasher.update(&dependee.as_bytes());
         }
 
