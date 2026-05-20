@@ -656,6 +656,50 @@ pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {
     fn validate(&self) -> Result<(), String> {
         Ok(())
     }
+
+    /// XXX TODO: Maybe this should be an array of strings for convenience? Consider
+    /// if something wants to include another crate's version as a dependency.
+    /// Also consider what happens if something wants to calculate the string
+    /// at runtime.
+    fn version(&self) -> &str;
+}
+
+/// Convenience macro for implementing `BassetAction::version`.
+///
+/// ```
+/// struct MyAction;
+///
+/// impl BassetAction for MyAction {
+///     basset_action_version!("123")
+/// }
+/// ```
+///
+/// If called with the identifier `crate` instead of a string, the version will
+/// be the full crate version (`env!("CARGO_PKG_VERSION")`).
+///
+/// ```
+/// struct MyAction;
+///
+/// impl BassetAction for MyAction {
+///     basset_action_version!(crate)
+/// }
+/// ```
+#[macro_export]
+macro_rules! basset_action_version {
+    ($str:literal) => {
+        fn version(&self) -> &str {
+            $str
+        }
+    };
+
+    (crate) => {
+        fn version(&self) -> &str {
+            // XXX TODO: Are we allowed to depend on cargo here? There's nothing
+            // to stop other build systems defining the same env var, but it is
+            // annoying. Maybe the practical option all the same.
+            env!("CARGO_PKG_VERSION")
+        }
+    };
 }
 
 // XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
@@ -692,6 +736,10 @@ impl ErasedBassetAction {
 
     pub fn validate(&self) -> Result<(), String> {
         self.0.validate()
+    }
+
+    pub fn version(&self) -> &str {
+        self.0.version()
     }
 }
 
@@ -1906,6 +1954,9 @@ pub mod action {
                 Ok(())
             }
         }
+
+        // XXX TODO: Should this version incorporate `AssetLoader` versions?
+        basset_action_version!(crate);
     }
 
     impl BassetActionFunction for LoadPathFunction {

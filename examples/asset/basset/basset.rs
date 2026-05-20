@@ -30,6 +30,7 @@ use bevy_asset::{
         action::LoadPath,
         publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
     },
+    basset_action_version,
     io::{AssetSourceId, Writer},
     meta::Settings,
     saver::{ErasedSavedAsset, PolyAssetSaver, SavedAsset},
@@ -57,7 +58,9 @@ mod action {
         strings: Vec<AssetRef<'static>>,
     }
 
-    impl BassetAction for JoinStrings {}
+    impl BassetAction for JoinStrings {
+        basset_action_version!(crate);
+    }
 
     pub struct JoinStringsFunction;
 
@@ -91,7 +94,9 @@ mod action {
         string: AssetRef<'static>,
     }
 
-    impl BassetAction for UppercaseString {}
+    impl BassetAction for UppercaseString {
+        basset_action_version!(crate);
+    }
 
     pub struct UppercaseStringFunction;
 
@@ -129,7 +134,9 @@ mod action {
         //scene: Option<String>,
     }
 
-    impl BassetAction for AcmeSceneFromGltf {}
+    impl BassetAction for AcmeSceneFromGltf {
+        basset_action_version!(crate);
+    }
 
     pub struct AcmeSceneFromGltfFunction;
 
@@ -176,7 +183,9 @@ mod action {
         }
     }
 
-    impl BassetAction for MeshletFromMesh {}
+    impl BassetAction for MeshletFromMesh {
+        basset_action_version!(crate);
+    }
 
     impl BassetActionFunction for MeshletFromMeshFunction {
         type Action = MeshletFromMesh;
@@ -207,7 +216,9 @@ mod action {
         vertex_position_quantization_factor: Option<u8>,
     }
 
-    impl BassetAction for ConvertAcmeSceneMeshesToMeshlets {}
+    impl BassetAction for ConvertAcmeSceneMeshesToMeshlets {
+        basset_action_version!(crate);
+    }
 
     pub struct ConvertAcmeSceneMeshesToMeshletsFunction;
 
@@ -247,7 +258,9 @@ mod action {
         pub image: AssetRef<'static>,
     }
 
-    impl BassetAction for CompressImage {}
+    impl BassetAction for CompressImage {
+        basset_action_version!(crate);
+    }
 
     pub struct CompressImageFunction;
 

@@ -345,9 +345,8 @@ impl DependencyGraph {
         // XXX TODO: Is this the best way to hash actions?
         let mut action_hasher = FixedHasher.build_hasher();
         Hash::hash(&action, &mut action_hasher);
+        Hash::hash(action.action().version(), &mut action_hasher);
         hasher.update(&action_hasher.finish().to_le_bytes());
-
-        // XXX TODO: Include the loader/action versions.
 
         DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
     }
