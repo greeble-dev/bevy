@@ -15,7 +15,7 @@ use bevy_reflect::{
         ReflectDeserializerProcessor, ReflectSerializerProcessor, TypedReflectDeserializer,
         TypedReflectSerializer,
     },
-    FromReflect, FromType, PartialReflect, Reflect, TypeRegistry,
+    CreateTypeData, FromReflect, PartialReflect, Reflect, TypeRegistry,
 };
 
 use crate::{
@@ -181,8 +181,8 @@ impl ReflectAsset {
     }
 }
 
-impl<A: Asset + FromReflect> FromType<A> for ReflectAsset {
-    fn from_type() -> Self {
+impl<A: Asset + FromReflect> CreateTypeData<A> for ReflectAsset {
+    fn create_type_data(_input: ()) -> Self {
         ReflectAsset {
             handle_type_id: TypeId::of::<Handle<A>>(),
             assets_resource_type_id: TypeId::of::<Assets<A>>(),
@@ -288,8 +288,8 @@ impl ReflectHandle {
     }
 }
 
-impl<A: Asset> FromType<Handle<A>> for ReflectHandle {
-    fn from_type() -> Self {
+impl<A: Asset> CreateTypeData<Handle<A>> for ReflectHandle {
+    fn create_type_data(_input: ()) -> Self {
         ReflectHandle {
             asset_type_id: TypeId::of::<A>(),
             downcast_handle_untyped: |handle: &dyn Any| {
