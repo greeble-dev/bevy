@@ -62,6 +62,7 @@ mod action {
         basset_action_version!(crate);
     }
 
+    #[derive(TypePath)]
     pub struct JoinStringsFunction;
 
     impl BassetActionFunction for JoinStringsFunction {
@@ -98,6 +99,7 @@ mod action {
         basset_action_version!(crate);
     }
 
+    #[derive(TypePath)]
     pub struct UppercaseStringFunction;
 
     impl BassetActionFunction for UppercaseStringFunction {
@@ -138,6 +140,7 @@ mod action {
         basset_action_version!(crate);
     }
 
+    #[derive(TypePath)]
     pub struct AcmeSceneFromGltfFunction;
 
     impl BassetActionFunction for AcmeSceneFromGltfFunction {
@@ -158,8 +161,6 @@ mod action {
             Ok(context.finish(scene))
         }
     }
-
-    pub struct MeshletFromMeshFunction;
 
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetAction, PartialEq, Hash)]
@@ -186,6 +187,9 @@ mod action {
     impl BassetAction for MeshletFromMesh {
         basset_action_version!(crate);
     }
+
+    #[derive(TypePath)]
+    pub struct MeshletFromMeshFunction;
 
     impl BassetActionFunction for MeshletFromMeshFunction {
         type Action = MeshletFromMesh;
@@ -220,6 +224,7 @@ mod action {
         basset_action_version!(crate);
     }
 
+    #[derive(TypePath)]
     pub struct ConvertAcmeSceneMeshesToMeshletsFunction;
 
     impl BassetActionFunction for ConvertAcmeSceneMeshesToMeshletsFunction {
@@ -260,8 +265,17 @@ mod action {
 
     impl BassetAction for CompressImage {
         basset_action_version!(crate);
+
+        // XXX TODO: Experiment with this.
+        // fn env<'a>(&'a self) -> EnvironmentSchema<'a> {
+        //     EnvironmentSchema(&[EnvironmentSchemaKey {
+        //         name: "texture_compression",
+        //         required: EnvironmentRequiredKey::Yes,
+        //     }])
+        // }
     }
 
+    #[derive(TypePath)]
     pub struct CompressImageFunction;
 
     impl BassetActionFunction for CompressImageFunction {
@@ -316,7 +330,7 @@ mod action {
 
             // XXX TODO: Verify we're correctly handling dependencies. Currently
             // `finished_erased_saved` overwrites the loader dependencies we
-            // paseed in.
+            // passed in.
             Ok(context.finish_erased_saved(
                 asset,
                 StandaloneAssetData {

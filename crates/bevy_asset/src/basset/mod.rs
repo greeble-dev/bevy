@@ -53,6 +53,7 @@ use bevy_reflect::{
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
     any::{type_name, TypeId},
+    cmp::Ordering,
     fmt::{Debug, Display},
     hash::{Hash, Hasher},
     ops::Deref,
@@ -244,7 +245,7 @@ impl RootAssetRef {
         }
     }
 
-    fn action(&self) -> &ErasedBassetAction {
+    pub fn action(&self) -> &ErasedBassetAction {
         &self.action
     }
 
@@ -469,20 +470,31 @@ pub struct ApplyContext<'a> {
     loader_dependencies: HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
 
     dependency_loading: DependencyLoading,
+
+    env: Environment<'a>,
 }
 
 impl<'a> ApplyContext<'a> {
-    pub fn new(asset_server: &'a AssetServer, dependency_loading: DependencyLoading) -> Self {
+    pub fn new(
+        asset_server: &'a AssetServer,
+        dependency_loading: DependencyLoading,
+        env: Environment<'a>,
+    ) -> Self {
         Self {
             asset_server,
             loader_dependencies: Default::default(),
             dependency_loading,
+            env,
         }
     }
 
     // XXX TODO: Try to avoid exposing this?
     pub fn asset_server(&'a self) -> &'a AssetServer {
         self.asset_server
+    }
+
+    pub fn env(&'a self) -> &'a Environment<'a> {
+        &self.env
     }
 }
 
@@ -662,6 +674,14 @@ pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {
     /// Also consider what happens if something wants to calculate the string
     /// at runtime.
     fn version(&self) -> &str;
+
+    /// XXX TODO: Should this go here or on `BassetActionFunction`? Having it
+    /// here is convenient since we don't have to look up the function first.
+    /// But that also means the function's value can't influence the schema
+    /// (e.g. exposing some external setting or using the type registry).
+    fn env<'a>(&'a self) -> EnvironmentSchema<'a> {
+        EnvironmentSchema(&[])
+    }
 }
 
 /// Convenience macro for implementing `BassetAction::version`.
@@ -741,6 +761,10 @@ impl ErasedBassetAction {
     pub fn version(&self) -> &str {
         self.0.version()
     }
+
+    fn env<'a>(&'a self) -> EnvironmentSchema<'a> {
+        self.0.env()
+    }
 }
 
 impl Hash for ErasedBassetAction {
@@ -774,11 +798,106 @@ pub struct BassetActionOutput {
     pub saved: Option<StandaloneAssetData>,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum EnvironmentRequiredKey {
+    No,
+    Yes,
+}
+
+pub struct EnvironmentSchemaKey<'a> {
+    pub name: &'a str,
+    pub required: EnvironmentRequiredKey,
+}
+
+pub struct EnvironmentSchema<'a>(pub &'a [EnvironmentSchemaKey<'a>]);
+
+// XXX TODO: Per-action environments are likely to be small, so maybe a `Vec`
+// or pairs is a better choice.
+#[derive(Default)]
+pub struct Environment<'a>(pub HashMap<&'a str, &'a str>);
+
+impl Hash for Environment<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // XXX TODO: Is the early out worth it?
+        if self.0.is_empty() {
+            Hash::hash(&0usize, state);
+        }
+
+        // Sort the filtered environment for consistency.
+        //
+        // XXX TODO: Is there a way we can shift this earlier? Maybe the
+        // environments could be pre-calculated when the action source starts
+        // up? So if we have a list of all possible actions and the environment
+        // then we can pre-calculate a per-action environment and hash. Probably
+        // not worth the complexity though.
+        let mut sorted = self.0.iter().collect::<Vec<_>>();
+        sorted.sort_by(|(lk, lv), (rk, rv)| match lk.cmp(rk) {
+            Ordering::Equal => lv.cmp(rv),
+            o => o,
+        });
+
+        Hash::hash(&sorted.len(), state);
+
+        for (k, v) in sorted {
+            Hash::hash(k, state);
+            Hash::hash(v, state);
+        }
+    }
+}
+
+// XXX TODO: Reconsider name?
+#[derive(Default)]
+pub struct FullEnvironment(pub HashMap<String, String>);
+
+#[derive(Debug)]
+pub enum EnvironmentFilterError {
+    // XXX TODO: We're storing the action, but the env actually comes from the
+    // action function. Review and consider changing - maybe the action should
+    // be the authority?
+    MissingRequiredKey {
+        action: &'static str,
+        keys: Vec<String>,
+    },
+}
+
+impl FullEnvironment {
+    fn filter<'a>(
+        &'a self,
+        action: &'a ErasedBassetAction,
+    ) -> Result<Environment<'a>, EnvironmentFilterError> {
+        // XXX TODO: Is the early out worth it?
+        if action.env().0.is_empty() {
+            return Ok(Environment::<'a>::default());
+        }
+
+        let mut result = Environment::<'a>::default();
+        let mut missing = Vec::<String>::new();
+
+        for key in action.env().0 {
+            if let Some(value) = self.0.get(key.name) {
+                result.0.insert(key.name, value);
+            } else if key.required == EnvironmentRequiredKey::Yes {
+                missing.push(key.name.into());
+            }
+        }
+
+        if missing.is_empty() {
+            Ok(result)
+        } else {
+            Err(EnvironmentFilterError::MissingRequiredKey {
+                action: action.type_path(),
+                keys: missing,
+            })
+        }
+    }
+}
+
 /// XXX TODO: Document.
 ///
 /// An action that takes a parameter struct of a known type and returns an
 /// `ErasedLoadedAsset`.
-pub trait BassetActionFunction: Send + Sync + 'static {
+// XXX TODO: Check if we should be bounding on `TypePath`.
+pub trait BassetActionFunction: TypePath + Send + Sync + 'static {
     type Action: BassetAction + TypePath + Default;
 
     /// XXX TODO: Document.
@@ -796,6 +915,7 @@ pub trait BassetActionFunction: Send + Sync + 'static {
     ) -> impl ConditionalSendFuture<Output = Result<BassetActionOutput, Self::Error>>;
 
     /// XXX TODO: Consider name. It implies publishable as well?
+    /// XXX TODO: Should this be on `BassetActionFunction` or `BassetAction`?
     fn cacheable(&self) -> bool {
         true
     }
@@ -809,11 +929,13 @@ pub trait ErasedBassetActionFunction: Send + Sync + 'static {
     ) -> BoxedFuture<'a, Result<BassetActionOutput, AssetLoadError>>;
 
     fn cacheable(&self) -> bool;
+
+    fn type_path(&self) -> &'static str;
 }
 
 impl<T> ErasedBassetActionFunction for T
 where
-    T: BassetActionFunction + Send + Sync,
+    T: BassetActionFunction,
 {
     fn apply<'a>(
         &'a self,
@@ -835,6 +957,10 @@ where
 
     fn cacheable(&self) -> bool {
         BassetActionFunction::cacheable(self)
+    }
+
+    fn type_path(&self) -> &'static str {
+        T::type_path()
     }
 }
 
@@ -1008,6 +1134,7 @@ pub(crate) struct DevelopmentActionSource {
     dependency_graph: Option<DependencyGraph>,
     action_cache: Option<MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>>,
     registry: TypeRegistryArc,
+    env: FullEnvironment,
 }
 
 // XXX TODO: Does this need to be an enum?
@@ -1041,11 +1168,15 @@ impl DevelopmentActionSource {
             registry.clone(),
         ));
 
+        // XXX TODO: Real environment.
+        let env = FullEnvironment::default();
+
         Self {
             settings,
             dependency_graph,
             action_cache,
             registry,
+            env,
         }
     }
 
@@ -1169,7 +1300,9 @@ impl ActionSource for DevelopmentActionSource {
             let dependency_key = self
                 .dependency_graph
                 .as_ref()
-                .map(|dependency_graph| dependency_graph.action_dependency_key(action));
+                // XXX TODO: `action_dependency_key` will filter the environment, and then we'll
+                // do it again below. Refactor?
+                .map(|dependency_graph| dependency_graph.action_dependency_key(action, &self.env));
 
             if action_function.cacheable()
                 && let Some(dependency_key) = dependency_key
@@ -1181,7 +1314,9 @@ impl ActionSource for DevelopmentActionSource {
                 // want to read from the cache.
 
                 if let Some((action_key, _)) = dependency_graph
-                    .action_key(action, Some(dependency_key))
+                    // XXX TODO: `action_key` will filter the environment, and then we'll
+                    // do it again below. Refactor?
+                    .action_key(action, Some(dependency_key), &self.env)
                     .await
                     && let Some(cached_standalone_asset) =
                         action_cache.get(&action_key, action).await
@@ -1196,7 +1331,12 @@ impl ActionSource for DevelopmentActionSource {
                 }
             }
 
-            let apply_context = ApplyContext::new(asset_server, dependency_loading);
+            let filtered_env = self
+                .env
+                .filter(action.action())
+                .map_err(|err| AssetLoadError::TodoError(Arc::new(format!("{err:?}").into())))?;
+
+            let apply_context = ApplyContext::new(asset_server, dependency_loading, filtered_env);
 
             let output = action_function.apply(apply_context, action).await?;
 
@@ -1359,7 +1499,7 @@ impl ActionSource for DevelopmentActionSource {
                         if action_function.cacheable() {
                             if let Some(dependency_graph) = &self.dependency_graph
                                 && let Some((action_key, dependency_value)) =
-                                    dependency_graph.action_key(action, None).await
+                                    dependency_graph.action_key(action, None, &self.env).await
                                 && let Some(action_cache) = &self.action_cache
                                 && let Some(cached_standalone_asset) =
                                     action_cache.get(&action_key, action).await
@@ -1438,7 +1578,7 @@ impl ActionSource for DevelopmentActionSource {
                         } else {
                             if let Some(dependency_graph) = &self.dependency_graph
                                 && let Some((_, dependency_value)) =
-                                    dependency_graph.action_key(action, None).await
+                                    dependency_graph.action_key(action, None, &self.env).await
                             {
                                 for dependency in dependency_value.loader_dependees() {
                                     input_stack.push(dependency.0.clone().into());
@@ -1708,20 +1848,27 @@ async fn try_load_path_action(
     action: &RootAssetRef,
     asset_server: &AssetServer,
     dependency_loading: DependencyLoading,
-) -> Option<Result<ErasedLoadedAsset, AssetLoadError>> {
+    env: &FullEnvironment,
+) -> Result<Option<ErasedLoadedAsset>, AssetLoadError> {
     // XXX TODO: Check if there's a better way to handle this.
     if action.action.type_path() == LoadPath::type_path() {
-        Some(
+        // XXX TODO: Currently `LoadPath` never needs the environment. Should we try
+        // and optimize for this?
+        let action_env = env
+            .filter(action.action())
+            .map_err(|err| AssetLoadError::TodoError(Arc::new(format!("{err:?}").into())))?;
+
+        Ok(Some(
             ErasedBassetActionFunction::apply(
                 &LoadPathFunction,
-                ApplyContext::new(asset_server, dependency_loading),
+                ApplyContext::new(asset_server, dependency_loading, action_env),
                 action,
             )
-            .await
-            .map(|output| output.asset),
-        )
+            .await?
+            .asset,
+        ))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -1735,13 +1882,17 @@ impl ActionSourceBuilder for MinimalActionSourceBuilder {
         _sources: Arc<AssetSources>,
         _registry: TypeRegistryArc,
     ) -> Arc<dyn ActionSource> {
-        Arc::new(MinimalActionSource)
+        Arc::new(MinimalActionSource::default())
     }
 }
 
 // XXX TODO: Review use cases. Is useful if tests can support `load_with_settings`,
 // which means supporting the `LoadPath` action.
-pub(crate) struct MinimalActionSource;
+// XXX TODO: Initialize environment?
+#[derive(Default)]
+pub(crate) struct MinimalActionSource {
+    env: FullEnvironment,
+}
 
 impl ActionSource for MinimalActionSource {
     fn apply<'a>(
@@ -1755,9 +1906,9 @@ impl ActionSource for MinimalActionSource {
     {
         Box::pin(async move {
             if let Some(output) =
-                try_load_path_action(action, asset_server, dependency_loading).await
+                try_load_path_action(action, asset_server, dependency_loading, &self.env).await?
             {
-                Ok((output?, None))
+                Ok((output, None))
             } else {
                 // XXX TODO: More appropriate error? "Not found" is misleading - maybe "not supported"?
                 Err(MissingActionFunctionError::NotFound(action.action().type_path()).into())
@@ -1784,12 +1935,15 @@ impl ActionSourceBuilder for PublishedActionSourceBuilder {
     ) -> Arc<dyn ActionSource> {
         Arc::new(PublishedActionSource {
             pack_file: self.pack_file.clone(),
+            // XXX TODO: Initialize environment?
+            env: FullEnvironment::default(),
         })
     }
 }
 
 struct PublishedActionSource {
     pack_file: Arc<ReadablePackFile>,
+    env: FullEnvironment,
 }
 
 impl ActionSource for PublishedActionSource {
@@ -1805,9 +1959,9 @@ impl ActionSource for PublishedActionSource {
             // not be published - only the file they're loading and the loader
             // dependencies are published.
             if let Some(load_path_action) =
-                try_load_path_action(action, asset_server, dependency_loading).await
+                try_load_path_action(action, asset_server, dependency_loading, &self.env).await?
             {
-                return Ok((load_path_action?, None));
+                return Ok((load_path_action, None));
             }
 
             // XXX TODO: Review if we should be treating these strings as
@@ -1924,12 +2078,9 @@ pub mod action {
     use super::*;
     use alloc::string::String;
 
-    pub struct LoadPathFunction;
-
     #[derive(Reflect, Default, Hash, PartialEq, Debug)]
     #[reflect(BassetAction, Hash, PartialEq)]
     pub struct LoadPath {
-        // XXX TODO: Should be `RootAssetPath`? Avoiding for now to simplify lifetimes and defaults.
         pub path: RootAssetPath<'static>,
         // XXX TODO: Currently the settings are simply serialized RON, which means we're
         // going to get duplication due to being non-canonical. Ideally it would
@@ -1958,6 +2109,9 @@ pub mod action {
         // XXX TODO: Should this version incorporate `AssetLoader` versions?
         basset_action_version!(crate);
     }
+
+    #[derive(TypePath)]
+    pub struct LoadPathFunction;
 
     impl BassetActionFunction for LoadPathFunction {
         type Action = LoadPath;

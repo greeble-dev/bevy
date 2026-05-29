@@ -4,7 +4,7 @@ use crate::{
             ActionCacheKey, BassetHash, CacheLoaderDependency, ContentCache, DependencyCacheKey,
             DependencyCacheValue, MemoryAndFileCache,
         },
-        RootAssetPath, RootAssetRef,
+        FullEnvironment, RootAssetPath, RootAssetRef,
     },
     io::{AssetSources, Reader, VecReader},
     LoaderDependency, ReadAssetBytesError,
@@ -330,14 +330,24 @@ impl DependencyGraph {
         self.graph.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    pub(crate) async fn dependency_key(&self, path: &LoaderDependency) -> DependencyCacheKey {
+    pub(crate) async fn dependency_key(
+        &self,
+        path: &LoaderDependency,
+        env: &FullEnvironment,
+    ) -> DependencyCacheKey {
         match path {
-            LoaderDependency::Action(action) => self.action_dependency_key(action),
+            LoaderDependency::Action(action) => self.action_dependency_key(action, env),
             LoaderDependency::File(path) => self.file_dependency_key(path).await,
         }
     }
 
-    pub(crate) fn action_dependency_key(&self, action: &RootAssetRef) -> DependencyCacheKey {
+    pub(crate) fn action_dependency_key(
+        &self,
+        action: &RootAssetRef,
+        env: &FullEnvironment,
+    ) -> DependencyCacheKey {
+        let filtered_env = env.filter(action.action()).expect("XXX TODO");
+
         // XXX TODO: Seed hash? Also consider using separate seeds for actions
         // and files just in case.
         let mut hasher = blake3::Hasher::new();
@@ -346,6 +356,7 @@ impl DependencyGraph {
         let mut action_hasher = FixedHasher.build_hasher();
         Hash::hash(&action, &mut action_hasher);
         Hash::hash(action.action().version(), &mut action_hasher);
+        Hash::hash(&filtered_env, &mut action_hasher);
         hasher.update(&action_hasher.finish().to_le_bytes());
 
         DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
@@ -399,13 +410,14 @@ impl DependencyGraph {
         &self,
         root_action: &RootAssetRef,
         root_dependency_key: Option<DependencyCacheKey>,
+        env: &FullEnvironment,
     ) -> Option<(ActionCacheKey, Arc<DependencyCacheValue>)> {
         let Some(cache) = &self.dependency_cache else {
             return None;
         };
 
         let root_dependency_key =
-            root_dependency_key.unwrap_or_else(|| self.action_dependency_key(root_action));
+            root_dependency_key.unwrap_or_else(|| self.action_dependency_key(root_action, env));
 
         // Early out if possible.
         if let Some(existing) = self.graph().get(root_action) {
@@ -453,7 +465,7 @@ impl DependencyGraph {
                 continue;
             };
 
-            let current_dependency_key = self.dependency_key(&dependency).await;
+            let current_dependency_key = self.dependency_key(&dependency, env).await;
 
             // If the predicted key doesn't match the current file state then
             // invalidate the node.

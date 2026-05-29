@@ -158,7 +158,7 @@ impl AssetServer {
 
         let basset_action_source = basset_action_source_builder
             .map(|s| s.build(sources.clone(), registry))
-            .unwrap_or_else(|| Arc::new(MinimalActionSource));
+            .unwrap_or_else(|| Arc::new(MinimalActionSource::default()));
         Self {
             data: Arc::new(AssetServerData {
                 sources,
