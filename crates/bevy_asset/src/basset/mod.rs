@@ -820,7 +820,7 @@ impl Hash for Environment<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // XXX TODO: Is the early out worth it?
         if self.0.is_empty() {
-            Hash::hash(&0usize, state);
+            return;
         }
 
         // Sort the filtered environment for consistency.
@@ -830,6 +830,10 @@ impl Hash for Environment<'_> {
         // up? So if we have a list of all possible actions and the environment
         // then we can pre-calculate a per-action environment and hash. Probably
         // not worth the complexity though.
+        //
+        // XXX TODO: Another option is to hash the individual elements then
+        // sort and hash the list? Probably faster, and hash-of-sorted-hashes
+        // pops up elsewhere, like `ActionCacheKey::new`.
         let mut sorted = self.0.iter().collect::<Vec<_>>();
         sorted.sort_by(|(lk, lv), (rk, rv)| match lk.cmp(rk) {
             Ordering::Equal => lv.cmp(rv),

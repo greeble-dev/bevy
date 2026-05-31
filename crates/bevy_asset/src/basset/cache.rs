@@ -391,9 +391,8 @@ pub(crate) struct ContentHash(BassetHash);
 
 impl ContentHash {
     pub(crate) fn from_bytes(bytes: &[u8]) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(bytes);
-        Self(BassetHash::new(*hasher.finalize().as_bytes()))
+        // XXX TODO: Review choice of blake3.
+        Self(BassetHash::new(blake3::hash(bytes).into()))
     }
 }
 
@@ -445,6 +444,7 @@ impl ContentCache {
             .await?;
 
         // XXX TODO: Don't read to end if possible, break into chunks.
+        // Also review the various optimized methods in blake3 like `update_mmap`.
         let mut bytes = Vec::<u8>::new();
         reader
             .read_to_end(&mut bytes)

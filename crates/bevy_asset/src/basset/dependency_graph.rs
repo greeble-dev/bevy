@@ -10,11 +10,11 @@ use crate::{
     LoaderDependency, ReadAssetBytesError,
 };
 use alloc::{boxed::Box, string::ToString, sync::Arc, vec, vec::Vec};
-use bevy_platform::{collections::HashMap, hash::FixedHasher};
+use bevy_platform::collections::HashMap;
 use bevy_reflect::TypeRegistryArc;
 use core::{
     fmt::{Debug, Display, Write},
-    hash::{BuildHasher, Hash, Hasher},
+    hash::{Hash, Hasher},
 };
 use indexmap::IndexMap;
 use petgraph::{
@@ -306,6 +306,32 @@ pub(crate) struct DependencyGraph {
     // XXX TODO: We should have loader versions here for calculating dependency keys?
 }
 
+// Partially implements the `core::hash::Hasher` interface by wrapping
+// `blake3::Hasher`. Does *not* support `Hasher::finish`, since that returns
+// a `u64` when we want the full 32-byte hash. Instead, call `Blake3Wrapper::finish`.
+//
+// XXX TODO: Reconsider name? Maybe should be just `BassetHasher`?
+struct Blake3Wrapper(blake3::Hasher);
+
+impl Blake3Wrapper {
+    fn new() -> Self {
+        Self(blake3::Hasher::new())
+    }
+    fn finish(self) -> BassetHash {
+        BassetHash::new(*self.0.finalize().as_bytes())
+    }
+}
+
+impl Hasher for Blake3Wrapper {
+    fn finish(&self) -> u64 {
+        unimplemented!("Use Blake3Wrapper::finish");
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+}
+
 impl DependencyGraph {
     pub(crate) fn new(
         dependency_cache_path: Option<PathBuf>,
@@ -346,20 +372,20 @@ impl DependencyGraph {
         action: &RootAssetRef,
         env: &FullEnvironment,
     ) -> DependencyCacheKey {
+        // XXX TODO: Can we can optimize this by combining environment filtering
+        // with hashing?
         let filtered_env = env.filter(action.action()).expect("XXX TODO");
 
         // XXX TODO: Seed hash? Also consider using separate seeds for actions
         // and files just in case.
-        let mut hasher = blake3::Hasher::new();
+        // XXX TODO: Review choice of `blake3`.
+        let mut hasher = Blake3Wrapper::new();
 
-        // XXX TODO: Is this the best way to hash actions?
-        let mut action_hasher = FixedHasher.build_hasher();
-        Hash::hash(&action, &mut action_hasher);
-        Hash::hash(action.action().version(), &mut action_hasher);
-        Hash::hash(&filtered_env, &mut action_hasher);
-        hasher.update(&action_hasher.finish().to_le_bytes());
+        Hash::hash(&action, &mut hasher);
+        Hash::hash(action.action().version(), &mut hasher);
+        Hash::hash(&filtered_env, &mut hasher);
 
-        DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
+        DependencyCacheKey(hasher.finish())
     }
 
     // XXX TODO: Review where this is used and make sure we're not introducing
