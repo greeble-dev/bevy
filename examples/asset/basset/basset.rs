@@ -38,7 +38,11 @@ use bevy_asset::{
 };
 use bevy_reflect::{TypeRegistry, TypeRegistryArc};
 use bevy_scene::SceneDependencies;
-use core::{ops::Deref, result::Result};
+use core::{
+    hash::{Hash, Hasher},
+    ops::Deref,
+    result::Result,
+};
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
@@ -47,7 +51,10 @@ mod action {
         basset::standalone::StandaloneAssetData,
         io::VecReader,
         meta::{AssetAction, AssetMeta, AssetMetaDyn},
+        RenderAssetUsages,
     };
+    use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
+    use image::DynamicImage;
 
     use super::*;
 
@@ -170,13 +177,12 @@ mod action {
     }
 
     impl MeshletFromMesh {
-        // XXX TODO?
-        // pub fn new(mesh: impl Into<Handle<Mesh>>) -> Self {
-        //     Self {
-        //         mesh: mesh.into(),
-        //         ..Default::default()
-        //     }
-        // }
+        pub fn new(mesh: impl Into<AssetRef<'static>>) -> Self {
+            Self {
+                mesh: mesh.into(),
+                ..Default::default()
+            }
+        }
 
         fn vertex_position_quantization_factor(&self) -> u8 {
             self.vertex_position_quantization_factor
@@ -186,6 +192,12 @@ mod action {
 
     impl BassetAction for MeshletFromMesh {
         basset_action_version!(crate);
+    }
+
+    impl From<MeshletFromMesh> for AssetRef<'static> {
+        fn from(value: MeshletFromMesh) -> Self {
+            AssetRef::new(value)
+        }
     }
 
     #[derive(TypePath)]
@@ -338,6 +350,73 @@ mod action {
                     meta: meta_bytes,
                 },
             ))
+        }
+    }
+
+    #[derive(Default, Debug, PartialEq, Reflect)]
+    #[reflect(BassetAction, PartialEq, Hash)]
+    pub struct ResizeImage {
+        pub image: AssetRef<'static>,
+        pub scale: f32,
+    }
+
+    impl BassetAction for ResizeImage {
+        basset_action_version!(crate);
+    }
+
+    impl Hash for ResizeImage {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.image.hash(state);
+            // XXX TODO: Hashing f32 action parameters is going to be common.
+            // Should we add a wrapper or using something like `ordered_float`?
+            self.scale.to_le_bytes().hash(state);
+        }
+    }
+
+    #[derive(TypePath)]
+    pub struct ResizeImageFunction;
+
+    impl BassetActionFunction for ResizeImageFunction {
+        type Action = ResizeImage;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            mut context: ApplyContext<'_>,
+            action: &Self::Action,
+        ) -> Result<BassetActionOutput, Self::Error> {
+            let original_image = context
+                .erased_load_dependee(&action.image)
+                .await?
+                .take::<Image>()
+                .ok_or_else(|| BevyError::from("XXX TODO"))?
+                .try_into_dynamic()?;
+
+            let mut resizer = Resizer::new();
+
+            let resize_alg =
+                ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Gaussian));
+
+            // XXX TODO: Verify scale is sensible.
+            let resized_width = ((original_image.width() as f32) * action.scale) as u32;
+            let resized_height = ((original_image.height() as f32) * action.scale) as u32;
+
+            let mut resized_image =
+                DynamicImage::new(resized_width, resized_height, original_image.color());
+
+            resizer
+                .resize(&original_image, &mut resized_image, &resize_alg)
+                .expect("XXX TODO");
+
+            // XXX TODO: Implement these properly.
+            let is_srgb = true;
+            let render_asset_usages = RenderAssetUsages::default();
+
+            Ok(context.finish(Image::from_dynamic(
+                resized_image,
+                is_srgb,
+                render_asset_usages,
+            )))
         }
     }
 }
@@ -747,7 +826,7 @@ struct AssetPaths {
     scenes: Vec<(AssetRef<'static>, Transform)>,
     // XXX TODO: Maybe better to store as functions to scenes? Then we can don't
     // have to consume them (since `spawn_scene` consumes the `Scene`).
-    bsns: Vec<Box<dyn Scene>>,
+    bsns: Vec<Box<dyn SceneList>>,
 }
 
 impl AssetPaths {
@@ -768,7 +847,7 @@ impl AssetPaths {
     }
 }
 
-fn bsn_dependencies(scene: &dyn Scene) -> Vec<AssetRef<'static>> {
+fn bsn_dependencies(scene: &dyn SceneList) -> Vec<AssetRef<'static>> {
     let mut scene_dependencies = SceneDependencies::default();
 
     // XXX TODO: This doesn't do anything useful since `HandleTemplate`
@@ -821,7 +900,7 @@ fn setup(
     }
 
     for scene in std::mem::take(&mut asset_paths.bsns) {
-        commands.spawn_scene(scene);
+        commands.spawn_scene_list(scene);
     }
 
     commands.spawn((
@@ -1129,11 +1208,15 @@ fn main() {
             ),
         ],
         bsns: vec![
-        // Box::new(bsn! {
-        //     MeshletMesh3d(action::MeshletFromMesh::new("Duck.glb#Mesh0/Primitive0"))
-        //     MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
-        //     template_value(Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01)))
-        // })
+            // Box::new(
+            // bsn_list! [
+            //         (
+            //             MeshletMesh3d(action::MeshletFromMesh::new("Duck.glb#Mesh0/Primitive0"))
+            //             MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
+            //             template_value(Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01)))
+            //         )
+            // ],
+            // )
         ],
     };
 
@@ -1177,6 +1260,7 @@ fn main() {
                     .with_action(action::MeshletFromMeshFunction)
                     .with_action(action::ConvertAcmeSceneMeshesToMeshletsFunction)
                     .with_action(action::CompressImageFunction)
+                    .with_action(action::ResizeImageFunction)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
                     .with_saver(MeshletMeshSaver)
