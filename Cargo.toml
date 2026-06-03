@@ -776,11 +776,6 @@ indexmap = "2"
 image = { version = "0.25.2", default-features = false }
 fast_image_resize = { version = "6.0", features = ["image"] }
 
-# XXX TODO: Review. Only added for basset example. Maybe removable.
-downcast-rs = { version = "2", default-features = false }
-blake3 = { version = "1.5", default-features = false }
-async-fs = { version = "2.0", default-features = false }
-
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 ureq = { version = "3.0.8", features = ["json"] }
 
