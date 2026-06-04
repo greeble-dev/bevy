@@ -90,7 +90,7 @@ mod action {
             let joined = strings
                 .into_iter()
                 .reduce(|l, r| l + &action.separator + &r)
-                .unwrap_or("".to_owned());
+                .unwrap_or_else(|| "".to_owned());
 
             Ok(context.finish(demo::StringAsset(joined)))
         }
