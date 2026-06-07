@@ -39,7 +39,7 @@ use bevy_asset::{
     AssetRef, ErasedLoadedAsset, LoadContext, LoadedAsset,
 };
 use bevy_ecs::{error::BevyError, reflect::AppTypeRegistry, world::FromWorld};
-use bevy_platform::collections::{HashMap, HashSet};
+use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
 use bevy_reflect::{
     reflect_trait,
     serde::{
@@ -53,7 +53,6 @@ use bevy_reflect::{
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
     any::{type_name, TypeId},
-    cmp::Ordering,
     fmt::{Debug, Display},
     hash::{Hash, Hasher},
     ops::Deref,
@@ -835,10 +834,7 @@ impl Hash for Environment<'_> {
         // sort and hash the list? Probably faster, and hash-of-sorted-hashes
         // pops up elsewhere, like `ActionCacheKey::new`.
         let mut sorted = self.0.iter().collect::<Vec<_>>();
-        sorted.sort_by(|(lk, lv), (rk, rv)| match lk.cmp(rk) {
-            Ordering::Equal => lv.cmp(rv),
-            o => o,
-        });
+        sorted.sort_unstable_by(|(lk, lv), (rk, rv)| lk.cmp(rk).then_with(|| lv.cmp(rv)));
 
         Hash::hash(&sorted.len(), state);
 
@@ -851,7 +847,14 @@ impl Hash for Environment<'_> {
 
 // XXX TODO: Reconsider name?
 #[derive(Default)]
-pub struct FullEnvironment(pub HashMap<String, String>);
+pub struct FullEnvironment(HashMap<String, String>);
+
+// TODO: Improve errors.
+#[derive(PartialEq, Eq, Debug)]
+pub enum EnvironmentSetError {
+    EmptyKey,
+    DuplicateKey,
+}
 
 #[derive(Debug)]
 pub enum EnvironmentFilterError {
@@ -865,19 +868,52 @@ pub enum EnvironmentFilterError {
 }
 
 impl FullEnvironment {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<(), EnvironmentSetError> {
+        let key = key.into();
+        let value = value.into();
+
+        if key.is_empty() {
+            return Err(EnvironmentSetError::EmptyKey);
+        }
+
+        match self.0.entry(key) {
+            Entry::Occupied(_) => Err(EnvironmentSetError::DuplicateKey),
+            Entry::Vacant(entry) => {
+                entry.insert(value);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).map(String::as_str)
+    }
+
+    // XXX TODO: Should this take the full action? Kinda annoying, but convenient
+    // and allows the `MissingRequiredKey` error to include the action name.
     fn filter<'a>(
         &'a self,
         action: &'a ErasedBassetAction,
     ) -> Result<Environment<'a>, EnvironmentFilterError> {
+        let schema = action.env();
+
         // XXX TODO: Is the early out worth it?
-        if action.env().0.is_empty() {
+        if schema.0.is_empty() {
             return Ok(Environment::<'a>::default());
         }
 
         let mut result = Environment::<'a>::default();
         let mut missing = Vec::<String>::new();
 
-        for key in action.env().0 {
+        for key in schema.0 {
             if let Some(value) = self.0.get(key.name) {
                 result.0.insert(key.name, value);
             } else if key.required == EnvironmentRequiredKey::Yes {
@@ -2196,5 +2232,26 @@ pub mod action {
         fn cacheable(&self) -> bool {
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn environment() {
+        let mut e = FullEnvironment::new();
+
+        assert_eq!(e.set("", "empty"), Err(EnvironmentSetError::EmptyKey));
+
+        assert_eq!(e.set("k1", "v1"), Ok(()));
+        assert_eq!(e.get("k1"), Some("v1"));
+
+        assert_eq!(e.set("k1", "dupe"), Err(EnvironmentSetError::DuplicateKey));
+
+        assert_eq!(e.set("k2", "v2"), Ok(()));
+        assert_eq!(e.get("k1"), Some("v1"));
+        assert_eq!(e.get("k2"), Some("v2"));
     }
 }

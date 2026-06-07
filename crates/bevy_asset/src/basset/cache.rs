@@ -609,7 +609,7 @@ impl ActionCacheKey {
     ) -> Self {
         // Sort and de-dupe the dependee keys for consistency.
         let mut sorted_dependee_action_keys = dependee_action_keys.to_vec();
-        sorted_dependee_action_keys.sort();
+        sorted_dependee_action_keys.sort_unstable();
         sorted_dependee_action_keys.dedup();
 
         // XXX TODO: In theory we could make the action key the same as the
