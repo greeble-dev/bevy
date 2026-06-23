@@ -1,8 +1,5 @@
 //! Adaptors used by the Curve API for transforming and combining curves together.
 
-#[cfg(feature = "bevy_reflect")]
-use bevy_reflect::TypePathTable;
-
 use super::interval::*;
 use super::Curve;
 
@@ -15,7 +12,7 @@ use core::marker::PhantomData;
 #[cfg(feature = "bevy_reflect")]
 use {
     alloc::format,
-    bevy_reflect::{utility::GenericTypePathCell, FromReflect, Reflect, TypePath},
+    bevy_reflect::{utility::GenericTypePathCell, FromReflect, Reflect, TypePath, TypePathTable},
 };
 
 #[cfg(feature = "bevy_reflect")]

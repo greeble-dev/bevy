@@ -6,13 +6,11 @@ use super::{Curve, Interval};
 use crate::StableInterpolate;
 #[cfg(feature = "bevy_reflect")]
 use alloc::format;
-#[cfg(feature = "bevy_reflect")]
-use bevy_reflect::TypePathTable;
 use core::any::type_name;
 use core::fmt::{self, Debug};
 
 #[cfg(feature = "bevy_reflect")]
-use bevy_reflect::{utility::GenericTypePathCell, Reflect, TypePath};
+use bevy_reflect::{utility::GenericTypePathCell, Reflect, TypePath, TypePathTable};
 
 #[cfg(feature = "bevy_reflect")]
 mod paths {
