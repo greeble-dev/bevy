@@ -94,6 +94,44 @@ pub trait TypePath: 'static {
         Self::type_path_table().path()
     }
 
+    /// Returns a short, pretty-print enabled path to the type.
+    ///
+    /// Generic parameter types are also shortened.
+    ///
+    /// For `Option<Vec<usize>>`, this is `"Option<Vec<usize>>"`.
+    fn short_type_path() -> &'static str {
+        Self::type_path_table().short_path()
+    }
+
+    /// Returns the name of the type, or [`None`] if it is [anonymous].
+    ///
+    /// Primitive types will return [`Some`].
+    ///
+    /// For `Option<Vec<usize>>`, this is `"Option"`.
+    ///
+    /// [anonymous]: TypePath#anonymity
+    fn type_ident() -> Option<&'static str> {
+        Self::type_path_table().ident()
+    }
+
+    /// Returns the name of the crate the type is in, or [`None`] if it is [anonymous].
+    ///
+    /// For `Option<Vec<usize>>`, this is `"core"`.
+    ///
+    /// [anonymous]: TypePath#anonymity
+    fn crate_name() -> Option<&'static str> {
+        Self::type_path_table().crate_name()
+    }
+
+    /// Returns the path to the module the type is in, or [`None`] if it is [anonymous].
+    ///
+    /// For `Option<Vec<usize>>`, this is `"std::option"`.
+    ///
+    /// [anonymous]: TypePath#anonymity
+    fn module_path() -> Option<&'static str> {
+        Self::type_path_table().module_path()
+    }
+
     /// XXX TODO: Documentation.
     fn type_path_table() -> &'static TypePathTable;
 }

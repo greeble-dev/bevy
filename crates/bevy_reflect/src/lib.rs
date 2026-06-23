@@ -2524,7 +2524,7 @@ mod tests {
         ($($ty:ty => $long:literal, $short:literal,)*) => {
             $(
                 assert_eq!(<$ty as TypePath>::type_path(), $long);
-                assert_eq!(<$ty as TypePath>::type_path_table().short_path(), $short);
+                assert_eq!(<$ty as TypePath>::short_type_path(), $short);
             )*
         };
     }

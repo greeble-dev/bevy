@@ -1292,7 +1292,7 @@ impl<'a> ReflectTypePath<'a> {
                         generics,
                         |TypeParam { ident, .. }| {
                             StringExpr::Borrowed(quote! {
-                                <#ident as #bevy_reflect_path::TypePath>::type_path_table().short_path()
+                                <#ident as #bevy_reflect_path::TypePath>::short_type_path()
                             })
                         },
                         bevy_reflect_path,

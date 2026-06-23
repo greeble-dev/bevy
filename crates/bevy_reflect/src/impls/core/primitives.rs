@@ -630,7 +630,7 @@ impl<T: TypePath, const N: usize> TypePath for [T; N] {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
         CELL.get_or_insert::<Self, _>(|| TypePathTable {
             path: format!("[{t}; {N}]", t = T::type_path()).leak(),
-            short_path: format!("[{t}; {N}]", t = T::type_path_table().short_path()).leak(),
+            short_path: format!("[{t}; {N}]", t = T::short_type_path()).leak(),
             ident: None,
             module_path: None,
         })
@@ -660,7 +660,7 @@ where
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
         CELL.get_or_insert::<Self, _>(|| TypePathTable {
             path: format!("[{}]", <T>::type_path()).leak(),
-            short_path: format!("[{}]", <T>::type_path_table().short_path()).leak(),
+            short_path: format!("[{}]", <T>::short_type_path()).leak(),
             ident: None,
             module_path: None,
         })
@@ -672,7 +672,7 @@ impl<T: TypePath + ?Sized> TypePath for &'static T {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
         CELL.get_or_insert::<Self, _>(|| TypePathTable {
             path: format!("&{}", T::type_path()).leak(),
-            short_path: format!("&{}", T::type_path_table().short_path()).leak(),
+            short_path: format!("&{}", T::short_type_path()).leak(),
             ident: None,
             module_path: None,
         })
@@ -684,7 +684,7 @@ impl<T: TypePath + ?Sized> TypePath for &'static mut T {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
         CELL.get_or_insert::<Self, _>(|| TypePathTable {
             path: format!("&mut {}", T::type_path()).leak(),
-            short_path: format!("&mut {}", T::type_path_table().short_path()).leak(),
+            short_path: format!("&mut {}", T::short_type_path()).leak(),
             ident: None,
             module_path: None,
         })

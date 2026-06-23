@@ -742,7 +742,7 @@ macro_rules! impl_type_path_tuple {
                 static CELL: GenericTypePathCell = GenericTypePathCell::new();
                 CELL.get_or_insert::<Self, _>(|| $crate::TypePathTable {
                     path: ("(".to_owned() + $param::type_path() + ",)").leak(),
-                    short_path: ("(".to_owned() + $param::type_path_table().short_path() + ",)").leak(),
+                    short_path: ("(".to_owned() + $param::short_type_path() + ",)").leak(),
                     ident: None,
                     module_path: None,
                 })
@@ -758,7 +758,7 @@ macro_rules! impl_type_path_tuple {
                 static CELL: GenericTypePathCell = GenericTypePathCell::new();
                 CELL.get_or_insert::<Self, _>(|| $crate::TypePathTable {
                     path: ("(".to_owned() $(+ $param::type_path() + ", ")* + $last::type_path() + ")").leak(),
-                    short_path: ("(".to_owned() $(+ $param::type_path_table().short_path() + ", ")* + $last::type_path_table().short_path() + ")").leak(),
+                    short_path: ("(".to_owned() $(+ $param::short_type_path() + ", ")* + $last::short_type_path() + ")").leak(),
                     ident: None,
                     module_path: None,
                 })

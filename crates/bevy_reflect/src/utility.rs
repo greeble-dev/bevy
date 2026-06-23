@@ -193,7 +193,7 @@ impl<T: TypedProperty> Default for NonGenericTypeCell<T> {
 ///         static CELL: GenericTypePathCell = GenericTypePathCell::new();
 ///         CELL.get_or_insert::<Self, _>(|| TypePathTable {
 ///             path: format!("my_crate::foo::Foo<{}>", T::type_path()).leak(),
-///             short_path: format!("Foo<{}>", T::type_path_table().short_path()).leak(),
+///             short_path: format!("Foo<{}>", T::short_type_path()).leak(),
 ///             ident: Some("Foo"),
 ///             module_path: Some("my_crate::foo"),
 ///         })

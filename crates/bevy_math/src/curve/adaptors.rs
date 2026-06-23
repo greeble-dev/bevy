@@ -127,7 +127,7 @@ where
             .leak(),
             short_path: format!(
                 "FunctionCurve<{},{}>",
-                T::type_path_table().short_path(),
+                T::short_type_path(),
                 type_name::<F>()
             )
             .leak(),

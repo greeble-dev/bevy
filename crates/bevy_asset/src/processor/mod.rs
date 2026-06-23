@@ -756,7 +756,7 @@ impl AssetProcessor {
             .insert(P::type_path(), processor.clone());
         match processors
             .short_type_path_to_processor
-            .entry(P::type_path_table().short_path())
+            .entry(P::short_type_path())
         {
             Entry::Vacant(entry) => {
                 entry.insert(ShortTypeProcessorEntry::Unique {
