@@ -62,31 +62,29 @@ pub(crate) fn impl_type_path(meta: &ReflectMeta) -> TokenStream {
     let type_path = meta.type_path();
     let bevy_reflect_path = meta.bevy_reflect_path();
 
-    let (long_type_path, short_type_path) = if type_path.impl_is_generic() {
-        let long_path_cell = static_type_cell(
-            meta,
-            TypedProperty::TypePath,
-            type_path.long_type_path(bevy_reflect_path).into_owned(),
-        );
-        let short_path_cell = static_type_cell(
-            meta,
-            TypedProperty::TypePath,
-            type_path.short_type_path(bevy_reflect_path).into_owned(),
-        );
-        (
-            long_path_cell.to_token_stream(),
-            short_path_cell.to_token_stream(),
-        )
-    } else {
-        (
-            type_path.long_type_path(bevy_reflect_path).into_borrowed(),
-            type_path.short_type_path(bevy_reflect_path).into_borrowed(),
-        )
-    };
-
     let type_ident = wrap_in_option(type_path.type_ident().map(StringExpr::into_borrowed));
     let module_path = wrap_in_option(type_path.module_path().map(StringExpr::into_borrowed));
-    let crate_name = wrap_in_option(type_path.crate_name().map(StringExpr::into_borrowed));
+
+    let long_type_path = type_path.long_type_path(bevy_reflect_path).leak();
+    let short_type_path = type_path.short_type_path(bevy_reflect_path).leak();
+
+    let type_path_table_value = quote! {
+        #bevy_reflect_path::TypePathTable {
+            path: #long_type_path,
+            short_path: #short_type_path,
+            ident: #type_ident,
+            module_path: #module_path,
+        }
+    };
+
+    let type_path_table = if type_path.impl_is_generic() {
+        static_type_cell(meta, TypedProperty::TypePath, type_path_table_value).to_token_stream()
+    } else {
+        quote! {
+            const TABLE: &'static #bevy_reflect_path::TypePathTable = &#type_path_table_value;
+            TABLE
+        }
+    };
 
     let primitive_assert = if let ReflectTypePath::Primitive(_) = type_path {
         Some(quote! {
@@ -112,24 +110,8 @@ pub(crate) fn impl_type_path(meta: &ReflectMeta) -> TokenStream {
 
         #[allow(deprecated, reason = "derives on a deprecated type shouldn't be considered a usage")]
         impl #impl_generics #bevy_reflect_path::TypePath for #type_path #ty_generics #where_reflect_clause {
-            fn type_path() -> &'static str {
-                #long_type_path
-            }
-
-            fn short_type_path() -> &'static str {
-                #short_type_path
-            }
-
-            fn type_ident() -> #FQOption<&'static str> {
-                #type_ident
-            }
-
-            fn crate_name() -> #FQOption<&'static str> {
-                #crate_name
-            }
-
-            fn module_path() -> #FQOption<&'static str> {
-                #module_path
+            fn type_path_table() -> &'static #bevy_reflect_path::TypePathTable {
+                #type_path_table
             }
         }
     }

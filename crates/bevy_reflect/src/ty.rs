@@ -53,7 +53,7 @@ use core::hash::Hash;
 /// [`Typed`]: crate::info::Typed
 #[derive(Copy, Clone)]
 pub struct Type {
-    type_path_table: TypePathTable,
+    type_path_table: &'static TypePathTable,
     type_id: TypeId,
 }
 
@@ -61,7 +61,7 @@ impl Type {
     /// Create a new [`Type`] from a type that implements [`TypePath`].
     pub fn of<T: TypePath + ?Sized>() -> Self {
         Self {
-            type_path_table: TypePathTable::of::<T>(),
+            type_path_table: T::type_path_table(),
             type_id: TypeId::of::<T>(),
         }
     }
@@ -100,8 +100,8 @@ impl Type {
     /// A representation of the type path of this.
     ///
     /// Provides dynamic access to all methods on [`TypePath`].
-    pub fn type_path_table(&self) -> &TypePathTable {
-        &self.type_path_table
+    pub fn type_path_table(&self) -> &'static TypePathTable {
+        self.type_path_table
     }
 
     /// Check if the given type matches this one.
@@ -173,6 +173,7 @@ macro_rules! impl_type_methods {
             self.ty().id()
         }
 
+        // XXX TODO: Documentation?
         /// The [stable, full type path] of this type.
         ///
         /// Use [`type_path_table`] if you need access to the other methods on [`TypePath`].
@@ -183,6 +184,7 @@ macro_rules! impl_type_methods {
             self.ty().path()
         }
 
+        // XXX TODO: Documentation?
         /// A representation of the type path of this type.
         ///
         /// Provides dynamic access to all methods on [`TypePath`].

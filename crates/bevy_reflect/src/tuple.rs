@@ -722,12 +722,14 @@ macro_rules! impl_type_path_tuple {
     ($(#[$meta:meta])*) => {
         $(#[$meta])*
         impl TypePath for () {
-            fn type_path() -> &'static str {
-                "()"
-            }
-
-            fn short_type_path() -> &'static str {
-                "()"
+            fn type_path_table() -> &'static $crate::TypePathTable {
+                const TABLE: &'static $crate::TypePathTable = &$crate::TypePathTable {
+                    path: "()",
+                    short_path: "()",
+                    ident: None,
+                    module_path: None,
+                };
+                TABLE
             }
         }
     };
@@ -735,19 +737,14 @@ macro_rules! impl_type_path_tuple {
     ($(#[$meta:meta])* $param:ident) => {
         $(#[$meta])*
         impl <$param: TypePath> TypePath for ($param,) {
-            fn type_path() -> &'static str {
+            fn type_path_table() -> &'static $crate::TypePathTable {
                 use $crate::__macro_exports::alloc_utils::ToOwned;
                 static CELL: GenericTypePathCell = GenericTypePathCell::new();
-                CELL.get_or_insert::<Self, _>(|| {
-                    "(".to_owned() + $param::type_path() + ",)"
-                })
-            }
-
-            fn short_type_path() -> &'static str {
-                use $crate::__macro_exports::alloc_utils::ToOwned;
-                static CELL: GenericTypePathCell = GenericTypePathCell::new();
-                CELL.get_or_insert::<Self, _>(|| {
-                    "(".to_owned() + $param::short_type_path() + ",)"
+                CELL.get_or_insert::<Self, _>(|| $crate::TypePathTable {
+                    path: ("(".to_owned() + $param::type_path() + ",)").leak(),
+                    short_path: ("(".to_owned() + $param::type_path_table().short_path() + ",)").leak(),
+                    ident: None,
+                    module_path: None,
                 })
             }
         }
@@ -756,19 +753,14 @@ macro_rules! impl_type_path_tuple {
     ($(#[$meta:meta])* $last:ident $(,$param:ident)*) => {
         $(#[$meta])*
         impl <$($param: TypePath,)* $last: TypePath> TypePath for ($($param,)* $last) {
-            fn type_path() -> &'static str {
+            fn type_path_table() -> &'static $crate::TypePathTable {
                 use $crate::__macro_exports::alloc_utils::ToOwned;
                 static CELL: GenericTypePathCell = GenericTypePathCell::new();
-                CELL.get_or_insert::<Self, _>(|| {
-                    "(".to_owned() $(+ $param::type_path() + ", ")* + $last::type_path() + ")"
-                })
-            }
-
-            fn short_type_path() -> &'static str {
-                use $crate::__macro_exports::alloc_utils::ToOwned;
-                static CELL: GenericTypePathCell = GenericTypePathCell::new();
-                CELL.get_or_insert::<Self, _>(|| {
-                    "(".to_owned() $(+ $param::short_type_path() + ", ")* + $last::short_type_path() + ")"
+                CELL.get_or_insert::<Self, _>(|| $crate::TypePathTable {
+                    path: ("(".to_owned() $(+ $param::type_path() + ", ")* + $last::type_path() + ")").leak(),
+                    short_path: ("(".to_owned() $(+ $param::type_path_table().short_path() + ", ")* + $last::type_path_table().short_path() + ")").leak(),
+                    ident: None,
+                    module_path: None,
                 })
             }
         }

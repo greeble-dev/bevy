@@ -10,6 +10,7 @@ use crate::{
         TypeRegistration, TypeRegistry,
     },
     utility::{reflect_hasher, GenericTypeInfoCell, GenericTypePathCell, NonGenericTypeInfoCell},
+    TypePathTable,
 };
 use bevy_platform::prelude::*;
 use bevy_reflect_derive::{impl_reflect_opaque, impl_type_path};
@@ -625,14 +626,14 @@ impl<T: Reflect + MaybeTyped + TypePath + GetTypeRegistration, const N: usize> T
 }
 
 impl<T: TypePath, const N: usize> TypePath for [T; N] {
-    fn type_path() -> &'static str {
+    fn type_path_table() -> &'static TypePathTable {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| format!("[{t}; {N}]", t = T::type_path()))
-    }
-
-    fn short_type_path() -> &'static str {
-        static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| format!("[{t}; {N}]", t = T::short_type_path()))
+        CELL.get_or_insert::<Self, _>(|| TypePathTable {
+            path: format!("[{t}; {N}]", t = T::type_path()).leak(),
+            short_path: format!("[{t}; {N}]", t = T::type_path_table().short_path()).leak(),
+            ident: None,
+            module_path: None,
+        })
     }
 }
 
@@ -655,38 +656,38 @@ impl<T: TypePath> TypePath for [T]
 where
     [T]: ToOwned,
 {
-    fn type_path() -> &'static str {
+    fn type_path_table() -> &'static TypePathTable {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| format!("[{}]", <T>::type_path()))
-    }
-
-    fn short_type_path() -> &'static str {
-        static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| format!("[{}]", <T>::short_type_path()))
+        CELL.get_or_insert::<Self, _>(|| TypePathTable {
+            path: format!("[{}]", <T>::type_path()).leak(),
+            short_path: format!("[{}]", <T>::type_path_table().short_path()).leak(),
+            ident: None,
+            module_path: None,
+        })
     }
 }
 
 impl<T: TypePath + ?Sized> TypePath for &'static T {
-    fn type_path() -> &'static str {
+    fn type_path_table() -> &'static TypePathTable {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| format!("&{}", T::type_path()))
-    }
-
-    fn short_type_path() -> &'static str {
-        static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| format!("&{}", T::short_type_path()))
+        CELL.get_or_insert::<Self, _>(|| TypePathTable {
+            path: format!("&{}", T::type_path()).leak(),
+            short_path: format!("&{}", T::type_path_table().short_path()).leak(),
+            ident: None,
+            module_path: None,
+        })
     }
 }
 
 impl<T: TypePath + ?Sized> TypePath for &'static mut T {
-    fn type_path() -> &'static str {
+    fn type_path_table() -> &'static TypePathTable {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| format!("&mut {}", T::type_path()))
-    }
-
-    fn short_type_path() -> &'static str {
-        static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| format!("&mut {}", T::short_type_path()))
+        CELL.get_or_insert::<Self, _>(|| TypePathTable {
+            path: format!("&mut {}", T::type_path()).leak(),
+            short_path: format!("&mut {}", T::type_path_table().short_path()).leak(),
+            ident: None,
+            module_path: None,
+        })
     }
 }
 

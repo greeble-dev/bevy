@@ -285,12 +285,12 @@ impl<P: Process> ErasedProcessor for P {
     }
 
     fn short_type_path(&self) -> &'static str {
-        P::short_type_path()
+        P::type_path_table().short_path()
     }
 
     fn default_meta(&self, processor_path_kind: MetaTypePathKind) -> Box<dyn AssetMetaDyn> {
         let type_path = match processor_path_kind {
-            MetaTypePathKind::Short => P::short_type_path(),
+            MetaTypePathKind::Short => P::type_path_table().short_path(),
             MetaTypePathKind::Long => P::type_path(),
         };
         Box::new(AssetMeta::<(), P>::new(AssetAction::Process {

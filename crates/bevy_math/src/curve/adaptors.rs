@@ -1,5 +1,8 @@
 //! Adaptors used by the Curve API for transforming and combining curves together.
 
+#[cfg(feature = "bevy_reflect")]
+use bevy_reflect::TypePathTable;
+
 use super::interval::*;
 use super::Curve;
 
@@ -18,7 +21,6 @@ use {
 #[cfg(feature = "bevy_reflect")]
 mod paths {
     pub(super) const THIS_MODULE: &str = "bevy_math::curve::adaptors";
-    pub(super) const THIS_CRATE: &str = "bevy_math";
 }
 
 #[expect(unused, reason = "imported just for doc links")]
@@ -113,39 +115,25 @@ where
     T: TypePath,
     F: 'static,
 {
-    fn type_path() -> &'static str {
+    fn type_path_table() -> &'static TypePathTable {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| {
-            format!(
+        CELL.get_or_insert::<Self, _>(|| TypePathTable {
+            path: format!(
                 "{}::FunctionCurve<{},{}>",
                 paths::THIS_MODULE,
                 T::type_path(),
                 type_name::<F>()
             )
-        })
-    }
-
-    fn short_type_path() -> &'static str {
-        static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| {
-            format!(
+            .leak(),
+            short_path: format!(
                 "FunctionCurve<{},{}>",
-                T::short_type_path(),
+                T::type_path_table().short_path(),
                 type_name::<F>()
             )
+            .leak(),
+            ident: Some("FunctionCurve"),
+            module_path: Some(paths::THIS_MODULE),
         })
-    }
-
-    fn type_ident() -> Option<&'static str> {
-        Some("FunctionCurve")
-    }
-
-    fn crate_name() -> Option<&'static str> {
-        Some(paths::THIS_CRATE)
-    }
-
-    fn module_path() -> Option<&'static str> {
-        Some(paths::THIS_MODULE)
     }
 }
 
@@ -220,10 +208,10 @@ where
     C: TypePath,
     F: 'static,
 {
-    fn type_path() -> &'static str {
+    fn type_path_table() -> &'static TypePathTable {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| {
-            format!(
+        CELL.get_or_insert::<Self, _>(|| TypePathTable {
+            path: format!(
                 "{}::MapCurve<{},{},{},{}>",
                 paths::THIS_MODULE,
                 S::type_path(),
@@ -231,32 +219,18 @@ where
                 C::type_path(),
                 type_name::<F>()
             )
-        })
-    }
-
-    fn short_type_path() -> &'static str {
-        static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| {
-            format!(
+            .leak(),
+            short_path: format!(
                 "MapCurve<{},{},{},{}>",
                 S::type_path(),
                 T::type_path(),
                 C::type_path(),
                 type_name::<F>()
             )
+            .leak(),
+            ident: Some("MapCurve"),
+            module_path: Some(paths::THIS_MODULE),
         })
-    }
-
-    fn type_ident() -> Option<&'static str> {
-        Some("MapCurve")
-    }
-
-    fn crate_name() -> Option<&'static str> {
-        Some(paths::THIS_CRATE)
-    }
-
-    fn module_path() -> Option<&'static str> {
-        Some(paths::THIS_MODULE)
     }
 }
 
@@ -318,41 +292,27 @@ where
     C: TypePath,
     F: 'static,
 {
-    fn type_path() -> &'static str {
+    fn type_path_table() -> &'static TypePathTable {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| {
-            format!(
+        CELL.get_or_insert::<Self, _>(|| TypePathTable {
+            path: format!(
                 "{}::ReparamCurve<{},{},{}>",
                 paths::THIS_MODULE,
                 T::type_path(),
                 C::type_path(),
                 type_name::<F>()
             )
-        })
-    }
-
-    fn short_type_path() -> &'static str {
-        static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| {
-            format!(
+            .leak(),
+            short_path: format!(
                 "ReparamCurve<{},{},{}>",
                 T::type_path(),
                 C::type_path(),
                 type_name::<F>()
             )
+            .leak(),
+            ident: Some("ReparamCurve"),
+            module_path: Some(paths::THIS_MODULE),
         })
-    }
-
-    fn type_ident() -> Option<&'static str> {
-        Some("ReparamCurve")
-    }
-
-    fn crate_name() -> Option<&'static str> {
-        Some(paths::THIS_CRATE)
-    }
-
-    fn module_path() -> Option<&'static str> {
-        Some(paths::THIS_MODULE)
     }
 }
 

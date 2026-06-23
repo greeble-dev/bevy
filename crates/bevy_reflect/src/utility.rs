@@ -1,6 +1,6 @@
 //! Helpers for working with Bevy reflection.
 
-use crate::TypeInfo;
+use crate::{TypeInfo, TypePathTable};
 use alloc::boxed::Box;
 use bevy_platform::{
     hash::{DefaultHasher, FixedHasher, NoOpHash},
@@ -20,27 +20,20 @@ pub trait TypedProperty: sealed::Sealed {
     type Stored: 'static;
 }
 
-/// Used to store a [`String`] in a [`GenericTypePathCell`] as part of a [`TypePath`] implementation.
-///
-/// [`TypePath`]: crate::TypePath
-/// [`String`]: alloc::string::String
-pub struct TypePathComponent;
-
 mod sealed {
-    use super::{TypeInfo, TypePathComponent, TypedProperty};
-    use alloc::string::String;
+    use super::{TypeInfo, TypePathTable, TypedProperty};
 
     pub trait Sealed {}
 
     impl Sealed for TypeInfo {}
-    impl Sealed for TypePathComponent {}
+    impl Sealed for TypePathTable {}
 
     impl TypedProperty for TypeInfo {
         type Stored = Self;
     }
 
-    impl TypedProperty for TypePathComponent {
-        type Stored = String;
+    impl TypedProperty for TypePathTable {
+        type Stored = Self;
     }
 }
 
@@ -56,7 +49,7 @@ mod sealed {
 ///
 /// ```
 /// # use core::any::Any;
-/// # use bevy_reflect::{DynamicTypePath, NamedField, PartialReflect, Reflect, ReflectMut, ReflectOwned, ReflectRef, structs::StructInfo, Typed, TypeInfo, TypePath, ApplyError};
+/// # use bevy_reflect::{DynamicTypePath, NamedField, PartialReflect, Reflect, ReflectMut, ReflectOwned, ReflectRef, structs::StructInfo, Typed, TypeInfo, TypePath, TypePathTable, ApplyError};
 /// use bevy_reflect::utility::NonGenericTypeInfoCell;
 ///
 /// struct Foo {
@@ -74,8 +67,7 @@ mod sealed {
 ///     }
 /// }
 /// # impl TypePath for Foo {
-/// #     fn type_path() -> &'static str { todo!() }
-/// #     fn short_type_path() -> &'static str { todo!() }
+/// #     fn type_path_table() -> &'static TypePathTable { todo!() }
 /// # }
 /// # impl PartialReflect for Foo {
 /// #     fn get_represented_type_info(&self) -> Option<&'static TypeInfo> { todo!() }
@@ -144,7 +136,7 @@ impl<T: TypedProperty> Default for NonGenericTypeCell<T> {
 ///
 /// ```
 /// # use core::any::Any;
-/// # use bevy_reflect::{DynamicTypePath, PartialReflect, Reflect, ReflectMut, ReflectOwned, ReflectRef, tuple_struct::TupleStructInfo, Typed, TypeInfo, TypePath, UnnamedField, ApplyError, Generics, TypeParamInfo};
+/// # use bevy_reflect::{DynamicTypePath, PartialReflect, Reflect, ReflectMut, ReflectOwned, ReflectRef, tuple_struct::TupleStructInfo, Typed, TypeInfo, TypePath, TypePathTable, UnnamedField, ApplyError, Generics, TypeParamInfo};
 /// use bevy_reflect::utility::GenericTypeInfoCell;
 ///
 /// struct Foo<T>(T);
@@ -161,8 +153,7 @@ impl<T: TypedProperty> Default for NonGenericTypeCell<T> {
 ///     }
 /// }
 /// # impl<T: TypePath> TypePath for Foo<T> {
-/// #     fn type_path() -> &'static str { todo!() }
-/// #     fn short_type_path() -> &'static str { todo!() }
+/// #     fn type_path_table() -> &'static TypePathTable { todo!() }
 /// # }
 /// # impl<T: PartialReflect + TypePath> PartialReflect for Foo<T> {
 /// #     fn get_represented_type_info(&self) -> Option<&'static TypeInfo> { todo!() }
@@ -192,32 +183,20 @@ impl<T: TypedProperty> Default for NonGenericTypeCell<T> {
 ///
 /// ```
 /// # use core::any::Any;
-/// # use bevy_reflect::TypePath;
+/// # use bevy_reflect::{TypePath, TypePathTable};
 /// use bevy_reflect::utility::GenericTypePathCell;
 ///
 /// struct Foo<T>(T);
 ///
 /// impl<T: TypePath> TypePath for Foo<T> {
-///     fn type_path() -> &'static str {
+///     fn type_path_table() -> &'static TypePathTable {
 ///         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-///         CELL.get_or_insert::<Self, _>(|| format!("my_crate::foo::Foo<{}>", T::type_path()))
-///     }
-///
-///     fn short_type_path() -> &'static str {
-///         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-///         CELL.get_or_insert::<Self, _>(|| format!("Foo<{}>", T::short_type_path()))
-///     }
-///
-///     fn type_ident() -> Option<&'static str> {
-///         Some("Foo")
-///     }
-///
-///     fn module_path() -> Option<&'static str> {
-///         Some("my_crate::foo")
-///     }
-///
-///     fn crate_name() -> Option<&'static str> {
-///         Some("my_crate")
+///         CELL.get_or_insert::<Self, _>(|| TypePathTable {
+///             path: format!("my_crate::foo::Foo<{}>", T::type_path()).leak(),
+///             short_path: format!("Foo<{}>", T::type_path_table().short_path()).leak(),
+///             ident: Some("Foo"),
+///             module_path: Some("my_crate::foo"),
+///         })
 ///     }
 /// }
 /// ```
@@ -228,7 +207,7 @@ pub struct GenericTypeCell<T: TypedProperty>(RwLock<TypeIdMap<&'static T::Stored
 /// See [`GenericTypeCell`].
 pub type GenericTypeInfoCell = GenericTypeCell<TypeInfo>;
 /// See [`GenericTypeCell`].
-pub type GenericTypePathCell = GenericTypeCell<TypePathComponent>;
+pub type GenericTypePathCell = GenericTypeCell<TypePathTable>;
 
 impl<T: TypedProperty> GenericTypeCell<T> {
     /// Initialize a [`GenericTypeCell`] for generic types.

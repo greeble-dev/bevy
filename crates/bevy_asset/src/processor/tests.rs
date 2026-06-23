@@ -1754,8 +1754,8 @@ fn writes_long_default_meta_for_ambiguous_processor() {
     >;
     // Verify that these two processors actually have the same short_type_path.
     assert_eq!(
-        CoolTextProcessor1::short_type_path(),
-        CoolTextProcessor2::short_type_path()
+        CoolTextProcessor1::type_path_table().short_path(),
+        CoolTextProcessor2::type_path_table().short_path()
     );
 
     app.register_asset_processor(CoolTextProcessor1::new(

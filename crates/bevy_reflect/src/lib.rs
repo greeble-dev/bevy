@@ -2524,7 +2524,7 @@ mod tests {
         ($($ty:ty => $long:literal, $short:literal,)*) => {
             $(
                 assert_eq!(<$ty as TypePath>::type_path(), $long);
-                assert_eq!(<$ty as TypePath>::short_type_path(), $short);
+                assert_eq!(<$ty as TypePath>::type_path_table().short_path(), $short);
             )*
         };
     }
@@ -2590,13 +2590,15 @@ mod tests {
         struct Type;
 
         impl TypePath for Type {
-            fn type_path() -> &'static str {
-                // for brevity in tests
-                "Long"
-            }
-
-            fn short_type_path() -> &'static str {
-                "Short"
+            fn type_path_table() -> &'static TypePathTable {
+                const TABLE: &TypePathTable = &TypePathTable {
+                    // for brevity in tests
+                    path: "Long",
+                    short_path: "Short",
+                    ident: None,
+                    module_path: None,
+                };
+                TABLE
             }
         }
 
@@ -3407,25 +3409,14 @@ bevy_reflect::tests::Test {
         struct NotTypePath;
 
         impl<T: 'static> TypePath for Foo<T> {
-            fn type_path() -> &'static str {
-                core::any::type_name::<Self>()
-            }
-
-            fn short_type_path() -> &'static str {
+            fn type_path_table() -> &'static TypePathTable {
                 static CELL: GenericTypePathCell = GenericTypePathCell::new();
-                CELL.get_or_insert::<Self, _>(|| ShortName::of::<Self>().to_string())
-            }
-
-            fn type_ident() -> Option<&'static str> {
-                Some("Foo")
-            }
-
-            fn crate_name() -> Option<&'static str> {
-                Some("bevy_reflect")
-            }
-
-            fn module_path() -> Option<&'static str> {
-                Some("bevy_reflect::tests")
+                CELL.get_or_insert::<Self, _>(|| TypePathTable {
+                    path: core::any::type_name::<Self>(),
+                    short_path: ShortName::of::<Self>().to_string().leak(),
+                    ident: Some("Foo"),
+                    module_path: Some("bevy_reflect::tests"),
+                })
             }
         }
 

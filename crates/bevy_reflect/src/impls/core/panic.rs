@@ -7,6 +7,7 @@ use crate::{
     type_path::DynamicTypePath,
     type_registry::{GetTypeRegistration, ReflectFromPtr, TypeRegistration},
     utility::{reflect_hasher, NonGenericTypeInfoCell},
+    TypePathTable,
 };
 use bevy_platform::prelude::*;
 use core::any::Any;
@@ -14,12 +15,14 @@ use core::hash::{Hash, Hasher};
 use core::panic::Location;
 
 impl TypePath for &'static Location<'static> {
-    fn type_path() -> &'static str {
-        "core::panic::Location"
-    }
-
-    fn short_type_path() -> &'static str {
-        "Location"
+    fn type_path_table() -> &'static TypePathTable {
+        const TABLE: &TypePathTable = &TypePathTable {
+            path: "core::panic::Location",
+            short_path: "Location",
+            ident: None,
+            module_path: None,
+        };
+        TABLE
     }
 }
 

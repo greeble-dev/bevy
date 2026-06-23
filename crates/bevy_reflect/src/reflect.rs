@@ -2,7 +2,7 @@ use crate::{
     array::array_debug, enums::enum_debug, list::list_debug, map::map_debug, set::set_debug,
     structs::struct_debug, tuple::tuple_debug, tuple_struct::tuple_struct_debug, DynamicTypePath,
     DynamicTyped, OpaqueInfo, ReflectCloneError, ReflectKind, ReflectKindMismatchError, ReflectMut,
-    ReflectOwned, ReflectRef, TypeInfo, TypePath, Typed,
+    ReflectOwned, ReflectRef, TypeInfo, TypePath, TypePathTable, Typed,
 };
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -515,12 +515,14 @@ impl Debug for dyn PartialReflect {
 // The following implementation never actually shadows the concrete TypePath implementation.
 // See the comment on `dyn Reflect`'s `TypePath` implementation.
 impl TypePath for dyn PartialReflect {
-    fn type_path() -> &'static str {
-        "dyn bevy_reflect::PartialReflect"
-    }
-
-    fn short_type_path() -> &'static str {
-        "dyn PartialReflect"
+    fn type_path_table() -> &'static TypePathTable {
+        const TABLE: &TypePathTable = &TypePathTable {
+            path: "dyn bevy_reflect::PartialReflect",
+            short_path: "dyn PartialReflect",
+            ident: None,
+            module_path: None,
+        };
+        TABLE
     }
 }
 
@@ -602,12 +604,14 @@ impl Typed for dyn Reflect {
 // The following implementation never actually shadows the concrete `TypePath` implementation.
 // See this playground (https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=589064053f27bc100d90da89c6a860aa).
 impl TypePath for dyn Reflect {
-    fn type_path() -> &'static str {
-        "dyn bevy_reflect::Reflect"
-    }
-
-    fn short_type_path() -> &'static str {
-        "dyn Reflect"
+    fn type_path_table() -> &'static TypePathTable {
+        const TABLE: &TypePathTable = &TypePathTable {
+            path: "dyn bevy_reflect::Reflect",
+            short_path: "dyn Reflect",
+            ident: None,
+            module_path: None,
+        };
+        TABLE
     }
 }
 

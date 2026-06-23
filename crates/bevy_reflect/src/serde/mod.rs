@@ -192,7 +192,7 @@ mod tests {
         use crate::from_reflect::FromReflect;
         use crate::serde::{DeserializeWithRegistry, ReflectDeserializeWithRegistry};
         use crate::serde::{ReflectSerializeWithRegistry, SerializeWithRegistry};
-        use crate::{ReflectFromReflect, TypePath};
+        use crate::{ReflectFromReflect, TypePath, TypePathTable};
         use alloc::{format, string::String, vec, vec::Vec};
         use bevy_platform::sync::Arc;
         use bevy_reflect_derive::reflect_trait;
@@ -210,12 +210,14 @@ mod tests {
 
         // This is needed to support Arc<dyn Enemy>
         impl TypePath for dyn Enemy {
-            fn type_path() -> &'static str {
-                "dyn bevy_reflect::serde::tests::type_data::Enemy"
-            }
-
-            fn short_type_path() -> &'static str {
-                "dyn Enemy"
+            fn type_path_table() -> &'static TypePathTable {
+                const TABLE: &TypePathTable = &TypePathTable {
+                    path: "dyn bevy_reflect::serde::tests::type_data::Enemy",
+                    short_path: "dyn Enemy",
+                    ident: None,
+                    module_path: None,
+                };
+                TABLE
             }
         }
 

@@ -6,6 +6,8 @@ use super::{Curve, Interval};
 use crate::StableInterpolate;
 #[cfg(feature = "bevy_reflect")]
 use alloc::format;
+#[cfg(feature = "bevy_reflect")]
+use bevy_reflect::TypePathTable;
 use core::any::type_name;
 use core::fmt::{self, Debug};
 
@@ -15,7 +17,6 @@ use bevy_reflect::{utility::GenericTypePathCell, Reflect, TypePath};
 #[cfg(feature = "bevy_reflect")]
 mod paths {
     pub(super) const THIS_MODULE: &str = "bevy_math::curve::sample_curves";
-    pub(super) const THIS_CRATE: &str = "bevy_math";
 }
 
 /// A curve that is defined by explicit neighbor interpolation over a set of evenly-spaced samples.
@@ -53,35 +54,20 @@ where
     T: TypePath,
     I: 'static,
 {
-    fn type_path() -> &'static str {
+    fn type_path_table() -> &'static TypePathTable {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| {
-            format!(
+        CELL.get_or_insert::<Self, _>(|| TypePathTable {
+            path: format!(
                 "{}::SampleCurve<{},{}>",
                 paths::THIS_MODULE,
                 T::type_path(),
                 type_name::<I>()
             )
+            .leak(),
+            short_path: format!("SampleCurve<{},{}>", T::type_path(), type_name::<I>()).leak(),
+            ident: Some("SampleCurve"),
+            module_path: Some(paths::THIS_MODULE),
         })
-    }
-
-    fn short_type_path() -> &'static str {
-        static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| {
-            format!("SampleCurve<{},{}>", T::type_path(), type_name::<I>())
-        })
-    }
-
-    fn type_ident() -> Option<&'static str> {
-        Some("SampleCurve")
-    }
-
-    fn crate_name() -> Option<&'static str> {
-        Some(paths::THIS_CRATE)
-    }
-
-    fn module_path() -> Option<&'static str> {
-        Some(paths::THIS_MODULE)
     }
 }
 
@@ -213,35 +199,21 @@ where
     T: TypePath,
     I: 'static,
 {
-    fn type_path() -> &'static str {
+    fn type_path_table() -> &'static TypePathTable {
         static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| {
-            format!(
+        CELL.get_or_insert::<Self, _>(|| TypePathTable {
+            path: format!(
                 "{}::UnevenSampleCurve<{},{}>",
                 paths::THIS_MODULE,
                 T::type_path(),
                 type_name::<I>()
             )
+            .leak(),
+            short_path: format!("UnevenSampleCurve<{},{}>", T::type_path(), type_name::<I>())
+                .leak(),
+            ident: Some("UnevenSampleCurve"),
+            module_path: Some(paths::THIS_MODULE),
         })
-    }
-
-    fn short_type_path() -> &'static str {
-        static CELL: GenericTypePathCell = GenericTypePathCell::new();
-        CELL.get_or_insert::<Self, _>(|| {
-            format!("UnevenSampleCurve<{},{}>", T::type_path(), type_name::<I>())
-        })
-    }
-
-    fn type_ident() -> Option<&'static str> {
-        Some("UnevenSampleCurve")
-    }
-
-    fn crate_name() -> Option<&'static str> {
-        Some(paths::THIS_CRATE)
-    }
-
-    fn module_path() -> Option<&'static str> {
-        Some(paths::THIS_MODULE)
     }
 }
 

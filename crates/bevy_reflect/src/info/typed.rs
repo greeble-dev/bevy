@@ -27,7 +27,7 @@ use crate::{
 ///
 /// ```
 /// # use core::any::Any;
-/// # use bevy_reflect::{DynamicTypePath, NamedField, PartialReflect, Reflect, ReflectMut, ReflectOwned, ReflectRef, structs::StructInfo, TypeInfo, TypePath, OpaqueInfo, ApplyError};
+/// # use bevy_reflect::{DynamicTypePath, NamedField, PartialReflect, Reflect, ReflectMut, ReflectOwned, ReflectRef, structs::StructInfo, TypeInfo, TypePath, TypePathTable, OpaqueInfo, ApplyError};
 /// # use bevy_reflect::utility::NonGenericTypeInfoCell;
 /// use bevy_reflect::Typed;
 ///
@@ -51,8 +51,7 @@ use crate::{
 /// }
 ///
 /// # impl TypePath for MyStruct {
-/// #     fn type_path() -> &'static str { todo!() }
-/// #     fn short_type_path() -> &'static str { todo!() }
+/// #     fn type_path_table() -> &'static TypePathTable { todo!() }
 /// # }
 /// # impl PartialReflect for MyStruct {
 /// #     fn get_represented_type_info(&self) -> Option<&'static TypeInfo> { todo!() }

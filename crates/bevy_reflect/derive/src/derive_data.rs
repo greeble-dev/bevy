@@ -1208,35 +1208,6 @@ impl<'a> ReflectTypePath<'a> {
         }
     }
 
-    /// Returns a [`StringExpr`] representing the name of the type's crate.
-    ///
-    /// Returns [`None`] if the type is [primitive] or [anonymous].
-    ///
-    /// For non-customized [internal] paths this is created from [`module_path`].
-    ///
-    /// For `Option<PhantomData>`, this is `"core"`.
-    ///
-    /// [primitive]: ReflectTypePath::Primitive
-    /// [anonymous]: ReflectTypePath::Anonymous
-    /// [internal]: ReflectTypePath::Internal
-    pub fn crate_name(&self) -> Option<StringExpr> {
-        if let Some(path) = self.get_path() {
-            let crate_name = &path.segments.first().unwrap().ident;
-            return Some(StringExpr::from(crate_name));
-        }
-
-        match self {
-            Self::Internal { .. } => Some(StringExpr::Borrowed(quote! {
-                ::core::module_path!()
-                    .split(':')
-                    .next()
-                    .unwrap()
-            })),
-            Self::External { .. } => unreachable!(),
-            _ => None,
-        }
-    }
-
     /// Combines type generics and const generics into one [`StringExpr`].
     ///
     /// This string can be used with a `GenericTypePathCell` in a `TypePath` implementation.
@@ -1321,7 +1292,7 @@ impl<'a> ReflectTypePath<'a> {
                         generics,
                         |TypeParam { ident, .. }| {
                             StringExpr::Borrowed(quote! {
-                                <#ident as #bevy_reflect_path::TypePath>::short_type_path()
+                                <#ident as #bevy_reflect_path::TypePath>::type_path_table().short_path()
                             })
                         },
                         bevy_reflect_path,

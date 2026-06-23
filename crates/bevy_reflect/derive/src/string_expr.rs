@@ -64,6 +64,16 @@ impl StringExpr {
         }
     }
 
+    /// XXX TODO: Document.
+    pub fn leak(self) -> TokenStream {
+        match self {
+            Self::Const(tokens) | Self::Borrowed(tokens) => tokens,
+            Self::Owned(owned) => quote! {
+                #owned.leak::<'static>()
+            },
+        }
+    }
+
     /// Appends a [`StringExpr`] to another.
     ///
     /// If both expressions are [`StringExpr::Const`] this will use [`concat`] to merge them.

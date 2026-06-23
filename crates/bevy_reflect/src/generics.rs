@@ -255,7 +255,7 @@ pub(crate) use impl_generic_info_methods;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Reflect, Typed};
+    use crate::{Reflect, TypePathTable, Typed};
     use alloc::string::String;
     use core::fmt::Debug;
 
@@ -347,12 +347,14 @@ mod tests {
         struct Test<T: Default, const N: usize = 10>(#[reflect(ignore)] T);
 
         impl<T: Default + 'static, const N: usize> TypePath for Test<T, N> {
-            fn type_path() -> &'static str {
-                ::core::any::type_name::<Self>()
-            }
-
-            fn short_type_path() -> &'static str {
-                "Test<T, N>"
+            fn type_path_table() -> &'static TypePathTable {
+                const TABLE: &TypePathTable = &TypePathTable {
+                    path: "Test<T, N>",
+                    short_path: "Test<T, N>",
+                    ident: None,
+                    module_path: None,
+                };
+                TABLE
             }
         }
 
@@ -394,12 +396,14 @@ mod tests {
         struct Test<T: Clone + Default, const N: usize = 10>(#[reflect(ignore)] T);
 
         impl<T: Clone + Default + 'static, const N: usize> TypePath for Test<T, N> {
-            fn type_path() -> &'static str {
-                ::core::any::type_name::<Self>()
-            }
-
-            fn short_type_path() -> &'static str {
-                "Test<T, N>"
+            fn type_path_table() -> &'static TypePathTable {
+                const TABLE: &TypePathTable = &TypePathTable {
+                    path: "Test<T, N>",
+                    short_path: "Test<T, N>",
+                    ident: None,
+                    module_path: None,
+                };
+                TABLE
             }
         }
 
