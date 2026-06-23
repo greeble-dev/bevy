@@ -210,7 +210,7 @@ impl Display for TypePathTable {
 // XXX TODO: Needed? Can probably auto-derive, but loses `crate_name`?
 impl fmt::Debug for TypePathTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TypePathData")
+        f.debug_struct("TypePathTable")
             .field("type_path", &self.path)
             .field("short_type_path", &self.short_path)
             .field("type_ident", &self.ident)
