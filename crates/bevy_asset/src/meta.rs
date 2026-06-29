@@ -1,3 +1,11 @@
+//! Handle asset metadata.
+//! Asset metadata informs how an [`Asset`] should be handled by the asset system.
+//!
+//! It is primarily used by [asset processing](crate::processor).
+//!
+//! Asset metadata is generally stored as a `.meta` file next to the asset,
+//! but this may differ per asset storage backend.
+
 use alloc::{
     boxed::Box,
     string::{String, ToString},
@@ -15,6 +23,10 @@ use downcast_rs::{impl_downcast, Downcast};
 use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
 
+/// The version of the metadata format being used.
+/// It is included in every metadata entry.
+///
+/// This constant will be updated whenever a breaking change is made to the format.
 pub const META_FORMAT_VERSION: &str = "1.0";
 pub type MetaTransform = Box<dyn Fn(&mut dyn AssetMetaDyn) + Send + Sync>;
 
@@ -83,7 +95,7 @@ pub enum AssetAction<LoaderSettings, ProcessSettings> {
 /// [`AssetProcessor`]: crate::processor::AssetProcessor
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct ProcessedInfo {
-    /// A hash of the asset bytes and the asset .meta data
+    /// A hash of the asset bytes and the asset `.meta` data
     pub hash: AssetHash,
     /// A hash of the asset bytes, the asset .meta data, and the `full_hash` of every `process_dependency`
     pub full_hash: AssetHash,
@@ -95,6 +107,7 @@ pub struct ProcessedInfo {
 /// has changed.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProcessDependencyInfo {
+    /// A hash of the dependency's `.meta` data and [`ProcessedInfo`] information.
     pub full_hash: AssetHash,
     pub path: AssetPath<'static>,
 }
@@ -114,8 +127,15 @@ pub struct AssetMetaMinimal {
 /// isn't necessary.
 #[derive(Serialize, Deserialize)]
 pub enum AssetActionMinimal {
+    /// Load the asset with the given loader.
+    /// See [`AssetLoader`].
     Load { loader: String },
+    /// Process the asset with the given processor.
+    /// See [`Process`] and [`AssetProcessor`].
+    ///
+    /// [`AssetProcessor`]: crate::processor::AssetProcessor
     Process { processor: String },
+    /// Do nothing with the asset
     Ignore,
 }
 
@@ -123,6 +143,9 @@ pub enum AssetActionMinimal {
 /// necessary.
 #[derive(Serialize, Deserialize)]
 pub struct ProcessedInfoMinimal {
+    /// Info produced by the [`AssetProcessor`] for a given processed asset.
+    ///
+    /// [`AssetProcessor`]: crate::processor::AssetProcessor
     pub processed_info: Option<ProcessedInfo>,
 }
 
@@ -239,6 +262,7 @@ impl AssetLoader for () {
     }
 }
 
+/// This type alias records the size of an asset hash.
 pub type AssetHash = [u8; 32];
 
 /// NOTE: changing the hashing logic here is a _breaking change_ that requires a [`META_FORMAT_VERSION`] bump.

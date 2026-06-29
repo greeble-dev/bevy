@@ -5,8 +5,9 @@ use crate::{
     basset::RootAssetRef,
     io::Reader,
     meta::{ProcessedInfo, Settings},
-    Asset, AssetLoadError, AssetPath, AssetRef, ErasedAssetLoader, ErasedLoadedAsset, Handle,
-    LoadContext, LoadDirectError, LoadedAsset, LoadedUntypedAsset, UntypedHandle,
+    Asset, AssetPath, AssetRef, ErasedAssetLoader, ErasedLoadedAsset, Handle, LoadContext,
+    LoadDirectError, LoadedAsset, LoadedUntypedAsset, RequestedHandleTypeMismatchError,
+    UntypedHandle,
 };
 use alloc::{borrow::ToOwned, boxed::Box, string::String, sync::Arc};
 use core::any::{type_name, TypeId};
@@ -335,7 +336,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                 .await
                 .map_err(|error| LoadDirectError::LoadError {
                     dependency: path.clone().into(),
-                    error: error.into(),
+                    error: Box::new(error.into()),
                 })?
         } else {
             self.load_context
@@ -344,7 +345,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                 .await
                 .map_err(|error| LoadDirectError::LoadError {
                     dependency: path.clone().into(),
-                    error: error.into(),
+                    error: Box::new(error.into()),
                 })?
         };
         let meta = loader.default_meta();
@@ -364,13 +365,6 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
 
     /// Same as [`Self::load_value_internal`], but with a generic to ensure the returned handle type
     /// is correct.
-    #[cfg_attr(
-        not(target_arch = "wasm32"),
-        expect(
-            clippy::result_large_err,
-            reason = "we need to give the user the correct error type"
-        )
-    )]
     async fn load_typed_value_internal<A: Asset>(
         self,
         path: AssetRef<'static>,
@@ -382,17 +376,20 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                     .downcast::<A>()
                     .map_err(|_| LoadDirectError::LoadError {
                         dependency: path.clone(),
-                        error: AssetLoadError::RequestedHandleTypeMismatch {
-                            path,
-                            requested: TypeId::of::<A>(),
-                            // XXX TODO: Needs work now that asset_type_name is Option.
-                            // Could use untyped_asset.asset_type_name()? But needs
-                            // refactoring as that's already been moved.
-                            actual_asset_name: "", // loader.asset_type_name(),
-                            // XXX TODO: Similarly, we lost support for the loader path
-                            // due to changes ins `load_value_internal`. Review alternatives.
-                            loader_name: loader.map(|l| l.type_path()).unwrap_or("XXX TODO"),
-                        },
+                        error: Box::new(
+                            Box::new(RequestedHandleTypeMismatchError {
+                                path,
+                                requested: TypeId::of::<A>(),
+                                // XXX TODO: Needs work now that asset_type_name is Option.
+                                // Could use untyped_asset.asset_type_name()? But needs
+                                // refactoring as that's already been moved.
+                                actual_asset_name: "", // loader.asset_type_name(),
+                                // XXX TODO: Similarly, we lost support for the loader path
+                                // due to changes ins `load_value_internal`. Review alternatives.
+                                loader_name: loader.map(|l| l.type_path()).unwrap_or("XXX TODO"),
+                            })
+                            .into(),
+                        ),
                     })
             })
     }
@@ -400,10 +397,6 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     // XXX TODO: Document.
     // XXX TODO: Refactor? Somewhat duplicates `load_typed_value_internal`, although
     // takes `AssetPath` instead of `AssetRef`.
-    #[expect(
-        clippy::result_large_err,
-        reason = "we need to give the user the correct error type"
-    )]
     async fn load_typed_value_from_reader_internal<A: Asset>(
         self,
         path: AssetPath<'static>,
@@ -416,13 +409,16 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                     .downcast::<A>()
                     .map_err(|_| LoadDirectError::LoadError {
                         dependency: AssetRef::from(path.clone()),
-                        error: AssetLoadError::RequestedHandleTypeMismatch {
-                            path: AssetRef::from(path),
-                            requested: TypeId::of::<A>(),
-                            // XXX TODO: Needs work now that asset_type_name is Option. Could use untyped_asset.asset_type_name()? But needs refactoring as that's already been moved.
-                            actual_asset_name: "", // loader.asset_type_name(),
-                            loader_name: loader.type_path(),
-                        },
+                        error: Box::new(
+                            Box::new(RequestedHandleTypeMismatchError {
+                                path: AssetRef::from(path),
+                                requested: TypeId::of::<A>(),
+                                // XXX TODO: Needs work now that asset_type_name is Option. Could use untyped_asset.asset_type_name()? But needs refactoring as that's already been moved.
+                                actual_asset_name: "", // loader.asset_type_name(),
+                                loader_name: loader.type_path(),
+                            })
+                            .into(),
+                        ),
                     })
             })
     }

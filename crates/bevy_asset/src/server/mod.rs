@@ -830,12 +830,17 @@ impl AssetServer {
                             // If we know the requested type then check it
                             // matches the labeled asset.
                             if asset_id.type_id != labeled_asset.handle.type_id() {
-                                let error = AssetLoadError::RequestedHandleTypeMismatch {
-                                    path: path.clone_owned(),
-                                    requested: asset_id.type_id,
-                                    actual_asset_name: labeled_asset.asset.value.asset_type_name(),
-                                    loader_name: "XXX TODO: Was loader.type_path()",
-                                };
+                                let error: AssetLoadError =
+                                    Box::new(RequestedHandleTypeMismatchError {
+                                        path: path.clone_owned(),
+                                        requested: asset_id.type_id,
+                                        actual_asset_name: labeled_asset
+                                            .asset
+                                            .value
+                                            .asset_type_name(),
+                                        loader_name: "XXX TODO: Was loader.type_path()",
+                                    })
+                                    .into();
                                 self.send_asset_event(InternalAssetEvent::Failed {
                                     index: asset_id,
                                     error: error.clone(),
@@ -2329,6 +2334,22 @@ impl RecursiveDependencyLoadState {
     }
 }
 
+/// An error that occurs when the requested handle type doesn't match the actual loaded asset type.
+#[derive(Error, Debug, Clone)]
+#[error("Requested handle of type {requested:?} for asset '{path}' does not match actual asset type '{actual_asset_name}', which used loader '{loader_name}'")]
+pub struct RequestedHandleTypeMismatchError {
+    /// The path of the asset.
+    // XXX TODO: Review if should be `AssetRef` or `AssetPath`? Might need
+    // a separate type of actions since they don't have a `loader_name`.
+    pub path: AssetRef<'static>,
+    /// The requested type id of handle.
+    pub requested: TypeId,
+    /// The actual loaded asset type name.
+    pub actual_asset_name: &'static str,
+    /// The loader name used to load the asset.
+    pub loader_name: &'static str,
+}
+
 /// An error that occurs during an [`Asset`] load.
 #[derive(Error, Debug, Clone)]
 #[expect(
@@ -2338,15 +2359,8 @@ impl RecursiveDependencyLoadState {
 pub enum AssetLoadError {
     #[error("Attempted to load an asset with an empty path \"{0}\"")]
     EmptyPath(AssetPath<'static>),
-    #[error("Requested handle of type {requested:?} for asset '{path}' does not match actual asset type '{actual_asset_name}', which used loader '{loader_name}'")]
-    RequestedHandleTypeMismatch {
-        // XXX TODO: Review if should be `AssetRef` or `AssetPath`? Might need
-        // a separate type of actions since they don't have a `loader_name`.
-        path: AssetRef<'static>,
-        requested: TypeId,
-        actual_asset_name: &'static str,
-        loader_name: &'static str,
-    },
+    #[error(transparent)]
+    RequestedHandleTypeMismatch(#[from] Box<RequestedHandleTypeMismatchError>),
     #[error("Could not find an asset loader matching: Asset Type: {asset_type_id:?}; Path: {asset_path:?};")]
     MissingAssetLoader {
         asset_type_id: Option<TypeId>,
