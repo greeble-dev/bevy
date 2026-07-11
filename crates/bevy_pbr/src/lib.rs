@@ -220,7 +220,10 @@ impl Plugin for PbrPlugin {
                 },
                 MaterialPlugin::<StandardMaterial> {
                     debug_flags: self.debug_flags,
-                    ..Default::default()
+                    default_asset: Some(StandardMaterial {
+                        base_color: Color::srgb(1.0, 0.0, 0.5),
+                        ..Default::default()
+                    }),
                 },
                 ScreenSpaceAmbientOcclusionPlugin,
                 FogPlugin,
@@ -259,18 +262,6 @@ impl Plugin for PbrPlugin {
         if self.add_default_deferred_lighting_plugin {
             app.add_plugins(DeferredPbrLightingPlugin);
         }
-
-        // Initialize the default material handle.
-        app.world_mut()
-            .resource_mut::<Assets<StandardMaterial>>()
-            .insert(
-                &Handle::<StandardMaterial>::default(),
-                StandardMaterial {
-                    base_color: Color::srgb(1.0, 0.0, 0.5),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
 
         let has_bluenoise = app
             .get_sub_app(RenderApp)

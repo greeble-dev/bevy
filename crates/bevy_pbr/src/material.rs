@@ -418,17 +418,20 @@ impl Plugin for MaterialsPlugin {
 pub struct MaterialPlugin<M: Material> {
     /// Debugging flags that can optionally be set when constructing the renderer.
     pub debug_flags: RenderDebugFlags,
-    pub _marker: PhantomData<M>,
+    pub default_asset: Option<M>,
 }
 
 impl<M: Material> Default for MaterialPlugin<M> {
     fn default() -> Self {
         Self {
             debug_flags: RenderDebugFlags::default(),
-            _marker: Default::default(),
+            default_asset: None,
         }
     }
 }
+
+#[derive(Resource)]
+struct DefaultMaterialAsset<M: Material>(Handle<M>);
 
 impl<M: Material> Plugin for MaterialPlugin<M>
 where
@@ -448,6 +451,18 @@ where
                     .after(mark_3d_meshes_as_changed_if_their_assets_changed),
             );
 
+        let default_asset_handle = if let Some(default_asset) = self.default_asset.as_ref()
+            && app.get_sub_app_mut(RenderApp).is_some()
+        {
+            Some(
+                app.world_mut()
+                    .resource_mut::<Assets<M>>()
+                    .add(default_asset.clone()),
+            )
+        } else {
+            None
+        };
+
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             let shaders = initialize_material_shaders::<M>(render_app.world());
             render_app
@@ -466,6 +481,10 @@ where
                             .in_set(DirtySpecializationSystems::CheckForRemovals),
                     ),
                 );
+
+            if let Some(default_asset_handle) = default_asset_handle {
+                render_app.insert_resource(DefaultMaterialAsset(default_asset_handle));
+            }
         }
     }
 }
@@ -722,15 +741,24 @@ fn extract_mesh_materials<M: Material>(
             Or<(Changed<ViewVisibility>, Changed<MeshMaterial3d<M>>)>,
         >,
     >,
+    default_material: Option<Res<DefaultMaterialAsset<M>>>,
 ) {
     let last_change_tick = material_instances.current_change_tick;
 
     for (entity, view_visibility, material) in &changed_meshes_query {
         if view_visibility.get() {
+            let asset_id = if let Some(default_material) = default_material.as_ref()
+                && **material == Handle::default()
+            {
+                default_material.0.id().untyped()
+            } else {
+                material.id().untyped()
+            };
+
             material_instances.instances.insert(
                 entity.into(),
                 RenderMaterialInstance {
-                    asset_id: material.id().untyped(),
+                    asset_id,
                     last_change_tick,
                 },
             );
