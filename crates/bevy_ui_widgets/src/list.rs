@@ -186,15 +186,17 @@ fn listbox_on_row_click(
     q_children: Query<&Children>,
     mut commands: Commands,
 ) {
-    if q_listbox.contains(ev.entity) {
+    if q_listbox.contains(ev.entity)
+        && let Some(original_event_target) = ev.original_event_target()
+    {
         // Processing clicks at the listbox level, not the list item level, so that we can
         // do exclusion. Starting with the original target, search upward for a list row.
-        let row_id = if q_listitems.contains(ev.original_event_target()) {
-            ev.original_event_target()
+        let row_id = if q_listitems.contains(original_event_target) {
+            original_event_target
         } else {
             // Search ancestors for the first list row
             let mut found_row = None;
-            for ancestor in q_parents.iter_ancestors(ev.original_event_target()) {
+            for ancestor in q_parents.iter_ancestors(original_event_target) {
                 if q_listbox.contains(ancestor) {
                     // We reached a list box before finding a list row, bail out
                     return;

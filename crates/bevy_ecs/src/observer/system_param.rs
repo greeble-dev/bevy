@@ -136,7 +136,7 @@ impl<
 {
     /// Returns the original [`Entity`] that this [`EntityEvent`] targeted via [`EntityEvent::event_target`] when it was _first_ triggered,
     /// prior to any propagation logic.
-    pub fn original_event_target(&self) -> Entity {
+    pub fn original_event_target(&self) -> Option<Entity> {
         self.trigger.original_event_target
     }
 

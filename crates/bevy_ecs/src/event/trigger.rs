@@ -232,7 +232,8 @@ pub unsafe fn trigger_entity_internal(
 /// If `AUTO_PROPAGATE` is `true`, [`PropagateEntityTrigger::propagate`] will default to `true`.
 pub struct PropagateEntityTrigger<const AUTO_PROPAGATE: bool, E: EntityEvent, T: Traversal<E>> {
     /// The original [`Entity`] the [`Event`] was _first_ triggered for.
-    pub original_event_target: Entity,
+    // XXX TODO: Review if this needs to be option or if PropogateEntityTrigger can be non-Default.
+    pub original_event_target: Option<Entity>,
 
     /// Whether or not to continue propagating using the `T` [`Traversal`]. If this is false,
     /// The [`Traversal`] will stop on the current entity.
@@ -246,7 +247,7 @@ impl<const AUTO_PROPAGATE: bool, E: EntityEvent, T: Traversal<E>> Default
 {
     fn default() -> Self {
         Self {
-            original_event_target: Entity::PLACEHOLDER,
+            original_event_target: None,
             propagate: AUTO_PROPAGATE,
             _marker: Default::default(),
         }
@@ -281,7 +282,7 @@ unsafe impl<
         event: &mut E,
     ) {
         let mut current_entity = event.event_target();
-        self.original_event_target = current_entity;
+        self.original_event_target = Some(current_entity);
         // SAFETY:
         // - `observers` come from `world` and match the event type `E`, enforced by the call to `trigger`
         // - the passed in event pointer comes from `event`, which is an `Event`

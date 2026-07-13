@@ -1200,7 +1200,7 @@ mod tests {
                 res.observed("parent");
 
                 assert_eq!(event.event_target(), parent);
-                assert_eq!(event.original_event_target(), child);
+                assert_eq!(event.original_event_target(), Some(child));
             },
         );
 
@@ -1208,7 +1208,7 @@ mod tests {
             move |event: On<EventPropagating>, mut res: ResMut<Order>| {
                 res.observed("child");
                 assert_eq!(event.event_target(), child);
-                assert_eq!(event.original_event_target(), child);
+                assert_eq!(event.original_event_target(), Some(child));
             },
         );
 

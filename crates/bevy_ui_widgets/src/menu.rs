@@ -499,7 +499,7 @@ mod tests {
         // `MenuEvent` bubbles up the `ChildOf` chain, so this observer runs once per ancestor. Count
         // only the original target hop to get one increment per triggered event.
         if matches!(event.action, MenuAction::CloseAll)
-            && event.event_target() == event.original_event_target()
+            && Some(event.event_target()) == event.original_event_target()
         {
             count.0 += 1;
         }
