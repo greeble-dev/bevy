@@ -229,8 +229,7 @@ pub fn extract_text2d_sprite(
                         computed_block
                             .entities()
                             .get(*section_index as usize)
-                            .map(|t| t.entity)
-                            .unwrap_or(Entity::PLACEHOLDER),
+                            .map(|t| t.entity),
                     )
                     .map(|text_color| LinearRgba::from(text_color.0))
                     .unwrap_or_default();
