@@ -60,8 +60,8 @@ fn map_error(err: QueryEntityError, ancestor: bool) -> ComputeGlobalTransformErr
                 NoSuchEntity(error)
             }
         }
-        QueryEntityError::AliasedMutability(_) => unreachable!(),
-        QueryEntityError::None => unreachable!(), // XXX TODO: Shouldn't be unreachable.
+        // XXX TODO: Review if `None` case should have a valid error.
+        QueryEntityError::AliasedMutability(_) | QueryEntityError::None => unreachable!(),
     }
 }
 
