@@ -232,7 +232,7 @@ pub unsafe fn trigger_entity_internal(
 /// If `AUTO_PROPAGATE` is `true`, [`PropagateEntityTrigger::propagate`] will default to `true`.
 pub struct PropagateEntityTrigger<const AUTO_PROPAGATE: bool, E: EntityEvent, T: Traversal<E>> {
     /// The original [`Entity`] the [`Event`] was _first_ triggered for.
-    // XXX TODO: Review if this needs to be option or if PropogateEntityTrigger can be non-Default.
+    // XXX TODO: Review if this needs to be option or if PropagateEntityTrigger can be non-Default.
     pub original_event_target: Option<Entity>,
 
     /// Whether or not to continue propagating using the `T` [`Traversal`]. If this is false,
