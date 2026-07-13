@@ -309,6 +309,7 @@ impl<I: SystemInput + 'static, O: 'static> FromTemplate for SystemHandle<I, O> {
 }
 
 /// A [`Template`] that produces a [`SystemHandle`].
+#[derive(Default)]
 pub enum SystemHandleTemplate<I: SystemInput + 'static = (), O: 'static = ()> {
     /// Creates a [`SystemHandle`] by cloning the given [`SystemHandle`] value.
     Handle(SystemHandle<I, O>),
@@ -320,6 +321,9 @@ pub enum SystemHandleTemplate<I: SystemInput + 'static = (), O: 'static = ()> {
     /// This should generally be constructed using [`SystemHandleTemplate::value`]
     /// or [`system_value`].
     Value(SystemHandleValue<I, O>),
+    /// XXX TODO
+    #[default]
+    None,
 }
 
 /// Stores an [`Arc<Mutex<SystemHandleOrValue<I, O>>>`].
@@ -372,6 +376,7 @@ impl<I: SystemInput + 'static, O: 'static> Template for SystemHandleTemplate<I, 
                     }
                 }
             }
+            Self::None => Err("XXX TODO?".into()),
         }
     }
 
@@ -379,15 +384,8 @@ impl<I: SystemInput + 'static, O: 'static> Template for SystemHandleTemplate<I, 
         match self {
             Self::Handle(handle) => Self::Handle(handle.clone()),
             Self::Value(value) => Self::Value(value.clone()),
+            Self::None => Self::None,
         }
-    }
-}
-
-impl<I: SystemInput + 'static, O: 'static> Default for SystemHandleTemplate<I, O> {
-    fn default() -> Self {
-        Self::Handle(SystemHandle::Weak(SystemId::from_entity(
-            Entity::PLACEHOLDER,
-        )))
     }
 }
 
