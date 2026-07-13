@@ -1700,7 +1700,7 @@ mod tests {
             #[derive(Component, Reflect, PartialEq, Eq, Debug)]
             #[reflect(Component, FromWorld, from_reflect = false)]
             struct SomeRef(
-                #[entities] Entity,
+                #[entities] Option<Entity>,
                 // We add an ignored field here to ensure `reflect_clone` fails and `FromWorld` is used
                 #[reflect(ignore)] PhantomData<()>,
             );
@@ -1711,7 +1711,7 @@ mod tests {
             impl FromWorld for SomeRef {
                 fn from_world(world: &mut World) -> Self {
                     world.insert_resource(FromWorldCalled(true));
-                    SomeRef(Entity::PLACEHOLDER, Default::default())
+                    SomeRef(None, Default::default())
                 }
             }
             let mut world = World::new();
@@ -1721,7 +1721,7 @@ mod tests {
 
             let a = world.spawn_empty().id();
             let b = world.spawn_empty().id();
-            let c = world.spawn(SomeRef(a, Default::default())).id();
+            let c = world.spawn(SomeRef(Some(a), Default::default())).id();
             let d = world.spawn_empty().id();
             let mut map = EntityHashMap::<Entity>::new();
             map.insert(a, b);
@@ -1730,7 +1730,7 @@ mod tests {
             let cloned = EntityCloner::default().clone_entity_mapped(&mut world, c, &mut map);
             assert_eq!(
                 *world.entity(cloned).get::<SomeRef>().unwrap(),
-                SomeRef(b, Default::default())
+                SomeRef(Some(b), Default::default())
             );
             assert!(world.resource::<FromWorldCalled>().0);
         }
