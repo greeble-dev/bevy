@@ -1309,7 +1309,7 @@ mod tests {
                 *entity,
                 HitData {
                     depth: 0.0,
-                    camera,
+                    camera: Some(camera),
                     position: None,
                     normal: None,
                     extra: None,

@@ -461,7 +461,7 @@ mod tests {
             hovered_child,
             HitData {
                 depth: 0.0,
-                camera,
+                camera: Some(camera),
                 position: None,
                 normal: None,
                 extra: None,
@@ -514,7 +514,7 @@ mod tests {
             hovered_entity,
             HitData {
                 depth: 0.0,
-                camera,
+                camera: Some(camera),
                 position: None,
                 normal: None,
                 extra: None,
@@ -580,7 +580,7 @@ mod tests {
             hovered_child,
             HitData {
                 depth: 0.0,
-                camera,
+                camera: Some(camera),
                 position: None,
                 normal: None,
                 extra: None,

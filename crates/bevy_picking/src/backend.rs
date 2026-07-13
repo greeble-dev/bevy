@@ -135,7 +135,8 @@ impl PointerHits {
 pub struct HitData {
     /// The camera entity used to detect this hit. Useful when you need to find the ray that was
     /// cast for this hit when using a raycasting backend.
-    pub camera: Entity,
+    // XXX TODO: Not sure if this should be option. Is only `None` in a few examples and tests.
+    pub camera: Option<Entity>,
     /// `depth` only needs to be self-consistent with other [`PointerHits`]s using the same
     /// [`RenderTarget`](bevy_camera::RenderTarget). However, it is recommended to use the
     /// distance from the pointer to the hit, measured from the near plane of the camera, to the
@@ -178,9 +179,14 @@ impl PartialEq for HitData {
 
 impl HitData {
     /// Construct a [`HitData`].
-    pub fn new(camera: Entity, depth: f32, position: Option<Vec3>, normal: Option<Vec3>) -> Self {
+    pub fn new(
+        camera: impl Into<Option<Entity>>,
+        depth: f32,
+        position: Option<Vec3>,
+        normal: Option<Vec3>,
+    ) -> Self {
         Self {
-            camera,
+            camera: camera.into(),
             depth,
             position,
             normal,
@@ -208,18 +214,18 @@ impl HitData {
     /// #[derive(Debug)]
     /// struct MyHitInfo { triangle_index: u32 }
     ///
-    /// # let camera = Entity::PLACEHOLDER;
+    /// # let camera = None;
     /// let hit = HitData::new_with_extra(camera, 1.0, None, None, MyHitInfo { triangle_index: 7 });
     /// ```
     pub fn new_with_extra(
-        camera: Entity,
+        camera: impl Into<Option<Entity>>,
         depth: f32,
         position: Option<Vec3>,
         normal: Option<Vec3>,
         extra: impl HitDataExtra,
     ) -> Self {
         Self {
-            camera,
+            camera: camera.into(),
             depth,
             position,
             normal,
@@ -360,7 +366,7 @@ mod tests {
 
     #[test]
     fn hit_data_extra() {
-        let camera = Entity::PLACEHOLDER;
+        let camera = None;
 
         let hit = HitData::new_with_extra(
             camera,

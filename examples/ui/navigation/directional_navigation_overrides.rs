@@ -851,7 +851,7 @@ fn interact_with_focused_button(
             Click {
                 button: PointerButton::Primary,
                 hit: HitData {
-                    camera: Entity::PLACEHOLDER,
+                    camera: None,
                     depth: 0.0,
                     position: None,
                     normal: None,
