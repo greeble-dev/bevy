@@ -331,11 +331,11 @@ impl<const N: usize> RelationshipSourceCollection for SmallVec<[Entity; N]> {
     }
 }
 
-impl RelationshipSourceCollection for Entity {
+impl RelationshipSourceCollection for Option<Entity> {
     type SourceIter<'a> = core::option::IntoIter<Entity>;
 
     fn new() -> Self {
-        Entity::PLACEHOLDER
+        None
     }
 
     fn reserve(&mut self, _: usize) {}
@@ -345,13 +345,13 @@ impl RelationshipSourceCollection for Entity {
     }
 
     fn add(&mut self, entity: Entity) -> bool {
-        *self = entity;
+        *self = Some(entity);
         true
     }
 
     fn remove(&mut self, entity: Entity) -> bool {
-        if *self == entity {
-            *self = Entity::PLACEHOLDER;
+        if *self == Some(entity) {
+            *self = None;
 
             return true;
         }
@@ -360,38 +360,30 @@ impl RelationshipSourceCollection for Entity {
     }
 
     fn iter(&self) -> Self::SourceIter<'_> {
-        if *self == Entity::PLACEHOLDER {
-            None.into_iter()
-        } else {
-            Some(*self).into_iter()
-        }
+        (*self).into_iter()
     }
 
     fn len(&self) -> usize {
-        if *self == Entity::PLACEHOLDER {
+        if self.is_none() {
             return 0;
         }
         1
     }
 
     fn clear(&mut self) {
-        *self = Entity::PLACEHOLDER;
+        *self = None;
     }
 
     fn shrink_to_fit(&mut self) {}
 
     fn extend_from_iter(&mut self, entities: impl IntoIterator<Item = Entity>) {
         for entity in entities {
-            *self = entity;
+            *self = Some(entity);
         }
     }
 
     fn source_to_remove_before_add(&self) -> Option<Entity> {
-        if *self != Entity::PLACEHOLDER {
-            Some(*self)
-        } else {
-            None
-        }
+        *self
     }
 }
 
@@ -638,7 +630,7 @@ mod tests {
 
         #[derive(Component)]
         #[relationship_target(relationship = Rel)]
-        struct RelTarget(Entity);
+        struct RelTarget(Option<Entity>);
 
         let mut world = World::new();
         let a = world.spawn_empty().id();
@@ -648,7 +640,7 @@ mod tests {
 
         let rel_target = world.get::<RelTarget>(b).unwrap();
         let collection = rel_target.collection();
-        assert_eq!(collection, &a);
+        assert_eq!(*collection, Some(a));
     }
 
     #[test]
@@ -705,14 +697,14 @@ mod tests {
 
         #[derive(Component)]
         #[relationship_target(relationship = Above)]
-        struct Below(Entity);
+        struct Below(Option<Entity>);
 
         let mut world = World::new();
         let a = world.spawn_empty().id();
         let b = world.spawn_empty().id();
 
         world.entity_mut(a).insert(Above(b));
-        assert_eq!(a, world.get::<Below>(b).unwrap().0);
+        assert_eq!(Some(a), world.get::<Below>(b).unwrap().0);
 
         // Verify removing target removes relationship
         world.entity_mut(b).remove::<Below>();
@@ -727,7 +719,7 @@ mod tests {
         let c = world.spawn_empty().id();
         world.entity_mut(a).insert(Above(c));
         assert!(world.get::<Below>(b).is_none());
-        assert_eq!(a, world.get::<Below>(c).unwrap().0);
+        assert_eq!(Some(a), world.get::<Below>(c).unwrap().0);
     }
 
     #[test]
@@ -776,7 +768,7 @@ mod tests {
 
         #[derive(Component)]
         #[relationship_target(relationship = Above)]
-        struct Below(Entity);
+        struct Below(Option<Entity>);
         let mut world = World::new();
         let a = world.spawn_empty().id();
         let b = world.spawn_empty().id();
@@ -797,7 +789,7 @@ mod tests {
         );
         assert_eq!(
             world.get::<Below>(c).unwrap().0,
-            b,
+            Some(b),
             "Target should point to new source"
         );
     }
@@ -810,7 +802,7 @@ mod tests {
 
         #[derive(Component)]
         #[relationship_target(relationship = Above)]
-        struct Below(Entity);
+        struct Below(Option<Entity>);
 
         let mut world = World::new();
         let a = world.spawn_empty().id();

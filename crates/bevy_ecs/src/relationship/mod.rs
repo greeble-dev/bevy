@@ -64,6 +64,7 @@ use log::warn;
 /// pub struct Children(Vec<Entity>);
 /// ```
 ///
+/// XXX TODO: Update documentation, needs to be `Option<Entity`.
 /// A one-to-one relationship can be created by putting a single [`Entity`] in the [`RelationshipTarget`]'s field.
 /// In that case, if another entity is added to the relationship, the original entity is removed.
 ///
@@ -76,7 +77,7 @@ use log::warn;
 ///
 /// #[derive(Component)]
 /// #[relationship_target(relationship = ViewOf)]
-/// pub struct View(Entity);
+/// pub struct View(Option<Entity>);
 /// ```
 ///
 /// When deriving [`RelationshipTarget`] you can specify the `#[relationship_target(linked_spawn)]` attribute to
@@ -977,7 +978,7 @@ mod tests {
 
         #[derive(Component)]
         #[relationship_target(relationship = Rel)]
-        struct RelTarget(Entity);
+        struct RelTarget(Option<Entity>);
 
         let mut world = World::new();
 
@@ -1219,7 +1220,7 @@ mod tests {
 
         #[derive(Component)]
         #[relationship_target(relationship = Rel)]
-        struct RelTarget(Entity);
+        struct RelTarget(Option<Entity>);
 
         impl Rel {
             fn on_add(world: DeferredWorld, context: HookContext) {
