@@ -61,6 +61,7 @@ fn map_error(err: QueryEntityError, ancestor: bool) -> ComputeGlobalTransformErr
             }
         }
         QueryEntityError::AliasedMutability(_) => unreachable!(),
+        QueryEntityError::None => unreachable!(), // XXX TODO: Shouldn't be unreachable.
     }
 }
 

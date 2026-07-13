@@ -1574,8 +1574,15 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// - [`get_mut`](Self::get_mut) to get a mutable query item.
     #[inline]
-    pub fn get(&self, entity: Entity) -> Result<ROQueryItem<'_, 's, D>, QueryEntityError> {
-        self.as_readonly().get_inner(entity)
+    pub fn get(
+        &self,
+        entity: impl Into<Option<Entity>>,
+    ) -> Result<ROQueryItem<'_, 's, D>, QueryEntityError> {
+        if let Some(entity) = entity.into() {
+            self.as_readonly().get_inner(entity)
+        } else {
+            Err(QueryEntityError::None)
+        }
     }
 
     /// Returns the read-only query items for the given array of [`Entity`].

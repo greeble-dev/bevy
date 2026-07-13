@@ -22,6 +22,9 @@ pub enum QueryEntityError {
     /// See [`Query::get_many_mut`](crate::system::Query::get_many_mut) for an example.
     #[error("The entity with ID {0} was requested mutably more than once")]
     AliasedMutability(Entity),
+    /// XXX TODO
+    #[error("XXX TODO")]
+    None,
 }
 
 /// An error that occurs when evaluating a [`Query`](crate::system::Query) or [`QueryState`](crate::query::QueryState) as a single expected result via
