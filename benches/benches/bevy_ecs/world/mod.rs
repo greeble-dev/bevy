@@ -26,6 +26,7 @@ criterion_group!(
     medium_sized_commands,
     large_sized_commands,
     world_entity,
+    world_entity_location,
     world_get,
     world_query_get,
     world_query_iter,

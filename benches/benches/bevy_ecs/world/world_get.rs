@@ -9,8 +9,8 @@ use bevy_ecs::{
     world::{EntityMut, World},
 };
 use chacha20::ChaCha8Rng;
-use criterion::Criterion;
-use rand::{prelude::SliceRandom, SeedableRng};
+use criterion::{Criterion, Throughput};
+use rand::{prelude::SliceRandom, RngExt, SeedableRng};
 use seq_macro::seq;
 
 #[derive(Component, Default)]
@@ -50,12 +50,45 @@ fn setup_wide<T: Bundle<Effect: NoBundleEffect> + Default>(
     black_box((world, entities))
 }
 
+#[inline(never)]
+fn get_location(world: &World, entities: &[Entity]) {
+    for &entity in entities {
+        let _ = black_box(
+            world
+                .entities()
+                .get_spawned(entity)
+                .ok()
+                // Read a variable from the location to make sure that there's
+                // a realistic `None` check.
+                .map(|location| location.archetype_id),
+        );
+    }
+}
+
+#[inline(never)]
+fn get_location_option(world: &World, entities: &[Option<Entity>]) {
+    for &entity in entities {
+        if let Some(entity) = entity {
+            let _ = black_box(
+                world
+                    .entities()
+                    .get_spawned(entity)
+                    .ok()
+                    // Read a variable from the location to make sure that there's
+                    // a realistic `None` check.
+                    .map(|location| location.archetype_id),
+            );
+        }
+    }
+}
+
 pub fn world_entity(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("world_entity");
     group.warm_up_time(core::time::Duration::from_millis(500));
     group.measurement_time(core::time::Duration::from_secs(4));
 
     for entity_count in RANGE.map(|i| i * 10_000) {
+        group.throughput(Throughput::Elements(entity_count as u64));
         group.bench_function(format!("{entity_count}_entities"), |bencher| {
             let (world, entities) = setup::<Table>(entity_count);
 
@@ -64,6 +97,90 @@ pub fn world_entity(criterion: &mut Criterion) {
                     black_box(world.entity(*entity));
                 }
             });
+        });
+    }
+
+    group.finish();
+}
+
+pub fn world_entity_location(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("world_entity_location");
+    group.warm_up_time(core::time::Duration::from_millis(500));
+    group.measurement_time(core::time::Duration::from_secs(4));
+
+    for entity_count in RANGE.map(|i| i * 10_000) {
+        group.throughput(Throughput::Elements(entity_count as u64));
+
+        group.bench_function(format!("{entity_count}_entities"), |bencher| {
+            let (world, entities) = setup::<Table>(entity_count);
+            bencher.iter(|| get_location(&world, &entities));
+        });
+
+        group.bench_function(format!("despawned_{entity_count}_entities"), |bencher| {
+            let (mut world, entities) = setup::<Table>(entity_count);
+            for entity in &entities {
+                world.despawn(*entity);
+            }
+            bencher.iter(|| get_location(&world, &entities));
+        });
+
+        group.bench_function(
+            format!("half_despawned_{entity_count}_entities"),
+            |bencher| {
+                let (mut world, entities) = setup::<Table>(entity_count);
+                let mut rand = deterministic_rand();
+                for entity in &entities {
+                    if rand.random() {
+                        world.despawn(*entity);
+                    }
+                }
+                bencher.iter(|| get_location(&world, &entities));
+            },
+        );
+
+        group.bench_function(format!("placeholder_{entity_count}_entities"), |bencher| {
+            let (world, _) = setup::<Table>(entity_count);
+            let entities = black_box(vec![Entity::PLACEHOLDER; entity_count as usize]);
+            bencher.iter(|| get_location(&world, &entities));
+        });
+
+        group.bench_function(
+            format!("half_placeholder_{entity_count}_entities"),
+            |bencher| {
+                let (world, mut entities) = setup::<Table>(entity_count);
+                let mut rand = deterministic_rand();
+                for entity in &mut entities {
+                    if rand.random() {
+                        *entity = Entity::PLACEHOLDER;
+                    }
+                }
+                bencher.iter(|| get_location(&world, &entities));
+            },
+        );
+
+        group.bench_function(format!("some_{entity_count}_entities"), |bencher| {
+            let (world, entities) = setup::<Table>(entity_count);
+            let entities = black_box(entities.into_iter().map(Option::from).collect::<Vec<_>>());
+            bencher.iter(|| get_location_option(&world, &entities));
+        });
+
+        group.bench_function(format!("none_{entity_count}_entities"), |bencher| {
+            let (world, _) = setup::<Table>(entity_count);
+            let entities = black_box(vec![None; entity_count as usize]);
+            bencher.iter(|| get_location_option(&world, &entities));
+        });
+
+        group.bench_function(format!("half_some_{entity_count}_entities"), |bencher| {
+            let (world, entities) = setup::<Table>(entity_count);
+            let mut entities =
+                black_box(entities.into_iter().map(Option::from).collect::<Vec<_>>());
+            let mut rand = deterministic_rand();
+            for entity in &mut entities {
+                if rand.random() {
+                    *entity = None;
+                }
+            }
+            bencher.iter(|| get_location_option(&world, &entities));
         });
     }
 
