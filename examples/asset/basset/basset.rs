@@ -53,6 +53,7 @@ mod action {
         meta::{AssetAction, AssetMeta, AssetMetaDyn},
         RenderAssetUsages,
     };
+    use bevy_image::CompressedImageSaverSettings;
     use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
     use image::DynamicImage;
 
@@ -314,10 +315,10 @@ mod action {
             let mut asset_bytes = Vec::<u8>::new();
 
             let settings = <CompressedImageSaver as AssetSaver>::save(
-                &CompressedImageSaver,
+                &CompressedImageSaver::default(),
                 &mut asset_bytes,
                 SavedAsset::from_loaded(&uncompressed_asset).expect("XXX TODO"),
-                &(),
+                &CompressedImageSaverSettings::default(),
                 AssetPath::from("XXX TODO"), // XXX TODO: Does this matter?
             )
             .await?;
