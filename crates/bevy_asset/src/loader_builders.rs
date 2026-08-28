@@ -5,9 +5,9 @@ use crate::{
     basset::RootAssetRef,
     io::Reader,
     meta::{ProcessedInfo, Settings},
-    Asset, AssetPath, AssetRef, ErasedAssetLoader, ErasedLoadedAsset, Handle, LoadContext,
-    LoadDirectError, LoadedAsset, LoadedUntypedAsset, RequestedHandleTypeMismatchError,
-    UntypedHandle,
+    Asset, AssetPath, AssetRef, ErasedAssetIndex, ErasedAssetLoader, ErasedLoadedAsset, Handle,
+    LoadContext, LoadDirectError, LoadedAsset, LoadedUntypedAsset,
+    RequestedHandleTypeMismatchError, UntypedHandle,
 };
 use alloc::{borrow::ToOwned, boxed::Box, string::String, sync::Arc};
 use core::any::{type_name, TypeId};
@@ -134,10 +134,12 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                 .asset_server
                 .get_or_create_path_handle(path, None) // XXX TODO: Removed `self.meta_transform`.
         };
-        // `load_unknown_type_with_meta_transform` and `get_or_create_path_handle` always returns a
-        // Strong variant, so we are safe to unwrap.
-        let index = (&handle).try_into().unwrap();
-        self.load_context.dependencies.insert(index);
+        // `load_unknown_type_with_meta_transform` returns a default `Uuid` handle when it refuses
+        // to start the load, for example because the path is unapproved. There is no load to
+        // track as a dependency in that case, and the reason has already been logged.
+        if let Ok(index) = ErasedAssetIndex::try_from(&handle) {
+            self.load_context.dependencies.insert(index);
+        }
         handle
     }
 
@@ -259,10 +261,12 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                 .get_or_create_path_handle_erased(path, type_id, type_name, None)
             // XXX TODO: Removed `self.meta_transform`.
         };
-        // `load_with_meta_transform` and `get_or_create_path_handle` always returns a Strong
-        // variant, so we are safe to unwrap.
-        let index = (&handle).try_into().unwrap();
-        self.load_context.dependencies.insert(index);
+        // `load_with_meta_transform` returns a default `Uuid` handle when it refuses to start the
+        // load, for example because the path is unapproved. There is no load to track as a
+        // dependency in that case, and the reason has already been logged.
+        if let Ok(index) = ErasedAssetIndex::try_from(&handle) {
+            self.load_context.dependencies.insert(index);
+        }
         handle
     }
 

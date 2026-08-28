@@ -1802,7 +1802,7 @@ impl PolyAssetLoader for BassetLoader {
         // XXX TODO: Maybe wrong. See comment on `BassetFileSerializable::root`.
         asset
             .take_labeled(basset.root.label_cow())
-            .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", &basset.root).into())
+            .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", basset.root).into())
     }
 
     fn extensions(&self) -> &[&str] {
