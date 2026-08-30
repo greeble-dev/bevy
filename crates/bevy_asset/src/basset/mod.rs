@@ -1701,6 +1701,8 @@ impl ActionSource for DevelopmentActionSource {
 
             write_pack_file(pack, pack_path).await;
 
+            info!("Finished pack file {pack_path:?}");
+
             info!(
                 "Publishing finished in {:.2}s",
                 begin_time.elapsed().as_secs_f32()
