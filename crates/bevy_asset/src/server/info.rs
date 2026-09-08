@@ -26,6 +26,9 @@ use tracing::warn;
 pub(crate) struct AssetInfo {
     weak_handle: Weak<StrongHandle>,
     pub(crate) path: Option<AssetRef<'static>>,
+    // XXX TODO: This should be obsolete now that the `LoadPath` action handles
+    // loader settings. Fully remove? Only keeping for now to reduce merge
+    // conflicts.
     pub(crate) meta_transform: Option<MetaTransform>,
     pub(crate) load_state: LoadState,
     pub(crate) dep_load_state: DependencyLoadState,
