@@ -1251,8 +1251,10 @@ impl DevelopmentActionSource {
         // If there's no specific saver for the type and the asset is
         // reflectable, fall back to the default saver.
         //
-        // XXX TODO: Relationship between "reflectable = default saver" is
-        // unclear. Review. Is this a naming problem or is the structure wrong?
+        // XXX TODO: We can't make this assumption. For example, `Mesh` is
+        // technically reflectable but its attributes are not, so serializing
+        // via reflection will silently strip them. Maybe need to explicitly
+        // register a type as serializable via reflection by default.
         //
         // XXX TODO: Looking up the partial reflect is annoying as it will
         // probably be done again in the saver. Any alternatives?

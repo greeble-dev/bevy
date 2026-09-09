@@ -110,6 +110,8 @@ pub trait PolyAssetSaver: TypePath + Send + Sync + 'static {
     /// The settings type used by this [`PolyAssetSaver`].
     type Settings: Settings + Default + Serialize + for<'a> Deserialize<'a>;
     /// The type of [`PolyAssetLoader`] used to load this [`Asset`]
+    // XXX TODO: Should this be restricted to `PolyAssetLoader`? Are poly
+    // savers and loaders always going to be symmetrical?
     type OutputLoader: PolyAssetLoader;
     /// The type of [error](`std::error::Error`) which could be encountered by this saver.
     type Error: Into<BevyError>;
