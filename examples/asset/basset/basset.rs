@@ -37,6 +37,7 @@ use bevy_asset::{
     saver::{ErasedSavedAsset, PolyAssetSaver, SavedAsset},
     AssetPath, AsyncWriteExt, EphemeralHandleBehavior, HandleSerializeProcessor,
 };
+use bevy_image::{ImageSaver, ImageSaverSettings};
 use bevy_reflect::{TypeRegistry, TypeRegistryArc};
 use bevy_scene::SceneDependencies;
 use core::{
@@ -49,6 +50,7 @@ use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 mod action {
     use bevy::{math::FloatOrd, mesh::Indices};
+    use core::ops::Mul;
     // XXX TODO: Should be in `use bevy` above?
     use bevy_asset::{
         basset::standalone::StandaloneAssetData,
@@ -291,6 +293,20 @@ mod action {
         // }
     }
 
+    impl CompressImage {
+        pub fn new(image: impl Into<AssetRef<'static>>) -> Self {
+            Self {
+                image: image.into(),
+            }
+        }
+    }
+
+    impl From<CompressImage> for AssetRef<'static> {
+        fn from(value: CompressImage) -> Self {
+            AssetRef::new(value)
+        }
+    }
+
     #[derive(TypePath)]
     pub struct CompressImageFunction;
 
@@ -304,13 +320,26 @@ mod action {
             action: &Self::Action,
         ) -> Result<BassetActionOutput, Self::Error> {
             // XXX TODO: See what can be refactored out of here.
-            let uncompressed_asset = context.erased_load_dependee(&action.image).await?;
+            let uncompressed_asset = context
+                .erased_load_dependee(&action.image)
+                .await?
+                .take::<Image>()
+                .expect("XXX TODO");
 
-            if uncompressed_asset.asset_type_id()
-                != TypeId::of::<<CompressedImageSaver as AssetSaver>::Asset>()
-            {
-                return Err("XXX TODO".into());
-            }
+            let uncompressed_size = uncompressed_asset.size();
+
+            // XXX TODO: Review. Unclear if we should be doing this automatically
+            // or if it should be done by `CompressedImageSaver`.
+            let compressed_size = UVec2::new(
+                uncompressed_size.x.next_power_of_two().max(4),
+                uncompressed_size.y.next_power_of_two().max(4),
+            );
+
+            let resized_asset = if uncompressed_size != compressed_size {
+                resize_image(uncompressed_asset, compressed_size)
+            } else {
+                uncompressed_asset
+            };
 
             let loader_type_name =
                 core::any::type_name::<<CompressedImageSaver as AssetSaver>::OutputLoader>();
@@ -320,7 +349,7 @@ mod action {
             let settings = <CompressedImageSaver as AssetSaver>::save(
                 &CompressedImageSaver::default(),
                 &mut asset_bytes,
-                SavedAsset::from_loaded(&uncompressed_asset).expect("XXX TODO"),
+                SavedAsset::from_asset(&resized_asset),
                 &CompressedImageSaverSettings::default(),
                 AssetPath::from("XXX TODO"), // XXX TODO: Does this matter?
             )
@@ -386,6 +415,33 @@ mod action {
     #[derive(TypePath)]
     pub struct ResizeImageFunction;
 
+    fn resize_dynamic_image(image: &DynamicImage, size: UVec2) -> DynamicImage {
+        let mut resizer = Resizer::new();
+
+        let resize_alg =
+            ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Gaussian));
+
+        let mut resized_image = DynamicImage::new(size.x, size.y, image.color());
+
+        resizer
+            .resize(image, &mut resized_image, &resize_alg)
+            .expect("XXX TODO");
+
+        resized_image
+    }
+
+    fn resize_image(image: Image, size: UVec2) -> Image {
+        // XXX TODO: Implement these properly.
+        let is_srgb = true;
+        let render_asset_usages = RenderAssetUsages::default();
+
+        Image::from_dynamic(
+            resize_dynamic_image(&image.try_into_dynamic().expect("XXX TODO"), size),
+            is_srgb,
+            render_asset_usages,
+        )
+    }
+
     impl BassetActionFunction for ResizeImageFunction {
         type Action = ResizeImage;
         type Error = BevyError;
@@ -399,34 +455,13 @@ mod action {
                 .erased_load_dependee(&action.image)
                 .await?
                 .take::<Image>()
-                .ok_or_else(|| BevyError::from("XXX TODO"))?
-                .try_into_dynamic()?;
+                .ok_or_else(|| BevyError::from("XXX TODO"))?;
 
-            let mut resizer = Resizer::new();
+            let target_size = original_image.size().as_vec2().mul(action.scale).as_uvec2();
 
-            let resize_alg =
-                ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Gaussian));
+            let resized_image = resize_image(original_image, target_size);
 
-            // XXX TODO: Verify scale is sensible.
-            let resized_width = ((original_image.width() as f32) * action.scale) as u32;
-            let resized_height = ((original_image.height() as f32) * action.scale) as u32;
-
-            let mut resized_image =
-                DynamicImage::new(resized_width, resized_height, original_image.color());
-
-            resizer
-                .resize(&original_image, &mut resized_image, &resize_alg)
-                .expect("XXX TODO");
-
-            // XXX TODO: Implement these properly.
-            let is_srgb = true;
-            let render_asset_usages = RenderAssetUsages::default();
-
-            Ok(context.finish(Image::from_dynamic(
-                resized_image,
-                is_srgb,
-                render_asset_usages,
-            )))
+            Ok(context.finish(resized_image))
         }
     }
 
@@ -1505,7 +1540,7 @@ fn main() {
                 template(|context| {
                     let s = context.resource::<AssetServer>();
                     Ok(MeshMaterial3d::<StandardMaterial>(s.add(StandardMaterial {
-                        base_color_texture: Some(s.load(action::ColorizeHeightmap::new("heightmaps/Heightmap_08_Island_512.png"))),
+                        base_color_texture: Some(s.load(action::CompressImage::new(action::ColorizeHeightmap::new("heightmaps/Heightmap_08_Island_512.png")))),
                         perceptual_roughness: 0.9,
                         ..Default::default()
                     })))
@@ -1576,6 +1611,16 @@ fn main() {
                     .with_saver(demo::IntAssetSaver)
                     .with_saver(MeshletMeshSaver)
                     .with_saver(MeshAssetSaver)
+                    .with_saver_and_settings(
+                        ImageSaver,
+                        ImageSaverSettings {
+                            // XXX TODO: Review. Not sure if this will be a problem.
+                            // It's only for cache action values, so we really want
+                            // some default "use the most appropriate format". Maybe
+                            // PNG is good enough.
+                            format: bevy_image::SaveImageFormatSetting::Format(ImageFormat::Png),
+                        },
+                    )
                     .with_default_poly_saver(RonAssetSaver::new(registry.clone())),
             ))),
             ..Default::default()

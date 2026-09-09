@@ -1115,10 +1115,15 @@ impl DevelopmentActionSourceSettings {
         self
     }
 
-    pub fn with_saver<T: AssetSaver>(mut self, saver: T) -> Self {
-        // XXX TODO: Do we ever want custom settings?
-        let settings = T::Settings::default();
+    pub fn with_saver<T: AssetSaver>(self, saver: T) -> Self {
+        self.with_saver_and_settings(saver, T::Settings::default())
+    }
 
+    pub fn with_saver_and_settings<T: AssetSaver>(
+        mut self,
+        saver: T,
+        settings: T::Settings,
+    ) -> Self {
         self.asset_type_name_to_saver.insert(
             type_name::<T::Asset>(),
             (Box::new(ErasedUniAssetSaver(saver)), Box::new(settings)),
