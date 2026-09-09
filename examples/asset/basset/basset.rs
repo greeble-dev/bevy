@@ -14,6 +14,7 @@ use bevy::{
     image::CompressedImageSaver,
     light::CascadeShadowConfigBuilder,
     log::LogPlugin,
+    mesh::SerializedMesh,
     pbr::experimental::meshlet::*,
     prelude::*,
     reflect::{
@@ -47,6 +48,7 @@ use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 mod action {
+    use bevy::{math::FloatOrd, mesh::Indices};
     use bevy_asset::{
         basset::standalone::StandaloneAssetData,
         io::VecReader,
@@ -374,6 +376,12 @@ mod action {
         }
     }
 
+    impl From<ResizeImage> for AssetRef<'static> {
+        fn from(value: ResizeImage) -> Self {
+            AssetRef::new(value)
+        }
+    }
+
     #[derive(TypePath)]
     pub struct ResizeImageFunction;
 
@@ -418,6 +426,158 @@ mod action {
                 is_srgb,
                 render_asset_usages,
             )))
+        }
+    }
+
+    #[derive(Debug, PartialEq, Reflect)]
+    #[reflect(BassetAction, PartialEq, Hash)]
+    pub struct MeshFromHeightmap {
+        pub heightmap: AssetRef<'static>,
+        pub extents: Aabb3d,
+    }
+
+    impl Default for MeshFromHeightmap {
+        fn default() -> Self {
+            Self {
+                heightmap: Default::default(),
+                extents: Aabb3d::from_min_max(vec3(-1.0, 0.0, -1.0), Vec3::ONE),
+            }
+        }
+    }
+
+    impl BassetAction for MeshFromHeightmap {
+        basset_action_version!(crate);
+    }
+
+    impl From<MeshFromHeightmap> for AssetRef<'static> {
+        fn from(value: MeshFromHeightmap) -> Self {
+            AssetRef::new(value)
+        }
+    }
+
+    impl MeshFromHeightmap {
+        pub fn new(heightmap: impl Into<AssetRef<'static>>) -> Self {
+            Self::default().with_heightmap(heightmap)
+        }
+
+        pub fn with_heightmap(self, heightmap: impl Into<AssetRef<'static>>) -> Self {
+            Self {
+                heightmap: heightmap.into(),
+                ..self
+            }
+        }
+
+        pub fn with_extents(self, extents: Aabb3d) -> Self {
+            Self { extents, ..self }
+        }
+    }
+
+    // XXX TODO: Could avoid this if we made an `Aabb3d` with `FloatOrd`.
+    impl Hash for MeshFromHeightmap {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.heightmap.hash(state);
+            for f in self
+                .extents
+                .min
+                .to_array()
+                .into_iter()
+                .chain(self.extents.max.to_array())
+            {
+                FloatOrd(f).hash(state);
+            }
+        }
+    }
+
+    #[derive(TypePath)]
+    pub struct MeshFromHeightmapFunction;
+
+    fn normalize(value: u16) -> f32 {
+        (value as f32) * (1.0 / (u16::MAX as f32))
+    }
+
+    fn within_extents(extents: Aabb3d, value: Vec3) -> Vec3 {
+        let bias = extents.min.to_vec3();
+        let scale = extents.max.to_vec3() - extents.min.to_vec3();
+
+        (value * scale) + bias
+    }
+
+    impl BassetActionFunction for MeshFromHeightmapFunction {
+        type Action = MeshFromHeightmap;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            mut context: ApplyContext<'_>,
+            action: &Self::Action,
+        ) -> Result<BassetActionOutput, Self::Error> {
+            let heightmap = context
+                .erased_load_dependee(&action.heightmap)
+                .await?
+                .take::<Image>()
+                .ok_or_else(|| BevyError::from("XXX TODO"))?
+                .try_into_dynamic()?
+                .to_luma16();
+
+            let vertex_count_x = heightmap.width();
+            let vertex_count_y = heightmap.height();
+
+            if (vertex_count_x <= 1) || (vertex_count_y <= 1) {
+                return Err(BevyError::from(format!(
+                    "XXX TODO: {vertex_count_x} {vertex_count_y}"
+                )));
+            }
+
+            // Create a vertex for each pixel in the heightmap.
+            let vertex_count = (vertex_count_x * vertex_count_y) as usize;
+            let mut positions = vec![Vec3::ZERO; vertex_count];
+            let mut uvs = vec![Vec2::ZERO; vertex_count];
+
+            for x in 0..vertex_count_x {
+                for y in 0..vertex_count_y {
+                    let height = normalize(heightmap.get_pixel(x, y)[0]);
+                    let u = (x as f32) * ((vertex_count_x - 1) as f32).recip();
+                    let v = (y as f32) * ((vertex_count_y - 1) as f32).recip();
+                    let position = within_extents(action.extents, Vec3::new(u, height, v));
+                    let uv = Vec2::new(u, v);
+
+                    let vertex_index = (x + (y * vertex_count_x)) as usize;
+                    positions[vertex_index] = position;
+                    uvs[vertex_index] = uv;
+                }
+            }
+
+            // Create indices so that a square joins each group of four
+            // heightmap pixels.
+            let square_count_x = vertex_count_x - 1;
+            let square_count_y = vertex_count_y - 1;
+            let square_count = (square_count_x * square_count_y) as usize;
+            let mut squares = vec![[0u32; 6]; square_count];
+
+            for x in 0..square_count_x {
+                for y in 0..square_count_y {
+                    let i0 = x + (y * vertex_count_x);
+                    let i1 = i0 + 1;
+                    let i2 = i0 + vertex_count_x;
+                    let i3 = i2 + 1;
+
+                    let square_index = (x + (y * square_count_x)) as usize;
+                    squares[square_index] = [i0, i2, i1, i1, i2, i3];
+                }
+            }
+
+            let indices = squares.into_flattened();
+
+            let mesh = Mesh::new(
+                bevy::mesh::PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            )
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+            .with_inserted_indices(Indices::U32(indices))
+            .with_computed_area_weighted_normals();
+
+            Ok(context.finish(mesh))
         }
     }
 }
@@ -630,6 +790,55 @@ impl PolyAssetSaver for RonAssetSaver {
         writer.write_all(string.as_bytes()).await?;
 
         Ok(Box::new(()))
+    }
+}
+
+#[derive(TypePath)]
+struct MeshAssetLoader;
+
+impl AssetLoader for MeshAssetLoader {
+    type Asset = Mesh;
+    type Settings = ();
+    type Error = BevyError;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _settings: &Self::Settings,
+        _load_context: &mut LoadContext<'_>,
+    ) -> Result<Self::Asset, Self::Error> {
+        // XXX TODO: Avoid boilerplate?
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+
+        Ok(ron::de::from_bytes::<SerializedMesh>(&bytes)
+            .expect("XXX TODO")
+            .into_mesh())
+    }
+}
+
+#[derive(TypePath)]
+struct MeshAssetSaver;
+
+impl AssetSaver for MeshAssetSaver {
+    type Asset = Mesh;
+    type Settings = ();
+    type OutputLoader = MeshAssetLoader;
+    type Error = BevyError;
+
+    async fn save(
+        &self,
+        writer: &mut Writer,
+        asset: SavedAsset<'_, '_, Self::Asset>,
+        _settings: &Self::Settings,
+        _asset_path: AssetPath<'_>,
+    ) -> Result<<Self::OutputLoader as AssetLoader>::Settings, Self::Error> {
+        let mesh = SerializedMesh::from_mesh(asset.deref().clone());
+        let string = ron::ser::to_string(&mesh).expect("XXX TODO");
+
+        writer.write_all(string.as_bytes()).await?;
+
+        Ok(())
     }
 }
 
@@ -906,7 +1115,7 @@ fn setup(
 
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(-0.4, 3.0, 4.5).looking_at(Vec3::new(-0.3, 0.75, 0.0), Vec3::Y),
+        Transform::from_xyz(-0.4, 3.5, 5.0).looking_at(Vec3::new(-0.3, 0.0, 0.0), Vec3::Y),
         FreeCamera {
             walk_speed: 2.0,
             ..Default::default()
@@ -1209,15 +1418,27 @@ fn main() {
             ),
         ],
         bsns: vec![
-            // Box::new(
-            // bsn_list! [
-            //         (
-            //             MeshletMesh3d(action::MeshletFromMesh::new("Duck.glb#Mesh0/Primitive0"))
-            //             MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
-            //             template_value(Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01)))
-            //         )
-            // ],
-            // )
+            Box::new(bsn! {
+                Mesh3d(action::MeshFromHeightmap::new(
+                    action::ResizeImage { image: "heightmaps/Heightmap_08_Island_512.png".into(), scale: 0.5 }
+                ))
+                MeshMaterial3d<StandardMaterial>(asset_value(Color::WHITE))
+                Transform::from_xyz(-2.0, 0.1, 1.5).with_scale(vec3(0.75, 1.0, 0.75))
+            }),
+            Box::new(bsn! {
+                MeshletMesh3d(action::MeshletFromMesh::new(
+                    action::MeshFromHeightmap::new(
+                        action::ResizeImage { image: "heightmaps/Heightmap_08_Island_512.png".into(), scale: 0.5 })
+                    )
+                )
+                MeshMaterial3d<MeshletDebugMaterial>(asset_value(MeshletDebugMaterial::default()))
+                Transform::from_xyz(0.0, 0.1, 1.5).with_scale(vec3(0.75, 1.0, 0.75))
+            }),
+            Box::new(bsn! {
+                MeshletMesh3d(action::MeshletFromMesh::new("Duck.glb#Mesh0/Primitive0"))
+                MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
+                Transform::from_xyz(2.0, 0.0, 1.5).looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01))
+            }),
         ],
     };
 
@@ -1262,9 +1483,11 @@ fn main() {
                     .with_action(action::ConvertAcmeSceneMeshesToMeshletsFunction)
                     .with_action(action::CompressImageFunction)
                     .with_action(action::ResizeImageFunction)
+                    .with_action(action::MeshFromHeightmapFunction)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
                     .with_saver(MeshletMeshSaver)
+                    .with_saver(MeshAssetSaver)
                     .with_default_poly_saver(RonAssetSaver::new(registry.clone())),
             ))),
             ..Default::default()
@@ -1289,6 +1512,7 @@ fn main() {
     .register_asset_reflect::<acme::AcmeScene>()
     .register_asset_loader(demo::StringAssetLoader)
     .register_asset_loader(demo::IntAssetLoader)
+    .register_asset_loader(MeshAssetLoader)
     .register_poly_asset_loader(RonAssetLoader::new(registry.clone()));
 
     test_reflect_serialization(

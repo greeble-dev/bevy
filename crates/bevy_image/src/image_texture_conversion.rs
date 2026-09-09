@@ -173,6 +173,16 @@ impl Image {
             TextureFormat::Rgba8UnormSrgb => {
                 ImageBuffer::from_raw(width, height, data).map(DynamicImage::ImageRgba8)
             }
+            // XXX TODO: Added this for `MeshFromHeightmap`. Should be in a separate PR.
+            TextureFormat::R16Unorm => {
+                let pixels: Vec<u16> = data
+                    .as_chunks()
+                    .0
+                    .iter()
+                    .map(|&bytes| u16::from_le_bytes(bytes))
+                    .collect();
+                ImageBuffer::from_raw(width, height, pixels).map(DynamicImage::ImageLuma16)
+            }
             // This format is commonly used as the format for the swapchain texture
             // This conversion is added here to support screenshots
             TextureFormat::Bgra8UnormSrgb | TextureFormat::Bgra8Unorm => {
