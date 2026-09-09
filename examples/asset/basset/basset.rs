@@ -49,6 +49,7 @@ use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 mod action {
     use bevy::{math::FloatOrd, mesh::Indices};
+    // XXX TODO: Should be in `use bevy` above?
     use bevy_asset::{
         basset::standalone::StandaloneAssetData,
         io::VecReader,
@@ -57,7 +58,7 @@ mod action {
     };
     use bevy_image::CompressedImageSaverSettings;
     use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
-    use image::DynamicImage;
+    use image::{DynamicImage, Rgb, RgbImage};
 
     use super::*;
 
@@ -578,6 +579,85 @@ mod action {
             .with_computed_area_weighted_normals();
 
             Ok(context.finish(mesh))
+        }
+    }
+
+    #[derive(Debug, PartialEq, Reflect, Default, Hash)]
+    #[reflect(BassetAction, PartialEq, Hash)]
+    pub struct ColorizeHeightmap {
+        pub heightmap: AssetRef<'static>,
+    }
+
+    impl BassetAction for ColorizeHeightmap {
+        basset_action_version!(crate);
+    }
+
+    impl From<ColorizeHeightmap> for AssetRef<'static> {
+        fn from(value: ColorizeHeightmap) -> Self {
+            AssetRef::new(value)
+        }
+    }
+
+    impl ColorizeHeightmap {
+        pub fn new(heightmap: impl Into<AssetRef<'static>>) -> Self {
+            Self {
+                heightmap: heightmap.into(),
+            }
+        }
+    }
+
+    #[derive(TypePath)]
+    pub struct ColorizeHeightmapFunction;
+
+    impl BassetActionFunction for ColorizeHeightmapFunction {
+        type Action = ColorizeHeightmap;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            mut context: ApplyContext<'_>,
+            action: &Self::Action,
+        ) -> Result<BassetActionOutput, Self::Error> {
+            let heightmap = context
+                .erased_load_dependee(&action.heightmap)
+                .await?
+                .take::<Image>()
+                .ok_or_else(|| BevyError::from("XXX TODO"))?
+                .try_into_dynamic()?
+                .to_luma16();
+
+            let w = heightmap.width();
+            let h = heightmap.height();
+
+            let mut output = RgbImage::new(w, h);
+
+            let mapping: &[(u16, Rgb<u8>)] = &[
+                (10, Rgb([20, 10, 127])),
+                (5000, Rgb([60, 100, 60])),
+                (6000, Rgb([127, 80, 40])),
+                (8000, Rgb([50, 40, 60])),
+                (u16::MAX, Rgb([210, 210, 230])),
+            ];
+
+            for x in 0..w {
+                for y in 0..h {
+                    let height = heightmap.get_pixel(x, y)[0];
+
+                    let color = mapping
+                        .iter()
+                        .find(|(threshold, _)| height <= *threshold)
+                        .map(|(_, color)| *color)
+                        .unwrap_or(Rgb([255, 0, 255]));
+
+                    output.put_pixel(x, y, color);
+                }
+            }
+
+            Ok(context.finish(Image::from_dynamic(
+                output.into(),
+                true,
+                RenderAssetUsages::default(),
+            )))
         }
     }
 }
@@ -1422,7 +1502,14 @@ fn main() {
                 Mesh3d(action::MeshFromHeightmap::new(
                     action::ResizeImage { image: "heightmaps/Heightmap_08_Island_512.png".into(), scale: 0.5 }
                 ))
-                MeshMaterial3d<StandardMaterial>(asset_value(Color::WHITE))
+                template(|context| {
+                    let s = context.resource::<AssetServer>();
+                    Ok(MeshMaterial3d::<StandardMaterial>(s.add(StandardMaterial {
+                        base_color_texture: Some(s.load(action::ColorizeHeightmap::new("heightmaps/Heightmap_08_Island_512.png"))),
+                        perceptual_roughness: 0.9,
+                        ..Default::default()
+                    })))
+                })
                 Transform::from_xyz(-2.0, 0.1, 1.5).with_scale(vec3(0.75, 1.0, 0.75))
             }),
             Box::new(bsn! {
@@ -1484,6 +1571,7 @@ fn main() {
                     .with_action(action::CompressImageFunction)
                     .with_action(action::ResizeImageFunction)
                     .with_action(action::MeshFromHeightmapFunction)
+                    .with_action(action::ColorizeHeightmapFunction)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
                     .with_saver(MeshletMeshSaver)
