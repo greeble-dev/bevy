@@ -6,6 +6,8 @@
 //! Asset metadata is generally stored as a `.meta` file next to the asset,
 //! but this may differ per asset storage backend.
 
+use core::any::{type_name, Any};
+
 use alloc::{
     boxed::Box,
     string::{String, ToString},
@@ -211,14 +213,49 @@ where
 
 impl_downcast!(AssetMetaDyn);
 
+#[derive(Copy, Clone, Debug)]
+pub struct SettingsDowncastError {
+    pub expected: &'static str,
+    pub got: &'static str,
+}
+
+// XXX TODO: Added this so that failed downcasts can print the expected and
+// actual types. Review and decide if we go back to the `downcast-rs` crate
+// as before. Or maybe submit as separate PR.
+// XXX TODO: Rename to `SettingsDowncast`?
+pub trait SettingsDowncastRef {
+    // XXX TODO: Consider renaming to `settings_downcast_ref` so it can't be
+    // confused with `Any_downcast_ref`.
+    fn downcast_ref<T: Settings>(&self) -> Result<&T, SettingsDowncastError>;
+}
+
+impl SettingsDowncastRef for dyn Settings {
+    fn downcast_ref<T: Settings>(&self) -> Result<&T, SettingsDowncastError> {
+        (self as &dyn Any)
+            .downcast_ref()
+            .ok_or_else(|| SettingsDowncastError {
+                expected: type_name::<T>(),
+                got: self.type_name(),
+            })
+    }
+}
+
 /// Settings used by the asset system, such as by [`AssetLoader`], [`Process`], and [`AssetSaver`]
 ///
 /// [`AssetSaver`]: crate::saver::AssetSaver
-pub trait Settings: Downcast + Send + Sync + 'static {}
+pub trait Settings: Any + Send + Sync + 'static {
+    // XXX TODO: See comment on `SettingsDowncastRef`.
+    fn type_name(&self) -> &'static str;
+}
 
-impl<T: 'static> Settings for T where T: Send + Sync {}
-
-impl_downcast!(Settings);
+impl<T: 'static> Settings for T
+where
+    T: Send + Sync,
+{
+    fn type_name(&self) -> &'static str {
+        type_name::<T>()
+    }
+}
 
 /// The () processor should never be called. This implementation exists to make the meta format nicer to work with.
 impl Process for () {

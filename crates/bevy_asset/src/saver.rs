@@ -6,7 +6,7 @@
 
 use crate::{
     io::{AssetWriterError, MissingAssetSourceError, MissingAssetWriterError, Writer},
-    meta::{AssetAction, AssetMeta, AssetMetaDyn, Settings},
+    meta::{AssetAction, AssetMeta, AssetMetaDyn, Settings, SettingsDowncastRef},
     transformer::TransformedAsset,
     Asset, AssetContainer, AssetId, AssetLoader, AssetPath, AssetServer, ErasedLoadedAsset, Handle,
     LabeledAsset, PolyAssetLoader, UntypedAssetId, UntypedHandle,
@@ -65,7 +65,7 @@ pub trait ErasedAssetSaver: Send + Sync + 'static {
         asset: &'a ErasedLoadedAsset,
         settings: &'a dyn Settings,
         asset_path: AssetPath<'a>,
-    ) -> BoxedFuture<'a, Result<(), BevyError>>;
+    ) -> BoxedFuture<'a, Result<Box<dyn Settings>, BevyError>>;
 
     /// The type name of the [`AssetSaver`].
     fn type_name(&self) -> &'static str;
@@ -83,16 +83,21 @@ impl<S: AssetSaver> ErasedAssetSaver for ErasedUniAssetSaver<S> {
         asset: &'a ErasedLoadedAsset,
         settings: &'a dyn Settings,
         asset_path: AssetPath<'a>,
-    ) -> BoxedFuture<'a, Result<(), BevyError>> {
+    ) -> BoxedFuture<'a, Result<Box<dyn Settings>, BevyError>> {
         Box::pin(async move {
             let settings = settings
                 .downcast_ref::<S::Settings>()
                 .expect("AssetLoader settings should match the loader type");
             let saved_asset = SavedAsset::<S::Asset>::from_loaded(asset).unwrap();
-            if let Err(err) = self.0.save(writer, saved_asset, settings, asset_path).await {
-                return Err(err.into());
+            match self.0.save(writer, saved_asset, settings, asset_path).await {
+                Ok(loader_settings) => {
+                    // XXX TODO: Could be simplified? Not sure how to make it
+                    // infer the `Box<dyn Settings>`.
+                    let loader_settings: Box<dyn Settings> = Box::new(loader_settings);
+                    Ok(loader_settings)
+                }
+                Err(err) => Err(err.into()),
             }
-            Ok(())
         })
     }
     fn type_name(&self) -> &'static str {
@@ -134,20 +139,16 @@ impl<S: PolyAssetSaver> ErasedAssetSaver for ErasedPolyAssetSaver<S> {
         asset: &'a ErasedLoadedAsset,
         settings: &'a dyn Settings,
         asset_path: AssetPath<'a>,
-    ) -> BoxedFuture<'a, Result<(), BevyError>> {
+    ) -> BoxedFuture<'a, Result<Box<dyn Settings>, BevyError>> {
         Box::pin(async move {
             let settings = settings
                 .downcast_ref::<S::Settings>()
                 .expect("AssetLoader settings should match the loader type");
             let saved_asset = ErasedSavedAsset::from_loaded(asset);
-            if let Err(err) = self
-                .0
+            self.0
                 .save(writer, &saved_asset, settings, asset_path)
                 .await
-            {
-                return Err(err.into());
-            }
-            Ok(())
+                .map_err(Into::<BevyError>::into)
         })
     }
 

@@ -10,20 +10,43 @@ use crate::{
         internal_load_with_settings_loader_and_reader, DependencyLoading, RootAssetPath,
     },
     io::SliceReader,
-    meta::{AssetActionMinimal, AssetMetaMinimal, Settings},
+    meta::Settings,
     saver::ErasedAssetSaver,
     AssetLoadError, AssetPath, AssetServer, ErasedAssetLoader, ErasedLoadedAsset,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use bevy_ecs::error::BevyError;
+use serde::{Deserialize, Serialize};
 
 const STANDALONE_MAGIC: &[u8] = b"BEVY_STANDALONE_ASSET\n";
 // XXX TODO: Is u16 maybe a bit risky? Might want to break into a bigger semver
 // style.
 const STANDALONE_VERSION: u16 = 1;
 
+#[derive(Default, Serialize, Deserialize)]
+pub struct StandaloneAssetHeader {
+    // XXX TODO: Maybe rename to `loader_type_path` so it's more explicit.
+    // XXX TODO: Could be a &str?
+    pub loader: String,
+    pub loader_settings: String,
+}
+
+impl StandaloneAssetHeader {
+    pub fn new(loader: &dyn ErasedAssetLoader, loader_settings: &dyn Settings) -> Self {
+        Self {
+            loader: loader.type_path().to_string(),
+            loader_settings: loader.serialize_settings(loader_settings),
+        }
+    }
+}
+
 pub struct StandaloneAssetData {
-    pub meta: Vec<u8>,
+    pub header: Vec<u8>,
     pub asset: Vec<u8>,
 }
 
@@ -43,11 +66,11 @@ pub(crate) fn read_standalone_asset(blob: &[u8]) -> Result<StandaloneAssetData, 
         return Err(AssetLoadError::TodoError(Arc::new("XXX TODO".into())));
     }
 
-    let meta = blob.bytes_sized().expect("XXX TODO");
+    let header = blob.bytes_sized().expect("XXX TODO");
     let asset = blob.bytes_sized().expect("XXX TODO");
 
     Ok(StandaloneAssetData {
-        meta: meta.into(),
+        header: header.into(),
         asset: asset.into(),
     })
 }
@@ -58,19 +81,16 @@ pub(crate) async fn load_standalone_asset(
     asset_server: &AssetServer,
     dependency_loading: DependencyLoading,
 ) -> Result<ErasedLoadedAsset, AssetLoadError> {
-    let minimal_meta = ron::de::from_bytes::<AssetMetaMinimal>(&data.meta).expect("XXX TODO");
-
-    let loader_name = match &minimal_meta.asset {
-        AssetActionMinimal::Load { loader } => loader.as_str(),
-        _ => todo!("XXX TODO"),
-    };
+    let header = ron::de::from_bytes::<StandaloneAssetHeader>(&data.header).expect("XXX TODO");
 
     let loader = asset_server
-        .get_asset_loader_with_type_name(loader_name)
+        .get_asset_loader_with_type_name(&header.loader)
         .await
         .expect("XXX TODO");
 
-    let meta = loader.deserialize_meta(&data.meta).expect("XXX TODO");
+    let loader_settings = loader
+        .deserialize_settings(header.loader_settings.as_bytes())
+        .expect("XXX TODO");
 
     let mut reader = SliceReader::new(&data.asset);
 
@@ -84,7 +104,7 @@ pub(crate) async fn load_standalone_asset(
     internal_load_with_settings_loader_and_reader(
         asset_server,
         fake_path,
-        meta.loader_settings().expect("meta is set to Load"),
+        &*loader_settings,
         &*loader,
         &mut reader,
         dependency_loading,
@@ -108,18 +128,20 @@ pub(crate) async fn save_standalone_asset(
     // XXX TODO: Don't throw away the loader settings returned from `AssetSaver::save`.
     // See below. Although note that `ErasedAssetSaver` doesn't return them for some
     // reason? Maybe needs fixing.
-    saver
+    let loader_settings = saver
         .save(&mut asset_bytes, asset, saver_settings, fake_path)
         .await?;
+
+    let header = StandaloneAssetHeader::new(loader, &*loader_settings);
 
     // XXX TODO: Think through loader settings. Firstly, if the asset was loaded
     // with certain settings then we should preserve them here? There might also
     // be situations where a saver/loader pair are expecting certain settings?
     // Could get messy.
-    let meta_bytes = loader.default_meta().serialize();
+    let header_bytes = ron::ser::to_string(&header).expect("XXX TODO").into_bytes();
 
     Ok(StandaloneAssetData {
-        meta: meta_bytes,
+        header: header_bytes,
         asset: asset_bytes,
     })
 }
@@ -132,7 +154,7 @@ pub(crate) fn write_standalone_asset(data: &StandaloneAssetData) -> Result<Box<[
 
         blob.bytes(STANDALONE_MAGIC);
         blob.u16(STANDALONE_VERSION);
-        blob.bytes_sized(&data.meta);
+        blob.bytes_sized(&data.header);
         blob.bytes_sized(&data.asset);
     }
 

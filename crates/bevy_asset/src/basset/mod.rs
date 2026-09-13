@@ -14,7 +14,7 @@ use crate::{
         },
         standalone::{
             load_standalone_asset, read_standalone_asset, save_standalone_asset,
-            write_standalone_asset, StandaloneAssetData,
+            write_standalone_asset, StandaloneAssetData, StandaloneAssetHeader,
         },
     },
     io::{AssetReaderError, AssetSourceId, AssetSources},
@@ -564,7 +564,7 @@ impl ApplyContext<'_> {
         reader: &mut dyn Reader,
         loader_type_name: &str,
         settings: &dyn Settings,
-    ) -> Result<ErasedLoadedAsset, BevyError> {
+    ) -> Result<(ErasedLoadedAsset, Arc<dyn ErasedAssetLoader>), BevyError> {
         let maybe_loader = self
             .asset_server
             .read_loaders()
@@ -582,7 +582,7 @@ impl ApplyContext<'_> {
             false,
         );
 
-        loader.load(reader, settings, load_context).await
+        Ok((loader.load(reader, settings, load_context).await?, loader))
 
         // XXX TODO: Should we add the loaded asset's `loader_dependencies` to
         // our own `loader_dependencies`?
@@ -1430,8 +1430,7 @@ impl ActionSource for DevelopmentActionSource {
                             "XXX TODO. Not supported yet. {action:?}",
                         );
 
-                        // XXX TODO: Verify loader matches saver? Need a way to get
-                        // `AssetSaver::OutputLoader` out of `ErasedAssetSaver`.
+                        // XXX TODO: Loader lookup could move into `save_standalone_asset`?
                         let loader = asset_server
                             .get_asset_loader_with_type_name(saver.loader_type_name())
                             .await?;
@@ -1544,6 +1543,12 @@ impl ActionSource for DevelopmentActionSource {
                         // like the action cache miss repeats the action cache lookup.
 
                         if action_function.cacheable() {
+                            // XXX TODO: Add debug switch to disable use of the cache. Also
+                            // consider debug switch that does both the cached and uncached
+                            // paths and checks that the standalone asset and dependencies
+                            // are the same.
+                            let standalone_asset;
+
                             if let Some(dependency_graph) = &self.dependency_graph
                                 && let Some((action_key, dependency_value)) =
                                     dependency_graph.action_key(action, None, &self.env).await
@@ -1551,65 +1556,16 @@ impl ActionSource for DevelopmentActionSource {
                                 && let Some(cached_standalone_asset) =
                                     action_cache.get(&action_key, action).await
                             {
-                                let standalone_asset =
-                                    read_standalone_asset(&cached_standalone_asset)?;
-
-                                pack.actions.insert(
-                                    Box::<str>::from(action.to_string()),
-                                    StagedAsset {
-                                        asset_bytes: standalone_asset.asset.into(),
-                                        meta_bytes: Some(standalone_asset.meta.into()),
-                                    },
-                                );
-
                                 for dependency in dependency_value.external_dependees() {
                                     input_stack.push(PublishDependency::Load(dependency.clone()));
                                 }
-                            } else {
-                                // XXX TODO: This is duplicating some of the the action cache path that we've done above.
-                                // Need to skip that part, but we still want to populate the action cache.
 
+                                standalone_asset = read_standalone_asset(&cached_standalone_asset)?;
+                            } else {
                                 let (loaded, _) = self
                                     .apply(action, asset_server, DependencyLoading::No)
                                     .await
                                     .expect("XXX TODO");
-
-                                // XXX TODO: Decide if we try to support the original path.
-                                let fake_path = AssetPath::parse(
-                                    "ERROR - Standalone assets shouldn't use their path",
-                                );
-
-                                // XXX TODO: Duplicates where `load_action` writes to the cache.
-                                let (saver, saver_settings) =
-                                    self.saver(&loaded, &self.registry).ok_or_else(|| {
-                                        format!(
-                                            "Couldn't find saver for asset type \"{}\".",
-                                            loaded.asset_type_name()
-                                        )
-                                    })?;
-
-                                let loader = asset_server
-                                    .get_asset_loader_with_type_name(saver.loader_type_name())
-                                    .await?;
-
-                                // XXX TODO: Review and check that we're ok with default settings.
-                                // Same decision made in `save_standalone_asset`.
-                                let meta_bytes =
-                                    loader.default_meta().serialize().into_boxed_slice();
-
-                                let mut asset_bytes = Vec::<u8>::new();
-                                saver
-                                    .save(&mut asset_bytes, &loaded, saver_settings, fake_path)
-                                    .await
-                                    .expect("XXX TODO");
-
-                                pack.actions.insert(
-                                    Box::<str>::from(action.to_string()),
-                                    StagedAsset {
-                                        asset_bytes: asset_bytes.into(),
-                                        meta_bytes: Some(meta_bytes),
-                                    },
-                                );
 
                                 loaded.visit_dependencies(&mut |dependency| {
                                     if let Some(path) = match dependency {
@@ -1621,7 +1577,51 @@ impl ActionSource for DevelopmentActionSource {
                                         input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
                                     };
                                 });
+
+                                // XXX TODO: If the above call to `apply` wrote to the cache
+                                // then we're duplicating that work here. Maybe `apply` should
+                                // optionally return the cached value? Or factor out the code
+                                // shared between here and apply.
+                                let (saver, saver_settings) =
+                                    self.saver(&loaded, &self.registry).ok_or_else(|| {
+                                        format!(
+                                            "Couldn't find saver for asset type \"{}\".",
+                                            loaded.asset_type_name()
+                                        )
+                                    })?;
+
+                                // XXX TODO: Other paths that call `save_standalone_asset` also do
+                                // this loader lookup. Maybe refactor into `save_standalone_asset`?
+                                let loader = asset_server
+                                    .get_asset_loader_with_type_name(saver.loader_type_name())
+                                    .await?;
+
+                                standalone_asset =
+                                    save_standalone_asset(&loaded, &*loader, saver, saver_settings)
+                                        .await
+                                        .expect("XXX TODO");
                             }
+
+                            let header = ron::de::from_bytes::<StandaloneAssetHeader>(
+                                &standalone_asset.header,
+                            )
+                            .expect("XXX TODO");
+
+                            let loader = asset_server
+                                .get_asset_loader_with_type_name(&header.loader)
+                                .await?;
+
+                            let meta_bytes = loader.serialize_meta_from_serialized_settings(
+                                header.loader_settings.as_bytes(),
+                            );
+
+                            pack.actions.insert(
+                                Box::<str>::from(action.to_string()),
+                                StagedAsset {
+                                    asset_bytes: standalone_asset.asset.into(),
+                                    meta_bytes: Some(meta_bytes.into_boxed_slice()),
+                                },
+                            );
                         } else {
                             if let Some(dependency_graph) = &self.dependency_graph
                                 && let Some((_, dependency_value)) =
@@ -1680,6 +1680,7 @@ impl ActionSource for DevelopmentActionSource {
                             .expect("XXX TODO");
 
                         // XXX TODO: Should throw error if the error isn't `NotFound`?
+                        // XXX TODO: Review if we actually want to support meta files - see also LoadPathFunction::apply.
                         let meta_bytes =
                             if let Ok(mut meta_reader) = reader.read_meta(path.path()).await {
                                 let mut meta_bytes = Vec::new();
@@ -1872,10 +1873,11 @@ pub trait ActionSource: Send + Sync + 'static {
         tracing::error!("dump_dependency_graph not implemented");
     }
 
-    // XXX TODO: This shouldn't be here - only one source can actually publish.
-    // Publishing kinda duplicates a lot of `DevelopmentActionSource`, so probably
-    // needs refactoring to pull out that duplication and make publishing its
-    // own action source?
+    // XXX TODO: This shouldn't be here - `DevelopmentActionSource` is the only
+    // source that can actually publish. Also don't like publishing being too
+    // bound to the source, although that may be necessary if it wants to fast-path
+    // by copying directly out of the cache. See if we can expose this in a
+    // different way and what can be factored out.
     fn publish<'a>(
         &'a self,
         _input: PublishInput,
@@ -2175,26 +2177,28 @@ pub mod action {
 
             let full_path = AssetPath::from(action.path.clone());
 
-            let (mut meta, loader, mut reader) = asset_server
+            let (meta, loader, mut reader) = asset_server
                 .get_meta_loader_and_reader(&full_path, None)
                 .await?;
 
-            // XXX TODO: If we didn't override the settings then we're now dependent
-            // on the meta's settings. These aren't currently expressed in the dependency
-            // key or dependency graph. Decide if we make this happen or drop support
-            // for metas.
-            if let Some(override_settings) = &action.loader_settings {
-                meta = loader
-                    .meta_from_settings(override_settings.as_bytes())
+            let settings_box;
+            let settings = if let Some(override_settings) = &action.loader_settings {
+                settings_box = loader
+                    .deserialize_settings(override_settings.as_bytes())
                     .map_err(|err| AssetLoadError::DeserializeMeta {
                         path: action.path.clone().into(),
                         error: err.into(),
                     })?;
-            }
 
-            let settings = meta
-                .loader_settings()
-                .expect("XXX TODO: Sensible error message. We only support AssetAction::Load.");
+                &*settings_box
+            } else {
+                // XXX TODO: If we didn't override the settings then we're now dependent
+                // on the meta's settings. These aren't currently expressed in the dependency
+                // key or dependency graph. Decide if we make this happen or drop support
+                // for metas.
+                meta.loader_settings()
+                    .expect("XXX TODO: Sensible error message. We only support AssetAction::Load.")
+            };
 
             // XXX TODO: Avoid clone?
             let file_dependency = LoaderDependency::File(action.path.clone());

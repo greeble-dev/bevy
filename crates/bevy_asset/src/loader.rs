@@ -2,13 +2,20 @@ use crate::{
     basset::{cache::DependencyCacheKey, DependencyLoading, RootAssetPath, RootAssetRef},
     io::{AssetReaderError, MissingAssetSourceError, MissingProcessedAssetReaderError, Reader},
     loader_builders::NestedLoadBuilder,
-    meta::{AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfo, ProcessedInfoMinimal, Settings},
+    meta::{
+        AssetHash, AssetMeta, AssetMetaDyn, ProcessedInfo, ProcessedInfoMinimal, Settings,
+        SettingsDowncastRef,
+    },
     path::AssetPath,
     Asset, AssetDependency, AssetIndex, AssetLoadError, AssetRef, AssetServer, AssetServerMode,
     Assets, ErasedAssetIndex, Handle, ReflectAsset, UntypedAssetId, UntypedHandle,
     VisitAssetDependencies,
 };
-use alloc::{boxed::Box, string::ToString, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec::Vec,
+};
 use atomicow::CowArc;
 use bevy_ecs::{error::BevyError, world::World};
 use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
@@ -81,12 +88,19 @@ pub trait ErasedAssetLoader: Send + Sync + 'static {
     /// XXX TODO: Document.
     // XXX TODO: We changed this to `Option`. Review where it's used to double check everything's ok.
     fn asset_type_id(&self) -> Option<TypeId>;
-    /// XXX TODO: Document, and review if needed. Could technically implement
-    /// in terms of `deserialize_meta`, although that's a bit hacky.
-    fn meta_from_settings(
+    /// XXX TODO: Document, and review if needed.
+    fn deserialize_settings(
         &self,
         settings: &[u8],
-    ) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError>;
+    ) -> Result<Box<dyn Settings>, DeserializeMetaError>;
+    /// XXX TODO: Document, and review if needed.
+    ///
+    /// XXX TODO: Odd that this returns `String` when others return [u8], but that
+    /// makes assigning to `StandaloneAssetHeader` easier. Maybe the others should
+    /// be `String` as well? It's easier to go from `String` to `[u8]` than the reverse.
+    fn serialize_settings(&self, settings: &dyn Settings) -> String;
+    /// XXX TODO: Document, and review if needed.
+    fn serialize_meta_from_serialized_settings(&self, settings: &[u8]) -> Vec<u8>;
 }
 
 pub(crate) struct ErasedUniAssetLoader<L: AssetLoader>(pub(crate) L);
@@ -144,16 +158,25 @@ impl<L: AssetLoader> ErasedAssetLoader for ErasedUniAssetLoader<L> {
         Some(TypeId::of::<L::Asset>())
     }
 
-    fn meta_from_settings(
+    fn deserialize_settings(
         &self,
         settings: &[u8],
-    ) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
-        Ok(Box::new(AssetMeta::<L::Settings, ()>::new(
+    ) -> Result<Box<dyn Settings>, DeserializeMetaError> {
+        Ok(Box::new(ron::de::from_bytes::<L::Settings>(settings)?))
+    }
+
+    fn serialize_settings(&self, settings: &dyn Settings) -> String {
+        ron::ser::to_string(settings.downcast_ref::<L::Settings>().expect("XXX TODO"))
+            .expect("XXX TODO")
+    }
+
+    fn serialize_meta_from_serialized_settings(&self, settings: &[u8]) -> Vec<u8> {
+        AssetMetaDyn::serialize(&AssetMeta::<L::Settings, ()>::new(
             crate::meta::AssetAction::Load {
                 loader: self.type_path().to_string(),
-                settings: ron::de::from_bytes(settings)?,
+                settings: ron::de::from_bytes::<L::Settings>(settings).expect("XXX TODO"),
             },
-        )))
+        ))
     }
 }
 
@@ -236,16 +259,25 @@ where
         None
     }
 
-    fn meta_from_settings(
+    fn deserialize_settings(
         &self,
         settings: &[u8],
-    ) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {
-        Ok(Box::new(AssetMeta::<L::Settings, ()>::new(
+    ) -> Result<Box<dyn Settings>, DeserializeMetaError> {
+        Ok(Box::new(ron::de::from_bytes::<L::Settings>(settings)?))
+    }
+
+    fn serialize_settings(&self, settings: &dyn Settings) -> String {
+        ron::ser::to_string(settings.downcast_ref::<L::Settings>().expect("XXX TODO"))
+            .expect("XXX TODO")
+    }
+
+    fn serialize_meta_from_serialized_settings(&self, settings: &[u8]) -> Vec<u8> {
+        AssetMetaDyn::serialize(&AssetMeta::<L::Settings, ()>::new(
             crate::meta::AssetAction::Load {
                 loader: self.type_path().to_string(),
-                settings: ron::de::from_bytes(settings)?,
+                settings: ron::de::from_bytes::<L::Settings>(settings).expect("XXX TODO"),
             },
-        )))
+        ))
     }
 }
 

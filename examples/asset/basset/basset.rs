@@ -53,9 +53,8 @@ mod action {
     use core::ops::Mul;
     // XXX TODO: Should be in `use bevy` above?
     use bevy_asset::{
-        basset::standalone::StandaloneAssetData,
+        basset::standalone::{StandaloneAssetData, StandaloneAssetHeader},
         io::VecReader,
-        meta::{AssetAction, AssetMeta, AssetMetaDyn},
         RenderAssetUsages,
     };
     use bevy_image::CompressedImageSaverSettings;
@@ -341,12 +340,16 @@ mod action {
                 uncompressed_asset
             };
 
+            // XXX TODO: Review everything below to see what can be factored out.
+            // Can probably have `ApplyContext` do most of the work if we pass
+            // in the appropriate saver and `SavedAsset`?
+
             let loader_type_name =
                 core::any::type_name::<<CompressedImageSaver as AssetSaver>::OutputLoader>();
 
             let mut asset_bytes = Vec::<u8>::new();
 
-            let settings = <CompressedImageSaver as AssetSaver>::save(
+            let loader_settings = <CompressedImageSaver as AssetSaver>::save(
                 &CompressedImageSaver::default(),
                 &mut asset_bytes,
                 SavedAsset::from_asset(&resized_asset),
@@ -355,23 +358,17 @@ mod action {
             )
             .await?;
 
-            let asset = context
+            let (asset, loader) = context
                 .load_from_reader(
                     &mut VecReader::new(asset_bytes.clone()),
                     loader_type_name,
-                    &settings,
+                    &loader_settings,
                 )
                 .await?;
 
-            let meta = AssetMeta::<
-                <<CompressedImageSaver as AssetSaver>::OutputLoader as AssetLoader>::Settings,
-                (),
-            >::new(AssetAction::Load {
-                loader: loader_type_name.into(),
-                settings,
-            });
+            let header = StandaloneAssetHeader::new(&*loader, &loader_settings);
 
-            let meta_bytes = AssetMetaDyn::serialize(&meta);
+            let header_bytes = ron::ser::to_string(&header).expect("XXX TODO").into_bytes();
 
             // XXX TODO: Verify we're correctly handling dependencies. Currently
             // `finished_erased_saved` overwrites the loader dependencies we
@@ -379,8 +376,8 @@ mod action {
             Ok(context.finish_erased_saved(
                 asset,
                 StandaloneAssetData {
+                    header: header_bytes,
                     asset: asset_bytes,
-                    meta: meta_bytes,
                 },
             ))
         }
@@ -1534,13 +1531,17 @@ fn main() {
         ],
         bsns: vec![
             Box::new(bsn! {
-                Mesh3d(action::MeshFromHeightmap::new(
-                    action::ResizeImage { image: "heightmaps/Heightmap_08_Island_512.png".into(), scale: 0.5 }
+                Mesh3d(
+                    action::MeshFromHeightmap::new(
+                        action::ResizeImage { image: "heightmaps/Heightmap_08_Island_512.png".into(), scale: 0.5 }
+
                 ))
                 template(|context| {
                     let s = context.resource::<AssetServer>();
                     Ok(MeshMaterial3d::<StandardMaterial>(s.add(StandardMaterial {
-                        base_color_texture: Some(s.load(action::CompressImage::new(action::ColorizeHeightmap::new("heightmaps/Heightmap_08_Island_512.png")))),
+                        base_color_texture: Some(s.load(action::CompressImage::new(
+                            action::ColorizeHeightmap::new("heightmaps/Heightmap_08_Island_512.png")
+                        ))),
                         perceptual_roughness: 0.9,
                         ..Default::default()
                     })))
