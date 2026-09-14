@@ -43,8 +43,8 @@ pub struct ReflectAsset {
     /// type-erase the asset.
     finish_load_context: for<'a> fn(
         LoadContext<'a>,
-        Box<dyn Reflect>,
-    ) -> Result<ErasedLoadedAsset, Box<dyn Reflect>>,
+        Box<dyn PartialReflect>,
+    ) -> Result<ErasedLoadedAsset, Box<dyn PartialReflect>>,
 }
 
 impl ReflectAsset {
@@ -156,8 +156,8 @@ impl ReflectAsset {
     pub fn finish_load_context(
         &self,
         load_context: LoadContext<'_>,
-        asset: Box<dyn Reflect>,
-    ) -> Result<ErasedLoadedAsset, Box<dyn Reflect>> {
+        asset: Box<dyn PartialReflect>,
+    ) -> Result<ErasedLoadedAsset, Box<dyn PartialReflect>> {
         (self.finish_load_context)(load_context, asset)
     }
 
@@ -221,8 +221,8 @@ impl<A: Asset + FromReflect> CreateTypeData<A> for ReflectAsset {
                 value.map(|value| Box::new(value) as Box<dyn Reflect>)
             },
             finish_load_context: |load_context, asset| {
-                let asset = asset.downcast()?;
-                let loaded_asset = load_context.finish::<A>(*asset);
+                let asset = asset.try_take::<A>()?;
+                let loaded_asset = load_context.finish::<A>(asset);
                 Ok(ErasedLoadedAsset::from(loaded_asset))
             },
         }

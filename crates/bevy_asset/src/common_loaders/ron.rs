@@ -9,7 +9,7 @@ use ron::ser::PrettyConfig;
 
 use bevy_reflect::{
     serde::{ReflectDeserializer, ReflectSerializer},
-    Reflect, ReflectFromPtr, ReflectFromReflect, TypePath, TypeRegistryArc,
+    Reflect, ReflectFromPtr, TypePath, TypeRegistryArc,
 };
 use serde::{
     de::{DeserializeOwned, DeserializeSeed},
@@ -136,20 +136,6 @@ impl AssetLoader for RonLoader {
                 asset_type_info.type_path(),
             ));
         };
-        let Some(reflect_from_reflect) = type_registration.data::<ReflectFromReflect>() else {
-            return Err(ReflectedRonDeserializeError::MissingReflectFromReflect(
-                asset_type_info.type_path(),
-            ));
-        };
-
-        // Unwrap is ok because `ReflectDeserializer` deserialized this type from its type data,
-        // and we are using the ReflectFromReflect registered for this type. Strictly speaking,
-        // someone could write a bad FromReflect implementation, but we won't handle that case here.
-        // In theory, someone could also insert ReflectFromReflect for type A into the registration
-        // of type B. That would be malicious though.
-        let reflected_asset = reflect_from_reflect
-            .from_reflect(&*reflected_asset)
-            .unwrap();
 
         // Unwrap is ok because `finish_load_context` only fails if the Box<dyn Reflect> holds the
         // wrong type. This is only possible if someone creates ReflectAsset for type A and inserts
