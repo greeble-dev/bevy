@@ -101,6 +101,11 @@ notify-debouncer-full = { version = "0.7.0", default-features = false, optional 
 ureq = { version = "3", optional = true, default-features = false }
 blocking = { version = "1.6", optional = true }
 
+# XXX TODO: Review dependencies. Added for compressed pack files. Also review
+# features - `bevy_pbr` disables default features, which means it doesn't use
+# the safe rust path.
+lz4_flex = { version = "0.13" }
+
 [lints]
 workspace = true
 

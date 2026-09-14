@@ -1490,6 +1490,8 @@ impl ActionSource for DevelopmentActionSource {
         &'a self,
         input: PublishInput,
         asset_server: &'a AssetServer,
+        // XXX TODO: The pack file path will need a rethink at some point. Unclear
+        // where the logic will be once we start looking at multiple pack files.
         pack_path: &'a Path,
     ) -> Option<BoxedFuture<'a, Result<(), BevyError>>> {
         Some(Box::pin(async move {

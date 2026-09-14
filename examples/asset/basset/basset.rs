@@ -1574,6 +1574,7 @@ fn main() {
         .deref()
         .clone();
 
+    // XXX TODO: Consider `.bpack` as a more precise extension.
     let pack_file_path = PathBuf::from("target/basset/published.pack");
 
     let asset_plugin = if args.mode == ArgMode::Published {

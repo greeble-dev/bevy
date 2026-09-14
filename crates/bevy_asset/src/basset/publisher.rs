@@ -8,7 +8,7 @@ use crate::{
     },
     io::{
         AssetReader, AssetReaderError, AssetSourceBuilder, AssetSourceId, PathStream, Reader,
-        SliceReader,
+        VecReader,
     },
     AssetPath, AssetRef, AssetServer, LoaderDependency,
 };
@@ -59,6 +59,9 @@ pub(crate) struct StagedAsset {
     pub(crate) asset_bytes: Box<[u8]>,
 }
 
+// XXX TODO: Consider avoiding serde/RON and deserializing from a custom format?
+// Could also get fancy by loading the entire blob and building hashmaps that
+// reference strings in the blob.
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(crate) struct ReadableManifest {
     pub(crate) paths: HashMap<RootAssetPath<'static>, AssetPackLocation>,
@@ -81,7 +84,8 @@ impl ReadableManifest {
 #[derive(Copy, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct PackLocation {
     pub(crate) offset: usize,
-    pub(crate) length: usize,
+    pub(crate) uncompressed_length: usize,
+    pub(crate) compressed_length: Option<usize>,
 }
 
 #[derive(Copy, Clone, Default, Serialize, Deserialize)]
@@ -141,14 +145,27 @@ const PACK_VERSION: u16 = 1;
 pub(crate) struct ReadableStorage(pub(crate) Box<[u8]>);
 
 impl<'a> ReadableStorage {
-    fn read(&'a self, location: PackLocation) -> Result<SliceReader<'a>, AssetReaderError> {
+    fn read(&'a self, location: PackLocation) -> Result<VecReader, AssetReaderError> {
         // XXX TODO: Bounds checking.
-
-        Ok(SliceReader::new(
-            // XXX TODO: Surprised that there isn't a helper function for this
-            // kind of sub-slicing? Maybe didn't spot it.
-            &(*self.0)[location.offset..][..location.length],
-        ))
+        if let Some(compressed_length) = location.compressed_length {
+            Ok(VecReader::new(
+                lz4_flex::decompress(
+                    // XXX TODO: Surprised that there isn't a helper function for this
+                    // kind of sub-slicing? Maybe didn't spot it.
+                    &(*self.0)[location.offset..][..compressed_length],
+                    location.uncompressed_length,
+                )
+                .expect("XXX TODO"),
+            ))
+        } else {
+            // XXX TODO: We could have used `SliceReader` here. But eventually
+            // this will all get replaced with reading from the file directly,
+            // in which case we'll be back to `VecReader` again or a streaming
+            // decompress reader.
+            Ok(VecReader::new(
+                (*self.0)[location.offset..][..location.uncompressed_length].to_vec(),
+            ))
+        }
     }
 }
 
@@ -158,9 +175,9 @@ pub struct ReadablePackFile {
     pub(crate) storage: ReadableStorage,
 }
 
-pub(crate) struct MetaAndAssetReader<'a> {
-    pub(crate) meta: Option<SliceReader<'a>>,
-    pub(crate) asset: SliceReader<'a>,
+pub(crate) struct MetaAndAssetReader {
+    pub(crate) meta: Option<VecReader>,
+    pub(crate) asset: VecReader,
 }
 
 impl<'a> ReadablePackFile {
@@ -168,7 +185,7 @@ impl<'a> ReadablePackFile {
         &'a self,
         source: &AssetSourceId,
         path: &Path,
-    ) -> Result<SliceReader<'a>, AssetReaderError> {
+    ) -> Result<VecReader, AssetReaderError> {
         debug!("Read file meta: {path:?}");
 
         let location = self
@@ -190,7 +207,7 @@ impl<'a> ReadablePackFile {
         &'a self,
         source: &AssetSourceId,
         path: &Path,
-    ) -> Result<SliceReader<'a>, AssetReaderError> {
+    ) -> Result<VecReader, AssetReaderError> {
         debug!("Read file asset: {path:?}");
 
         let location = self
@@ -201,10 +218,7 @@ impl<'a> ReadablePackFile {
         self.storage.read(location.asset)
     }
 
-    pub(crate) fn action(
-        &'a self,
-        action: &str,
-    ) -> Result<MetaAndAssetReader<'a>, AssetReaderError> {
+    pub(crate) fn action(&'a self, action: &str) -> Result<MetaAndAssetReader, AssetReaderError> {
         debug!("Read action: {action:?}");
 
         let location = self
@@ -231,7 +245,7 @@ pub async fn read_pack_file(path: &Path) -> ReadablePackFile {
         .await
         .expect("XXX TODO");
 
-    // XXX TODO: Avoid full load? Need `BlobReader` or an alternative to support
+    // XXX TODO: Avoid full load. Need `BlobReader` or an alternative to support
     // reading from `Read`.
     let mut bytes = Vec::<u8>::new();
     AsyncReadExt::read_to_end(&mut file, &mut bytes)
@@ -249,6 +263,9 @@ pub async fn read_pack_file(path: &Path) -> ReadablePackFile {
 
     // XXX TODO: Error handling.
     assert_eq!(version, PACK_VERSION);
+
+    // XXX TODO: Maybe add the compression format here. Not sure if we're actually
+    // gonna benefit for specifying the format per-file, but it would be safer.
 
     let manifest_bytes = blob.bytes_sized().expect("XXX TODO");
     let storage_bytes = blob.bytes_sized().expect("XXX TODO");
@@ -287,25 +304,65 @@ impl StorageBuilder {
 
             Some(PackLocation {
                 offset: meta_offset,
-                length: meta_bytes.len(),
+                uncompressed_length: meta_bytes.len(),
+                compressed_length: None,
             })
         } else {
             None
         };
 
         let asset_offset = self.length;
-        self.length += asset.asset_bytes.len();
 
-        let asset_location = PackLocation {
-            offset: asset_offset,
-            length: asset.asset_bytes.len(),
-        };
+        // XXX TODO: Maybe add a heuristic for small assets. Unlikely to be
+        // worth compressing something if it's small, although I'm not sure what
+        // the threshold would be.
+        //
+        // XXX TODO: Also consider a heuristic if the compressed size is only
+        // slightly smaller?
+        //
+        // XXX TODO: Add option to disable compression.
+        //
+        // XXX TODO: What happens if we compress values in the action cache?
+        // Might be able to fast path straight from the cache into the pack file.
+        // But have to consider the trade-offs if it turns out to make development
+        // mode slower.
 
-        self.files.push(asset);
+        let compressed_asset_bytes = lz4_flex::compress(&asset.asset_bytes);
 
-        AssetPackLocation {
-            meta: meta_location,
-            asset: asset_location,
+        // XXX TODO: Refactor to avoid duplication?
+        if compressed_asset_bytes.len() < asset.asset_bytes.len() {
+            self.length += compressed_asset_bytes.len();
+
+            let asset_location = PackLocation {
+                offset: asset_offset,
+                uncompressed_length: asset.asset_bytes.len(),
+                compressed_length: Some(compressed_asset_bytes.len()),
+            };
+
+            self.files.push(StagedAsset {
+                meta_bytes: asset.meta_bytes,
+                asset_bytes: compressed_asset_bytes.into_boxed_slice(),
+            });
+
+            AssetPackLocation {
+                meta: meta_location,
+                asset: asset_location,
+            }
+        } else {
+            self.length += asset.asset_bytes.len();
+
+            let asset_location = PackLocation {
+                offset: asset_offset,
+                compressed_length: None,
+                uncompressed_length: asset.asset_bytes.len(),
+            };
+
+            self.files.push(asset);
+
+            AssetPackLocation {
+                meta: meta_location,
+                asset: asset_location,
+            }
         }
     }
 
