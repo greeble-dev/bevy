@@ -1479,7 +1479,7 @@ impl ActionSource for DevelopmentActionSource {
         })
     }
 
-    // XXX TODO: Less hacky debugging.
+    // XXX TODO: Less hacky debugging
     fn dump_dependency_graph(&self) {
         self.dependency_graph
             .as_ref()
@@ -1556,8 +1556,11 @@ impl ActionSource for DevelopmentActionSource {
                                 && let Some(cached_standalone_asset) =
                                     action_cache.get(&action_key, action).await
                             {
-                                for dependency in dependency_value.external_dependees() {
-                                    input_stack.push(PublishDependency::Load(dependency.clone()));
+                                if let Some(dependency_value) = dependency_value {
+                                    for dependency in dependency_value.external_dependees() {
+                                        input_stack
+                                            .push(PublishDependency::Load(dependency.clone()));
+                                    }
                                 }
 
                                 standalone_asset = read_standalone_asset(&cached_standalone_asset)?;
@@ -1627,12 +1630,15 @@ impl ActionSource for DevelopmentActionSource {
                                 && let Some((_, dependency_value)) =
                                     dependency_graph.action_key(action, None, &self.env).await
                             {
-                                for dependency in dependency_value.loader_dependees() {
-                                    input_stack.push(dependency.0.clone().into());
-                                }
+                                if let Some(dependency_value) = dependency_value {
+                                    for dependency in dependency_value.loader_dependees() {
+                                        input_stack.push(dependency.0.clone().into());
+                                    }
 
-                                for dependency in dependency_value.external_dependees() {
-                                    input_stack.push(PublishDependency::Load(dependency.clone()));
+                                    for dependency in dependency_value.external_dependees() {
+                                        input_stack
+                                            .push(PublishDependency::Load(dependency.clone()));
+                                    }
                                 }
                             } else {
                                 let (loaded, _) = self

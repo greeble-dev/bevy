@@ -27,26 +27,32 @@ use std::{
 };
 use tracing::warn;
 
-#[derive(Debug)]
-enum InternalGraphNode {
-    Valid(ActionCacheKey, DependencyCacheKey),
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct KnownAssetState {
+    node_index: NodeIndex,
+    action_key: ActionCacheKey,
+    dependency_key: DependencyCacheKey,
+    dependency_value: Option<Arc<DependencyCacheValue>>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum AssetState {
     Unknown,
+    Known(KnownAssetState),
 }
 
 #[derive(Default)]
 struct InternalGraph {
-    graph: Acyclic<StableDiGraph<InternalGraphNode, ()>>,
-    action_to_node: HashMap<RootAssetRef, (NodeIndex, Arc<DependencyCacheValue>)>,
-    file_to_node: HashMap<RootAssetPath<'static>, NodeIndex>,
+    graph: Acyclic<StableDiGraph<LoaderDependency, ()>>,
+    action_to_state: HashMap<RootAssetRef, AssetState>,
+    file_to_state: HashMap<RootAssetPath<'static>, AssetState>,
 }
 
 impl InternalGraph {
-    fn get_node_id(&self, dependency: &LoaderDependency) -> Option<NodeIndex> {
+    fn get_asset_state(&self, dependency: &LoaderDependency) -> Option<AssetState> {
         match dependency {
-            LoaderDependency::Action(action) => {
-                self.action_to_node.get(action).map(|(node_id, _)| *node_id)
-            }
-            LoaderDependency::File(file) => self.file_to_node.get(file).copied(),
+            LoaderDependency::Action(action) => self.action_to_state.get(action).cloned(),
+            LoaderDependency::File(file) => self.file_to_state.get(file).cloned(),
         }
     }
 
@@ -56,27 +62,18 @@ impl InternalGraph {
         dependency_key: DependencyCacheKey,
         dependency_value: Arc<DependencyCacheValue>,
     ) -> Option<ActionCacheKey> {
-        // XXX TODO: Validate the existing entry? Or is it an error to set twice?
-        // XXX TODO: Try to optimize this by reusing the entry?
-        // XXX TODO: Avoid clone?
-        if let Some(existing_node_id) = self.action_to_node.get(&path).map(|(node_id, _)| *node_id)
+        // XXX TODO: Review for correctness. We want an early out here because
+        // uncached actions like `LoadPath` will be applied multiple times even
+        // if they don't change.
+        if let Some(AssetState::Known(existing_state)) = self.action_to_state.get(&path)
+            && (existing_state.dependency_key == dependency_key)
         {
-            return match self
-                .graph
-                .node_weight(existing_node_id)
-                .expect("Graph node should always exist XXX TODO: Document?")
-            {
-                InternalGraphNode::Valid(existing_action_key, existing_dependency_key) => {
-                    // XXX TODO: This can happen if we fail to invalidate on file
-                    // changes. Do we need to make that robust or handle it gracefully
-                    // here?
-                    assert_eq!(*existing_dependency_key, dependency_key);
-
-                    Some(*existing_action_key)
-                }
-                InternalGraphNode::Unknown => None,
-            };
+            return Some(existing_state.action_key);
         }
+
+        // XXX TODO: Optimize? This repeats the state lookup we just did. Or merge into
+        // one `invalidate_file_if_different` function.
+        self.invalidate_action(&path);
 
         // Gather the node id and action key of each dependee, returning `None`
         // if any are absent or unknown.
@@ -88,33 +85,28 @@ impl InternalGraph {
         let resolved = dependency_value
             .loader_dependees()
             .iter()
-            .map(|CacheLoaderDependency(dependee, dependee_key)| {
-                if let Some(dependee_node_id) = self.get_node_id(dependee) {
-                    let dependee_node = self
-                        .graph
-                        .node_weight(dependee_node_id)
-                        .expect("Graph node should always exist XXX TODO: Document?");
-
-                    match dependee_node {
-                        InternalGraphNode::Valid(action_key, existing_dependee_key) => {
+            .map(|CacheLoaderDependency(dependee, dependee_dependency_key)| {
+                if let Some(dependee_state) = self.get_asset_state(dependee) {
+                    match dependee_state {
+                        AssetState::Known(dependee_state) => {
                             // XXX TODO: Should go behind validation flag?
-                            assert_eq!(dependee_key, existing_dependee_key);
-                            Some((dependee_node_id, *action_key))
+                            assert_eq!(*dependee_dependency_key, dependee_state.dependency_key);
+                            Some((dependee_state.node_index, dependee_state.action_key))
                         }
-                        InternalGraphNode::Unknown => None,
+                        AssetState::Unknown => None,
                     }
                 }
                 else {
                     // XXX TODO: Change to error? Or make logging opt-in.
-                    warn!(?dependee, %dependee_key, "Failed to find graph node - were dependencies not registered for this asset?");
+                    warn!(?dependee, %dependee_dependency_key, "Failed to find state - were dependencies not registered for this asset?");
                     None
                 }
             })
             .collect::<Option<Vec<(NodeIndex, ActionCacheKey)>>>();
 
-        let (node_id, action_key) = if let Some(resolved) = resolved {
-            // We found valid nodes for all dependees, so we're valid. Create our
-            // node and link it to the dependees.
+        if let Some(resolved) = resolved {
+            // We found nodes for all dependees. Create our node and link it to
+            // the dependees.
 
             let action_key = ActionCacheKey::new(
                 dependency_key,
@@ -125,9 +117,7 @@ impl InternalGraph {
                     .as_slice(),
             );
 
-            let node_id = self
-                .graph
-                .add_node(InternalGraphNode::Valid(action_key, dependency_key));
+            let node_id = self.graph.add_node(LoaderDependency::Action(path.clone()));
 
             for (dependee_node_id, _) in resolved.iter() {
                 self.graph
@@ -135,19 +125,25 @@ impl InternalGraph {
                     .expect("Oops, cycle. XXX TODO");
             }
 
-            (node_id, Some(action_key))
+            self.action_to_state.insert(
+                path,
+                AssetState::Known(KnownAssetState {
+                    node_index: node_id,
+                    action_key,
+                    dependency_key,
+                    dependency_value: Some(dependency_value),
+                }),
+            );
+
+            Some(action_key)
         } else {
-            // At least one dependency was not in the graph, so we're unknown.
+            // At least one dependency was not in the graph, so we remain unknown.
+            // Our state should have been set to unknown by the call to invalidate
+            // near the top.
+            assert_eq!(self.action_to_state.get(&path), Some(&AssetState::Unknown));
 
-            let node_id = self.graph.add_node(InternalGraphNode::Unknown);
-
-            (node_id, None)
-        };
-
-        self.action_to_node
-            .insert(path, (node_id, dependency_value));
-
-        action_key
+            None
+        }
     }
 
     // XXX TODO: Document and reconsider name. Corresponds to `LoaderDependency::File`.
@@ -157,87 +153,115 @@ impl InternalGraph {
         path: RootAssetPath<'static>,
         dependency_key: DependencyCacheKey,
     ) -> Option<ActionCacheKey> {
-        // XXX TODO: Validate the existing entry? Or is it an error to set twice?
-        // XXX TODO: Try to optimize this by reusing the entry?
-        // XXX TODO: Avoid clone?
-        if let Some(existing_node_id) = self.file_to_node.get(&path).copied() {
-            return match self
-                .graph
-                .node_weight(existing_node_id)
-                .expect("Graph node should always exist XXX TODO: Document?")
-            {
-                InternalGraphNode::Valid(existing_action_key, existing_dependency_key) => {
-                    // XXX TODO: This can happen if we fail to invalidate on file
-                    // changes. Do we need to make that robust or handle it gracefully
-                    // here?
-                    assert_eq!(*existing_dependency_key, dependency_key);
-
-                    Some(*existing_action_key)
-                }
-                InternalGraphNode::Unknown => None,
-            };
+        if let Some(AssetState::Known(existing_state)) = self.file_to_state.get(&path)
+            && (existing_state.dependency_key == dependency_key)
+        {
+            return Some(existing_state.action_key);
         }
+
+        // XXX TODO: Optimize? This repeats the state lookup we just did. Or merge into
+        // one `invalidate_file_if_different` function.
+        self.invalidate_file(&path);
 
         let action_key = ActionCacheKey::new(dependency_key, &[]);
 
-        let node_id = self
-            .graph
-            .add_node(InternalGraphNode::Valid(action_key, dependency_key));
+        let node_id = self.graph.add_node(LoaderDependency::File(path.clone()));
 
-        self.file_to_node.insert(path, node_id);
+        self.file_to_state.insert(
+            path,
+            AssetState::Known(KnownAssetState {
+                node_index: node_id,
+                action_key,
+                dependency_key,
+                dependency_value: None,
+            }),
+        );
 
         Some(action_key)
     }
 
-    fn get(&self, path: &RootAssetRef) -> Option<(ActionCacheKey, Arc<DependencyCacheValue>)> {
-        self.action_to_node
+    fn get_action(
+        &self,
+        path: &RootAssetRef,
+    ) -> Option<(ActionCacheKey, Option<Arc<DependencyCacheValue>>)> {
+        self.action_to_state
             .get(path)
-            .and_then(|(node_id, dependency_value)| {
-                match self.graph.node_weight(*node_id).expect("XXX TODO") {
-                    InternalGraphNode::Valid(action_key, _) => {
-                        Some((*action_key, dependency_value.clone()))
-                    }
-                    InternalGraphNode::Unknown => None,
+            .and_then(|state| match state {
+                AssetState::Known(known) => {
+                    Some((known.action_key, known.dependency_value.clone()))
                 }
+                AssetState::Unknown => None,
             })
     }
 
     fn contains(&self, path: &LoaderDependency) -> bool {
         match path {
-            LoaderDependency::Action(action) => self.action_to_node.contains_key(action),
-            LoaderDependency::File(file) => self.file_to_node.contains_key(file),
+            LoaderDependency::Action(action) => self.action_to_state.contains_key(action),
+            LoaderDependency::File(file) => self.file_to_state.contains_key(file),
         }
     }
 
-    fn invalidate(&mut self, path: &LoaderDependency) {
-        if let Some(initial_node_index) = self.get_node_id(path) {
-            let mut stack = vec![initial_node_index];
+    fn invalidate_action(&mut self, path: &RootAssetRef) {
+        // XXX TODO: There's a couple of minor optimizations to make here although
+        // they might not be worth the complexity. Firstly, if the action has
+        // no dependencies then we could set it straight to `Unknown` and skip
+        // the graph searching. Secondly, We can avoid looking up the initial action
+        // twice - once to get the initial node index near the top, and one to set it#
+        // to `Unknown` near the bottom.
+        let Some(initial_node_index) =
+            self.action_to_state
+                .get(path)
+                .and_then(|state| match state {
+                    AssetState::Known(state) => Some(state.node_index),
+                    _ => None,
+                })
+        else {
+            return;
+        };
 
-            while let Some(node_index) = stack.pop() {
-                stack.extend(
-                    self.graph
-                        .edges_directed(node_index, Direction::Incoming)
-                        .map(|edge| edge.source()),
-                );
-                self.graph.remove_node(node_index);
+        let mut stack = vec![initial_node_index];
+        let mut cursor = 0;
+
+        while let Some(node_index) = stack.get(cursor) {
+            cursor += 1;
+
+            stack.extend(
+                self.graph
+                    .edges_directed(*node_index, Direction::Incoming)
+                    .map(|edge| edge.source()),
+            );
+        }
+
+        // XXX TODO: Check if there's a more efficient way to bulk remove.
+        for node_index in stack.into_iter() {
+            let path = self.graph.remove_node(node_index).expect("XXX TODO");
+
+            match path {
+                LoaderDependency::Action(action) => {
+                    *self.action_to_state.get_mut(&action).expect("XXX TODO") = AssetState::Unknown;
+                }
+                LoaderDependency::File(file) => {
+                    *self.file_to_state.get_mut(&file).expect("XXX TODO") = AssetState::Unknown;
+                }
             }
+        }
+    }
+
+    fn invalidate_file(&mut self, path: &RootAssetPath<'static>) {
+        if let Some(state) = self.file_to_state.get_mut(path)
+            && let AssetState::Known(known_state) = state
+        {
+            self.graph
+                .remove_node(known_state.node_index)
+                .expect("XXX TODO");
+
+            *state = AssetState::Unknown;
         }
     }
 }
 
 impl Debug for InternalGraph {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let node_to_path: HashMap<NodeIndex, LoaderDependency> = HashMap::from_iter(
-            self.action_to_node
-                .iter()
-                .map(|(path, (node, _))| (*node, LoaderDependency::Action(path.clone())))
-                .chain(
-                    self.file_to_node
-                        .iter()
-                        .map(|(path, node)| (*node, LoaderDependency::File(path.clone()))),
-                ),
-        );
-
         // XXX TODO: Maybe petgraph has this built-in somewhere?
         let root_nodes = self
             .graph
@@ -248,23 +272,20 @@ impl Debug for InternalGraph {
                     .next()
                     .is_none()
             })
-            .map(|n| node_to_path[&n].clone())
             .collect::<Vec<_>>();
 
         let mut stack = Vec::<(NodeIndex, usize)>::new();
 
-        for root_node_path in root_nodes.into_iter() {
-            // Unwrap is safe - the list of root nodes came from the same collection.
-            let root_node_id = self.get_node_id(&root_node_path).unwrap();
-
+        for root_node_index in root_nodes.into_iter() {
             // Skip spammy embedded assets. XXX TODO: Rethink at some point.
-            if let LoaderDependency::Action(path) = root_node_path
+            if let LoaderDependency::Action(path) =
+                self.graph.node_weight(root_node_index).expect("XXX TODO")
                 && path.to_string().contains("embedded://")
             {
                 continue;
             }
 
-            stack.push((root_node_id, 0));
+            stack.push((root_node_index, 0));
         }
 
         while let Some((node_id, depth)) = stack.pop() {
@@ -272,18 +293,17 @@ impl Debug for InternalGraph {
                 f.write_str("    ")?;
             }
 
+            let path = self.graph.node_weight(node_id).expect("XXX TODO");
+            let AssetState::Known(state) = self.get_asset_state(path).expect("XXX TODO") else {
+                unreachable!("XXX TODO");
+            };
+
             f.write_str("+-- ")?;
-
-            if let InternalGraphNode::Valid(action_key, dependency_key) = self.graph[node_id] {
-                Display::fmt(&action_key, f)?;
-                f.write_char('/')?;
-                Display::fmt(&dependency_key, f)?;
-                f.write_char(' ')?;
-            } else {
-                f.write_str("unknown/unknown ")?;
-            }
-
-            Debug::fmt(&node_to_path[&node_id], f)?;
+            Display::fmt(&state.action_key, f)?;
+            f.write_char('/')?;
+            Display::fmt(&state.dependency_key, f)?;
+            f.write_char(' ')?;
+            Debug::fmt(&self.graph.node_weight(node_id).expect("XXX TODO"), f)?;
 
             // XXX TODO: Platform specific newline?
             f.write_char('\n')?;
@@ -437,7 +457,7 @@ impl DependencyGraph {
         root_action: &RootAssetRef,
         root_dependency_key: Option<DependencyCacheKey>,
         env: &FullEnvironment,
-    ) -> Option<(ActionCacheKey, Arc<DependencyCacheValue>)> {
+    ) -> Option<(ActionCacheKey, Option<Arc<DependencyCacheValue>>)> {
         let Some(cache) = &self.dependency_cache else {
             return None;
         };
@@ -446,7 +466,7 @@ impl DependencyGraph {
             root_dependency_key.unwrap_or_else(|| self.action_dependency_key(root_action, env));
 
         // Early out if possible.
-        if let Some(existing) = self.graph().get(root_action) {
+        if let Some(existing) = self.graph().get_action(root_action) {
             return Some(existing);
         };
 
@@ -548,7 +568,7 @@ impl DependencyGraph {
                         graph.set_file(path, dependency_key);
                     }
                     None => {
-                        graph.invalidate(&LoaderDependency::File(path));
+                        graph.invalidate_file(&path);
                     }
                 };
             }
@@ -560,14 +580,14 @@ impl DependencyGraph {
                         graph.set_action(path, dependency_key, dependency_value.clone());
                     }
                     None => {
-                        graph.invalidate(&LoaderDependency::Action(path));
+                        graph.invalidate_action(&path);
                     }
                 };
             }
         }
 
         // XXX TODO: Avoid clone?
-        self.graph().get(root_action)
+        self.graph().get_action(root_action)
     }
 
     pub(crate) fn register_dependencies_load(
