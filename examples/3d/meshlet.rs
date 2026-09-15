@@ -3,11 +3,12 @@
 // Note: This example showcases the meshlet API, but is not the type of scene that would benefit from using meshlets.
 
 use bevy::{
+    asset::RenderAssetUsages,
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap},
     pbr::experimental::meshlet::{MeshletMesh3d, MeshletPlugin},
     prelude::*,
-    render::render_resource::AsBindGroup,
+    render::render_resource::{AsBindGroup, Extent3d, TextureDimension, TextureFormat},
 };
 use std::f32::consts::PI;
 
@@ -36,6 +37,7 @@ fn setup(
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     mut debug_materials: ResMut<Assets<MeshletDebugMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     commands.spawn((
         Camera3d::default(),
@@ -106,6 +108,19 @@ fn setup(
         ));
     }
 
+    let mipmap_material = mipmap_material(&mut standard_materials, &mut images);
+
+    for x in -2..=2 {
+        commands.spawn((
+            MeshletMesh3d(meshlet_mesh_handle.clone()),
+            MeshMaterial3d(mipmap_material.clone()),
+            Transform::default()
+                .with_scale(Vec3::splat(0.2))
+                .with_rotation(Quat::from_rotation_y(PI))
+                .with_translation(Vec3::new(x as f32 / 2.0, 0.0, -0.9)),
+        ));
+    }
+
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(5.0, 5.0))),
         MeshMaterial3d(standard_materials.add(StandardMaterial {
@@ -130,3 +145,65 @@ struct MeshletDebugMaterial {
 }
 
 impl Material for MeshletDebugMaterial {}
+
+fn checkerboard(size: usize, color: Srgba) -> Vec<u8> {
+    let color = color.to_u8_array();
+    let black = Srgba::BLACK.to_u8_array();
+    let d = size.ilog2().saturating_sub(4);
+
+    (0..(size * size))
+        .into_iter()
+        .flat_map(|i| {
+            let x = i.rem_euclid(size) >> d;
+            let y = (i / size) >> d;
+            if ((x + y) & 1) == 0 {
+                color
+            } else {
+                black
+            }
+        })
+        .collect()
+}
+
+fn mipmap_material(
+    standard_materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+) -> Handle<StandardMaterial> {
+    let mip_colors = [
+        Srgba::rgb(1.0, 0.0, 0.0),
+        Srgba::rgb(0.0, 1.0, 0.0),
+        Srgba::rgb(0.0, 0.0, 1.0),
+        Srgba::rgb(1.0, 1.0, 0.0),
+        Srgba::rgb(0.0, 1.0, 1.0),
+        Srgba::rgb(1.0, 0.0, 1.0),
+    ];
+
+    let size = 1024;
+
+    let mut image = Image::new_uninit(
+        Extent3d {
+            width: size as u32,
+            height: size as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+
+    image.texture_descriptor.mip_level_count = mip_colors.len() as u32;
+
+    image.data = Some(
+        mip_colors
+            .iter()
+            .enumerate()
+            .flat_map(|(level, color)| checkerboard(size / 2_usize.pow(level as u32), *color))
+            .collect(),
+    );
+
+    standard_materials.add(StandardMaterial {
+        base_color_texture: Some(images.add(image)),
+        perceptual_roughness: 1.0,
+        ..default()
+    })
+}
