@@ -1531,11 +1531,11 @@ fn main() {
         ],
         bsns: vec![
             Box::new(bsn! {
-                Mesh3d(
+                MeshletMesh3d(action::MeshletFromMesh::new(
                     action::MeshFromHeightmap::new(
-                        action::ResizeImage { image: "heightmaps/Heightmap_08_Island_512.png".into(), scale: 0.5 }
-
-                ))
+                        action::ResizeImage { image: "heightmaps/Heightmap_08_Island_512.png".into(), scale: 0.5 })
+                    )
+                )
                 template(|context| {
                     let s = context.resource::<AssetServer>();
                     Ok(MeshMaterial3d::<StandardMaterial>(s.add(StandardMaterial {
