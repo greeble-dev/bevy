@@ -52,11 +52,7 @@ mod action {
     use bevy::{math::FloatOrd, mesh::Indices};
     use core::ops::Mul;
     // XXX TODO: Should be in `use bevy` above?
-    use bevy_asset::{
-        basset::standalone::{StandaloneAssetData, StandaloneAssetHeader},
-        io::VecReader,
-        RenderAssetUsages,
-    };
+    use bevy_asset::RenderAssetUsages;
     use bevy_image::CompressedImageSaverSettings;
     use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
     use image::{DynamicImage, Rgb, RgbImage};
@@ -311,7 +307,7 @@ mod action {
 
     impl BassetActionFunction for CompressImageFunction {
         type Action = CompressImage;
-        type Error = BevyError;
+        type Error = BevyError; // XXX: Or use `CompressedImageSaverError`?
 
         async fn apply(
             &self,
@@ -334,52 +330,23 @@ mod action {
                 uncompressed_size.y.next_power_of_two().max(4),
             );
 
-            let resized_asset = if uncompressed_size != compressed_size {
+            let mut resized_asset = if uncompressed_size != compressed_size {
                 resize_image(uncompressed_asset, compressed_size)
             } else {
                 uncompressed_asset
             };
 
-            // XXX TODO: Review everything below to see what can be factored out.
-            // Can probably have `ApplyContext` do most of the work if we pass
-            // in the appropriate saver and `SavedAsset`?
-
-            let loader_type_name =
-                core::any::type_name::<<CompressedImageSaver as AssetSaver>::OutputLoader>();
-
-            let mut asset_bytes = Vec::<u8>::new();
-
-            let loader_settings = <CompressedImageSaver as AssetSaver>::save(
-                &CompressedImageSaver::default(),
-                &mut asset_bytes,
-                SavedAsset::from_asset(&resized_asset),
-                &CompressedImageSaverSettings::default(),
-                AssetPath::from("XXX TODO"), // XXX TODO: Does this matter?
-            )
-            .await?;
-
-            let (asset, loader) = context
-                .load_from_reader(
-                    &mut VecReader::new(asset_bytes.clone()),
-                    loader_type_name,
-                    &loader_settings,
-                )
-                .await?;
-
-            let header = StandaloneAssetHeader::new(&*loader, &loader_settings);
-
-            let header_bytes = ron::ser::to_string(&header).expect("XXX TODO").into_bytes();
-
             // XXX TODO: Verify we're correctly handling dependencies. Currently
             // `finished_erased_saved` overwrites the loader dependencies we
             // passed in.
-            Ok(context.finish_erased_saved(
-                asset,
-                StandaloneAssetData {
-                    header: header_bytes,
-                    asset: asset_bytes,
-                },
-            ))
+            context
+                .finish_saved::<CompressedImageSaver>(
+                    &mut resized_asset,
+                    &CompressedImageSaver::default(), // XXX TODO: Review. Feels like we should be getting this from somewhere else?
+                    &CompressedImageSaverSettings::default(), // XXX TODO: Review if we should be customizing these settings.
+                )
+                .await
+                .map_err(BevyError::from)
         }
     }
 

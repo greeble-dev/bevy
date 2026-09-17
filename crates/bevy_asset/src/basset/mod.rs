@@ -17,9 +17,9 @@ use crate::{
             write_standalone_asset, StandaloneAssetData, StandaloneAssetHeader,
         },
     },
-    io::{AssetReaderError, AssetSourceId, AssetSources},
+    io::{AssetReaderError, AssetSourceId, AssetSources, VecReader},
     meta::{AssetActionMinimal, AssetHash, AssetMetaMinimal},
-    saver::{ErasedPolyAssetSaver, ErasedUniAssetSaver, PolyAssetSaver},
+    saver::{ErasedPolyAssetSaver, ErasedUniAssetSaver, PolyAssetSaver, SavedAsset},
     Asset, AssetApp, AssetDependency, AssetLoadError, AssetLoaderError, AssetPath, AssetServer,
     ErasedAssetLoader, Handle, LoaderDependency, ParseAssetPathError, PolyAssetLoader,
     ReadAssetBytesError,
@@ -555,39 +555,6 @@ impl ApplyContext<'_> {
             .get_or_create_path_handle(AssetRef::new(action), None)
     }
 
-    // XXX TODO: This is a slightly odd function, currently used to support saving
-    // and reloading within an action - see `CompressImage` for use case.
-    // Consider alternatives. Also need to think through what happens if the
-    // asset has dependencies or path relative stuff.
-    pub async fn load_from_reader(
-        &self,
-        reader: &mut dyn Reader,
-        loader_type_name: &str,
-        settings: &dyn Settings,
-    ) -> Result<(ErasedLoadedAsset, Arc<dyn ErasedAssetLoader>), BevyError> {
-        let maybe_loader = self
-            .asset_server
-            .read_loaders()
-            .get_by_name(loader_type_name)
-            .expect("XXX TODO");
-
-        let loader = maybe_loader.get().await.expect("XXX TODO");
-
-        let load_context = LoadContext::new(
-            self.asset_server,
-            // XXX TODO: Does this matter?
-            AssetPath::parse("XXX TODO"),
-            // XXX TODO: Review `load_dependencies` value?
-            true,
-            false,
-        );
-
-        Ok((loader.load(reader, settings, load_context).await?, loader))
-
-        // XXX TODO: Should we add the loaded asset's `loader_dependencies` to
-        // our own `loader_dependencies`?
-    }
-
     pub fn finish<A: Asset>(self, asset: A) -> BassetActionOutput {
         let mut loaded_asset = LoadedAsset::new_with_dependencies(asset);
 
@@ -603,21 +570,70 @@ impl ApplyContext<'_> {
         }
     }
 
-    pub fn finish_erased_saved(
+    // XXX TODO: Document why this is useful.
+    // XXX TODO: Try to avoid making this generic on the saver?
+    pub async fn finish_saved<S: AssetSaver>(
         self,
-        mut asset: ErasedLoadedAsset,
-        saved: StandaloneAssetData,
-    ) -> BassetActionOutput {
+        asset: &mut S::Asset,
+        saver: &S,
+        saver_settings: &S::Settings,
+    ) -> Result<BassetActionOutput, S::Error> {
+        let mut asset_bytes = Vec::<u8>::new();
+
+        let loader_settings = saver
+            .save(
+                &mut asset_bytes,
+                SavedAsset::from_asset(asset),
+                saver_settings,
+                AssetPath::from("XXX TODO"), // XXX TODO: Does this matter?
+            )
+            .await?;
+
+        let maybe_loader = self
+            .asset_server
+            .read_loaders()
+            .get_by_name(type_name::<S::OutputLoader>())
+            .expect("XXX TODO");
+
+        let loader = maybe_loader.get().await.expect("XXX TODO");
+
+        let load_context = LoadContext::new(
+            self.asset_server,
+            // XXX TODO: Does this matter?
+            AssetPath::parse("XXX TODO"),
+            // XXX TODO: Review `load_dependencies` value?
+            true,
+            false,
+        );
+
+        let mut reloaded_asset = loader
+            .load(
+                &mut VecReader::new(asset_bytes.clone()),
+                &loader_settings,
+                load_context,
+            )
+            .await
+            .expect("XXX TODO");
+
+        let header = StandaloneAssetHeader::new(&*loader, &loader_settings);
+
+        let header_bytes = ron::ser::to_string(&header).expect("XXX TODO").into_bytes();
+
+        let saved = Some(StandaloneAssetData {
+            header: header_bytes,
+            asset: asset_bytes,
+        });
+
         // XXX TODO: Note that we're overwriting the asset's own dependencies and
         // key. Check that this is correct.
-        asset.loader_dependencies = self.loader_dependencies;
+        reloaded_asset.loader_dependencies = self.loader_dependencies;
 
-        load_dependencies(&asset, self.asset_server, self.dependency_loading);
+        load_dependencies(&reloaded_asset, self.asset_server, self.dependency_loading);
 
-        BassetActionOutput {
-            asset,
-            saved: Some(saved),
-        }
+        Ok(BassetActionOutput {
+            asset: reloaded_asset,
+            saved,
+        })
     }
 }
 
@@ -790,6 +806,10 @@ impl Debug for ErasedBassetAction {
     }
 }
 
+// XXX TODO: Review questions around what actions return. There's some merit
+// in making everything go via `StandaloneAssetData` for uniformity, but then
+// there are cases where we needlessly reload. Maybe this ends up as an enum
+// that's either a saved asset or an `ErasedLoadedAsset`.
 pub struct BassetActionOutput {
     pub asset: ErasedLoadedAsset,
     // XXX TODO: This value is only needed for the action cache. Is there any

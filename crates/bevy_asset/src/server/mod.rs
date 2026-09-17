@@ -188,7 +188,7 @@ impl AssetServer {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    // XXX: Was changed from private to `pub(crate)` for `ApplyContext::load_from_reader`.
+    // XXX: Was changed from private to `pub(crate)` for `ApplyContext::finish_saved`.
     // Consider alternatives.
     pub(crate) fn read_loaders(&self) -> RwLockReadGuard<'_, AssetLoaders> {
         self.data
