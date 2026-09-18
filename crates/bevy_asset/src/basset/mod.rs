@@ -832,8 +832,17 @@ pub struct EnvironmentSchema<'a>(pub &'a [EnvironmentSchemaKey<'a>]);
 
 // XXX TODO: Per-action environments are likely to be small, so maybe a `Vec`
 // or pairs is a better choice.
+//
+// XXX TODO: Consider using `dyn Reflect` or `dyn Any` instead of string values.
 #[derive(Default)]
 pub struct Environment<'a>(pub HashMap<&'a str, &'a str>);
+
+impl Environment<'_> {
+    pub fn get(&self, key: &str) -> Option<&str> {
+        // XXX TODO: Isn't there a cleaner alternative to `map`?
+        self.0.get(key).copied()
+    }
+}
 
 impl Hash for Environment<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
