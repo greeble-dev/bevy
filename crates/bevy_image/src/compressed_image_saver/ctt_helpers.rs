@@ -1,5 +1,3 @@
-use std::env;
-
 use ctt::{
     encoders::{
         astcenc::{AstcencSettings, AstcencUsage, NormalSwizzle},
@@ -8,53 +6,103 @@ use ctt::{
     AlphaMode, TargetFormat,
 };
 use ktx2::Format;
+#[cfg(all(
+    feature = "compressed_image_saver",
+    not(feature = "compressed_image_saver_universal")
+))]
+use std::env;
 use wgpu_types::{AstcBlock, AstcChannel, TextureFormat};
+
+use crate::compressed_image_saver::ctt::CompressedImageSaverCttFormat;
 
 use super::{CompressedImageSaverError, ImageCompressorAlphaMode};
 
-/// Returns `Some((unorm, hdr))` ASTC format pair if the env var is set, `None` otherwise.
-pub fn parse_astc_env_var() -> Result<Option<(Format, Format)>, CompressedImageSaverError> {
+/// Returns `Some(CompressedImageSaverCttFormat::Astc)` if the env var is set, `None` otherwise.
+#[cfg(all(
+    feature = "compressed_image_saver",
+    not(feature = "compressed_image_saver_universal")
+))]
+pub(crate) fn parse_astc_env_var(
+) -> Result<Option<CompressedImageSaverCttFormat>, CompressedImageSaverError> {
     let Ok(val) = env::var("BEVY_COMPRESSED_IMAGE_SAVER_ASTC") else {
         return Ok(None);
     };
 
     let val = val.trim();
-    let (unorm, hdr) = match val {
-        "" | "1" | "4x4" => (Format::ASTC_4x4_UNORM_BLOCK, Format::ASTC_4x4_SFLOAT_BLOCK),
-        "5x4" => (Format::ASTC_5x4_UNORM_BLOCK, Format::ASTC_5x4_SFLOAT_BLOCK),
-        "5x5" => (Format::ASTC_5x5_UNORM_BLOCK, Format::ASTC_5x5_SFLOAT_BLOCK),
-        "6x5" => (Format::ASTC_6x5_UNORM_BLOCK, Format::ASTC_6x5_SFLOAT_BLOCK),
-        "6x6" => (Format::ASTC_6x6_UNORM_BLOCK, Format::ASTC_6x6_SFLOAT_BLOCK),
-        "8x5" => (Format::ASTC_8x5_UNORM_BLOCK, Format::ASTC_8x5_SFLOAT_BLOCK),
-        "8x6" => (Format::ASTC_8x6_UNORM_BLOCK, Format::ASTC_8x6_SFLOAT_BLOCK),
-        "8x8" => (Format::ASTC_8x8_UNORM_BLOCK, Format::ASTC_8x8_SFLOAT_BLOCK),
-        "10x5" => (
+    match val {
+        "" | "1" | "4x4" => Ok(Some(CompressedImageSaverCttFormat::astc(4, 4))),
+        "5x4" => Ok(Some(CompressedImageSaverCttFormat::astc(5, 4))),
+        "5x5" => Ok(Some(CompressedImageSaverCttFormat::astc(5, 5))),
+        "6x5" => Ok(Some(CompressedImageSaverCttFormat::astc(6, 5))),
+        "6x6" => Ok(Some(CompressedImageSaverCttFormat::astc(6, 6))),
+        "8x5" => Ok(Some(CompressedImageSaverCttFormat::astc(8, 5))),
+        "8x6" => Ok(Some(CompressedImageSaverCttFormat::astc(8, 6))),
+        "8x8" => Ok(Some(CompressedImageSaverCttFormat::astc(8, 8))),
+        "10x5" => Ok(Some(CompressedImageSaverCttFormat::astc(10, 5))),
+        "10x6" => Ok(Some(CompressedImageSaverCttFormat::astc(10, 6))),
+        "10x8" => Ok(Some(CompressedImageSaverCttFormat::astc(10, 8))),
+        "10x10" => Ok(Some(CompressedImageSaverCttFormat::astc(10, 10))),
+        "12x10" => Ok(Some(CompressedImageSaverCttFormat::astc(12, 10))),
+        "12x12" => Ok(Some(CompressedImageSaverCttFormat::astc(12, 12))),
+        other => {
+            Err(CompressedImageSaverError::CompressionFailed(
+                format!("Invalid BEVY_COMPRESSED_IMAGE_SAVER_ASTC block size: {other:?}. \
+                    Expected one of: 4x4, 5x4, 5x5, 6x5, 6x6, 8x5, 8x6, 8x8, 10x5, 10x6, 10x8, 10x10, 12x10, 12x12")
+                    .into(),
+            ))
+        }
+    }
+}
+
+/// Returns `Some((unorm, hdr))` ASTC format pair if the format is `CompressedImageSaverCttFormat::Astc`,
+/// `None` otherwise.
+pub fn astc_block(
+    input: CompressedImageSaverCttFormat,
+) -> Result<Option<(Format, Format)>, CompressedImageSaverError> {
+    let CompressedImageSaverCttFormat::Astc {
+        block_width,
+        block_height,
+    } = input
+    else {
+        return Ok(None);
+    };
+
+    let (unorm, hdr) = match (block_width, block_height) {
+        (4, 4) => (Format::ASTC_4x4_UNORM_BLOCK, Format::ASTC_4x4_SFLOAT_BLOCK),
+        (5, 4) => (Format::ASTC_5x4_UNORM_BLOCK, Format::ASTC_5x4_SFLOAT_BLOCK),
+        (5, 5) => (Format::ASTC_5x5_UNORM_BLOCK, Format::ASTC_5x5_SFLOAT_BLOCK),
+        (6, 5) => (Format::ASTC_6x5_UNORM_BLOCK, Format::ASTC_6x5_SFLOAT_BLOCK),
+        (6, 6) => (Format::ASTC_6x6_UNORM_BLOCK, Format::ASTC_6x6_SFLOAT_BLOCK),
+        (8, 5) => (Format::ASTC_8x5_UNORM_BLOCK, Format::ASTC_8x5_SFLOAT_BLOCK),
+        (8, 6) => (Format::ASTC_8x6_UNORM_BLOCK, Format::ASTC_8x6_SFLOAT_BLOCK),
+        (8, 8) => (Format::ASTC_8x8_UNORM_BLOCK, Format::ASTC_8x8_SFLOAT_BLOCK),
+        (10, 5) => (
             Format::ASTC_10x5_UNORM_BLOCK,
             Format::ASTC_10x5_SFLOAT_BLOCK,
         ),
-        "10x6" => (
+        (10, 6) => (
             Format::ASTC_10x6_UNORM_BLOCK,
             Format::ASTC_10x6_SFLOAT_BLOCK,
         ),
-        "10x8" => (
+        (10, 8) => (
             Format::ASTC_10x8_UNORM_BLOCK,
             Format::ASTC_10x8_SFLOAT_BLOCK,
         ),
-        "10x10" => (
+        (10, 10) => (
             Format::ASTC_10x10_UNORM_BLOCK,
             Format::ASTC_10x10_SFLOAT_BLOCK,
         ),
-        "12x10" => (
+        (12, 10) => (
             Format::ASTC_12x10_UNORM_BLOCK,
             Format::ASTC_12x10_SFLOAT_BLOCK,
         ),
-        "12x12" => (
+        (12, 12) => (
             Format::ASTC_12x12_UNORM_BLOCK,
             Format::ASTC_12x12_SFLOAT_BLOCK,
         ),
-        other => {
+        _ => {
             return Err(CompressedImageSaverError::CompressionFailed(
-                format!("Invalid BEVY_COMPRESSED_IMAGE_SAVER_ASTC block size: {other:?}. \
+                format!("Invalid ASTC block size: {block_width}x{block_height}. \
                     Expected one of: 4x4, 5x4, 5x5, 6x5, 6x6, 8x5, 8x6, 8x8, 10x5, 10x6, 10x8, 10x10, 12x10, 12x12")
                     .into(),
             ));
@@ -67,8 +115,9 @@ pub fn parse_astc_env_var() -> Result<Option<(Format, Format)>, CompressedImageS
 pub fn choose_ctt_compressed_format(
     input: TextureFormat,
     is_normal_map: bool,
+    ctt_format: CompressedImageSaverCttFormat,
 ) -> Result<TargetFormat, CompressedImageSaverError> {
-    let astc_block = parse_astc_env_var()?;
+    let astc_block = astc_block(ctt_format)?;
 
     // Normal maps go to a two-channel format (X, Y) regardless of the input's channel count
     if is_normal_map {

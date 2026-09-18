@@ -1,17 +1,28 @@
-use bevy_asset::{io::Writer, saver::SavedAsset, AssetPath, AsyncWriteExt};
+use bevy_asset::{
+    io::Writer,
+    saver::{AssetSaver, SavedAsset},
+    AssetPath, AsyncWriteExt,
+};
+use bevy_reflect::TypePath;
 
 use super::{CompressedImageSaverError, CompressedImageSaverSettings};
-use crate::{Image, ImageFormat, ImageFormatSetting, ImageLoaderSettings};
+use crate::{Image, ImageFormat, ImageFormatSetting, ImageLoader, ImageLoaderSettings};
 
 use basis_universal::{
     BasisTextureFormat, ColorSpace, Compressor, CompressorParams, UASTC_QUALITY_DEFAULT,
 };
 
-#[derive(Default)]
+/// XXX TODO: Document.
+#[derive(Default, TypePath)]
 pub struct CompressedImageSaverUniversal;
 
-impl CompressedImageSaverUniversal {
-    pub async fn save(
+impl AssetSaver for CompressedImageSaverUniversal {
+    type Asset = Image;
+    type Settings = CompressedImageSaverSettings;
+    type OutputLoader = ImageLoader;
+    type Error = CompressedImageSaverError;
+
+    async fn save(
         &self,
         writer: &mut Writer,
         image: SavedAsset<'_, '_, Image>,

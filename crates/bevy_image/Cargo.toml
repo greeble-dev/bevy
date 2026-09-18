@@ -46,9 +46,13 @@ zstd_rust = ["zstd", "dep:ruzstd"]
 zstd_c = ["zstd", "dep:zstd"]
 
 # Texture compression asset processor (cross-platform, transcodes to any GPU format at load time)
-compressed_image_saver_universal = ["basis-universal"]
+compressed_image_saver_universal = ["basis-universal", "compressed_image_saver"]
 
 # Texture compression asset processor (BCn for desktop, ASTC for mobile via env var)
+# XXX TODO: Review this feature and `compressed_image_saver_universal`. For now
+# I just want backwards compatibility, so the user specifies exactly one. But we might want
+# to split it into `compressed_image_saver`, `compressed_image_saver_universal` and `compressed_image_saver_ctt`.
+# Or maybe we just have `compressed_image_saver` on its own and pull in everything?
 compressed_image_saver = ["dep:ctt", "ktx2", "zstd"]
 
 [dependencies]

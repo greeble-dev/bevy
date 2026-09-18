@@ -1,8 +1,14 @@
-use bevy_asset::{io::Writer, saver::SavedAsset, AssetPath, AsyncWriteExt};
+use bevy_asset::{
+    io::Writer,
+    saver::{AssetSaver, SavedAsset},
+    AssetPath, AsyncWriteExt,
+};
+use bevy_reflect::TypePath;
 use ctt::{
     convert, ColorSpace, Container, ConvertSettings, Image as CttImage, MipmapFilter,
     PipelineOutput, Quality, Surface, TextureKind,
 };
+use serde::{Deserialize, Serialize};
 
 use super::{
     ctt_helpers::{
@@ -10,13 +16,46 @@ use super::{
     },
     CompressedImageSaverError, CompressedImageSaverSettings,
 };
-use crate::{Image, ImageFormat, ImageFormatSetting, ImageLoaderSettings};
+use crate::{Image, ImageFormat, ImageFormatSetting, ImageLoader, ImageLoaderSettings};
 
-#[derive(Default)]
-pub struct CompressedImageSaverCtt;
+/// XXX TODO: Document.
+#[derive(Copy, Clone, Serialize, Deserialize)]
+pub enum CompressedImageSaverCttFormat {
+    /// XXX TODO: Document.
+    Astc {
+        /// XXX TODO: Document.
+        block_width: u32,
+        /// XXX TODO: Document.
+        block_height: u32,
+    },
+    /// XXX TODO: Document.
+    Bcn,
+}
 
-impl CompressedImageSaverCtt {
-    pub async fn save(
+impl CompressedImageSaverCttFormat {
+    /// XXX TODO: Document.
+    pub fn astc(block_width: u32, block_height: u32) -> Self {
+        Self::Astc {
+            block_width,
+            block_height,
+        }
+    }
+}
+
+/// XXX TODO: Document.
+//
+// XXX TODO: Putting the format here is probably wrong. Alternative is to have
+// a settings struct that's `CompressedImageSaverSettings` plus the format.
+#[derive(TypePath)]
+pub struct CompressedImageSaverCtt(pub CompressedImageSaverCttFormat);
+
+impl AssetSaver for CompressedImageSaverCtt {
+    type Asset = Image;
+    type Settings = CompressedImageSaverSettings;
+    type OutputLoader = ImageLoader;
+    type Error = CompressedImageSaverError;
+
+    async fn save(
         &self,
         writer: &mut Writer,
         image: SavedAsset<'_, '_, Image>,
@@ -34,8 +73,11 @@ impl CompressedImageSaverCtt {
         }
 
         let input_format = wgpu_to_ctt_texture_format(image.texture_descriptor.format)?;
-        let output_format =
-            choose_ctt_compressed_format(image.texture_descriptor.format, settings.is_normal_map)?;
+        let output_format = choose_ctt_compressed_format(
+            image.texture_descriptor.format,
+            settings.is_normal_map,
+            self.0,
+        )?;
 
         let is_srgb = image.texture_descriptor.format.is_srgb();
         let color_space = if is_srgb {

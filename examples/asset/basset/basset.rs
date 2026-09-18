@@ -11,7 +11,6 @@ use bevy::{
     },
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     ecs::error::BevyError,
-    image::CompressedImageSaver,
     light::CascadeShadowConfigBuilder,
     log::LogPlugin,
     mesh::SerializedMesh,
@@ -53,7 +52,12 @@ mod action {
     use core::ops::Mul;
     // XXX TODO: Should be in `use bevy` above?
     use bevy_asset::RenderAssetUsages;
-    use bevy_image::CompressedImageSaverSettings;
+    #[cfg(feature = "compressed_image_saver_universal")]
+    use bevy_image::universal::CompressedImageSaverUniversal;
+    use bevy_image::{
+        ctt::{CompressedImageSaverCtt, CompressedImageSaverCttFormat},
+        CompressedImageSaverSettings,
+    };
     use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
     use image::{DynamicImage, Rgb, RgbImage};
 
@@ -279,13 +283,12 @@ mod action {
     impl BassetAction for CompressImage {
         basset_action_version!(crate);
 
-        // XXX TODO: Experiment with this.
-        // fn env<'a>(&'a self) -> EnvironmentSchema<'a> {
-        //     EnvironmentSchema(&[EnvironmentSchemaKey {
-        //         name: "texture_compression",
-        //         required: EnvironmentRequiredKey::Yes,
-        //     }])
-        // }
+        fn env<'a>(&'a self) -> EnvironmentSchema<'a> {
+            EnvironmentSchema(&[EnvironmentSchemaKey {
+                name: "compressed_texture_format",
+                required: EnvironmentRequiredKey::Yes,
+            }])
+        }
     }
 
     impl CompressImage {
@@ -323,7 +326,8 @@ mod action {
 
             let uncompressed_size = uncompressed_asset.size();
 
-            // XXX TODO: Review. Unclear if we should be doing this automatically
+            // XXX TODO: Review. `CompressedImageSaver` can fail if the compressed
+            // size is not pow2. Unclear if we should be doing this automatically
             // or if it should be done by `CompressedImageSaver`.
             let compressed_size = UVec2::new(
                 uncompressed_size.x.next_power_of_two().max(4),
@@ -339,14 +343,59 @@ mod action {
             // XXX TODO: Verify we're correctly handling dependencies. Currently
             // `finished_erased_saved` overwrites the loader dependencies we
             // passed in.
-            context
-                .finish_saved::<CompressedImageSaver>(
-                    &mut resized_asset,
-                    &CompressedImageSaver::default(), // XXX TODO: Review. Feels like we should be getting this from somewhere else?
-                    &CompressedImageSaverSettings::default(), // XXX TODO: Review if we should be customizing these settings.
-                )
-                .await
-                .map_err(BevyError::from)
+
+            // XXX TODO: Review if we should be customizing these settings.
+            let settings = CompressedImageSaverSettings::default();
+
+            match context
+                .env()
+                .get("compressed_texture_format")
+                .expect("XXX TODO?")
+            {
+                #[cfg(feature = "compressed_image_saver")]
+                "bcn" => {
+                    context
+                        .finish_saved::<CompressedImageSaverCtt>(
+                            &mut resized_asset,
+                            &CompressedImageSaverCtt(CompressedImageSaverCttFormat::Bcn),
+                            &settings,
+                        )
+                        .await
+                }
+                #[cfg(feature = "compressed_image_saver")]
+                "astc" => {
+                    context
+                        .finish_saved::<CompressedImageSaverCtt>(
+                            &mut resized_asset,
+                            &CompressedImageSaverCtt(CompressedImageSaverCttFormat::Astc {
+                                // XXX TODO: Should be configurable? Maybe needs to go in the
+                                // environment.
+                                block_width: 4,
+                                block_height: 4,
+                            }),
+                            &settings,
+                        )
+                        .await
+                }
+                #[cfg(feature = "compressed_image_saver_universal")]
+                "universal" => {
+                    context
+                        .finish_saved::<CompressedImageSaverUniversal>(
+                            &mut resized_asset,
+                            &CompressedImageSaverUniversal,
+                            &settings,
+                        )
+                        .await
+                }
+                unrecognized => {
+                    // XXX TODO: This reports a misleading error if the format is
+                    // recognized but the relevant feature is not enabled.
+                    return Err(BevyError::from(format!(
+                        "Unrecognized compressed texture format \"{unrecognized}\"."
+                    )));
+                }
+            }
+            .map_err(BevyError::from)
         }
     }
 
@@ -1560,7 +1609,9 @@ fn main() {
             ..Default::default()
         }
     } else {
-        let env = FullEnvironment::default();
+        let mut env = FullEnvironment::default();
+        env.set("compressed_texture_format", "bcn")
+            .expect("XXX TODO");
 
         AssetPlugin {
             file_path: "examples/asset/basset/assets".to_string(),

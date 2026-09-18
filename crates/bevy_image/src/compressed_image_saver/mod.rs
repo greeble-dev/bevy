@@ -1,19 +1,23 @@
+/// XXX TODO: Document.
 #[cfg(feature = "compressed_image_saver")]
-mod ctt;
+pub mod ctt;
 #[cfg(feature = "compressed_image_saver")]
 mod ctt_helpers;
-#[cfg(all(
-    feature = "compressed_image_saver_universal",
-    not(feature = "compressed_image_saver")
-))]
-mod universal;
+/// XXX TODO: Document.
+#[cfg(feature = "compressed_image_saver_universal")]
+pub mod universal;
 
-#[cfg(feature = "compressed_image_saver")]
-use crate::compressed_image_saver::ctt::CompressedImageSaverCtt;
 #[cfg(all(
-    feature = "compressed_image_saver_universal",
-    not(feature = "compressed_image_saver")
+    feature = "compressed_image_saver",
+    not(feature = "compressed_image_saver_universal")
 ))]
+use crate::compressed_image_saver::ctt::{CompressedImageSaverCtt, CompressedImageSaverCttFormat};
+#[cfg(all(
+    feature = "compressed_image_saver",
+    not(feature = "compressed_image_saver_universal")
+))]
+use crate::compressed_image_saver::ctt_helpers::parse_astc_env_var;
+#[cfg(feature = "compressed_image_saver_universal")]
 use crate::compressed_image_saver::universal::CompressedImageSaverUniversal;
 use crate::{Image, ImageLoader, ImageLoaderSettings};
 
@@ -106,15 +110,7 @@ use wgpu_types::TextureFormat;
 /// edges. See the field docs for details.
 #[derive(TypePath, Default)]
 #[expect(clippy::doc_markdown, reason = "clippy does not like unquoted BCn")]
-pub struct CompressedImageSaver {
-    #[cfg(feature = "compressed_image_saver")]
-    inner: CompressedImageSaverCtt,
-    #[cfg(all(
-        feature = "compressed_image_saver_universal",
-        not(feature = "compressed_image_saver")
-    ))]
-    inner: CompressedImageSaverUniversal,
-}
+pub struct CompressedImageSaver;
 
 impl AssetSaver for CompressedImageSaver {
     type Asset = Image;
@@ -137,7 +133,23 @@ impl AssetSaver for CompressedImageSaver {
             ));
         }
 
-        self.inner.save(writer, asset, settings, asset_path).await
+        #[cfg(feature = "compressed_image_saver_universal")]
+        return CompressedImageSaverUniversal
+            .save(writer, asset, settings, asset_path)
+            .await;
+
+        // XXX TODO: Review this config. See notes on the `compressed_image_saver`
+        // feature in Cargo.toml.
+        #[cfg(not(feature = "compressed_image_saver_universal"))]
+        {
+            // XXX TODO: This env var parsing is for backwards compatibility right now.
+            // Unclear what we do next.
+            let format = parse_astc_env_var()?.unwrap_or(CompressedImageSaverCttFormat::Bcn);
+
+            return CompressedImageSaverCtt(format)
+                .save(writer, asset, settings, asset_path)
+                .await;
+        }
     }
 }
 

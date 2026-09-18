@@ -244,7 +244,7 @@ impl Plugin for ImagePlugin {
                 ImageLoader,
                 bevy_asset::transformer::IdentityAssetTransformer<Image>,
                 crate::CompressedImageSaver,
-            >>(crate::CompressedImageSaver::default().into());
+            >>(crate::CompressedImageSaver.into());
 
             for file_extension in &self.default_compressed_image_processor_extensions {
                 processor.set_default_processor::<bevy_asset::processor::LoadTransformAndSave<
