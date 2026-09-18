@@ -865,10 +865,6 @@ impl Hash for Environment<'_> {
     }
 }
 
-// XXX TODO: Reconsider name?
-#[derive(Default)]
-pub struct FullEnvironment(HashMap<String, String>);
-
 // TODO: Improve errors.
 #[derive(PartialEq, Eq, Debug)]
 pub enum EnvironmentSetError {
@@ -886,6 +882,10 @@ pub enum EnvironmentFilterError {
         keys: Vec<String>,
     },
 }
+
+// XXX TODO: Reconsider name?
+#[derive(Default)]
+pub struct FullEnvironment(HashMap<String, String>);
 
 impl FullEnvironment {
     pub fn new() -> Self {
@@ -1074,6 +1074,22 @@ pub struct DevelopmentActionSourceSettings {
     // Might be necessary but double check.
     asset_type_name_to_saver: HashMap<&'static str, (Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
     default_poly_saver: Option<(Box<dyn ErasedAssetSaver>, Box<dyn Settings>)>,
+    // XXX TODO: Review how we decide the environment. Having it here is
+    // convenient, but forces publishing to always use the same environment.
+    // That's bad because want to support publishing to multiple targets while
+    // reusing the caches.
+    //
+    // I'm not sure if publishing can locally override the environment - we're
+    // too dependent on things calling back into the action source via
+    // `ApplyContext::asset_server`, so we don't know when the override should
+    // be applied. Maybe we should try decoupling processing from the asset server,
+    // which might have other benefits as well. But that's difficult since we
+    // rely on it for things like `Handle` allocation and loaders.
+    //
+    // The other route is to accept that each publishing target creates a separate
+    // asset server (and thus a separate `DevelopmentActionSource`) and we find
+    // a way to share the caches.
+    env: FullEnvironment,
 }
 
 impl Default for DevelopmentActionSourceSettings {
@@ -1097,6 +1113,7 @@ impl Default for DevelopmentActionSourceSettings {
             action_type_path_to_action_function,
             asset_type_name_to_saver: Default::default(),
             default_poly_saver: None,
+            env: Default::default(),
         }
     }
 }
@@ -1160,6 +1177,11 @@ impl DevelopmentActionSourceSettings {
 
         self
     }
+
+    pub fn with_env(mut self, env: FullEnvironment) -> Self {
+        self.env = env;
+        self
+    }
 }
 
 // XXX TODO: Review if all this stuff actually needs to be shared.
@@ -1199,7 +1221,6 @@ pub(crate) struct DevelopmentActionSource {
     dependency_graph: Option<DependencyGraph>,
     action_cache: Option<MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>>,
     registry: TypeRegistryArc,
-    env: FullEnvironment,
 }
 
 // XXX TODO: Does this need to be an enum?
@@ -1233,15 +1254,11 @@ impl DevelopmentActionSource {
             registry.clone(),
         ));
 
-        // XXX TODO: Real environment.
-        let env = FullEnvironment::default();
-
         Self {
             settings,
             dependency_graph,
             action_cache,
             registry,
-            env,
         }
     }
 
@@ -1363,13 +1380,15 @@ impl ActionSource for DevelopmentActionSource {
         Box::pin(async move {
             let action_function = self.action_function(action.action())?;
 
+            let env = &self.settings.env;
+
             // XXX TODO: Avoid clone?
             let dependency_key = self
                 .dependency_graph
                 .as_ref()
                 // XXX TODO: `action_dependency_key` will filter the environment, and then we'll
                 // do it again below. Refactor?
-                .map(|dependency_graph| dependency_graph.action_dependency_key(action, &self.env));
+                .map(|dependency_graph| dependency_graph.action_dependency_key(action, env));
 
             if action_function.cacheable()
                 && let Some(dependency_key) = dependency_key
@@ -1383,7 +1402,7 @@ impl ActionSource for DevelopmentActionSource {
                 if let Some((action_key, _)) = dependency_graph
                     // XXX TODO: `action_key` will filter the environment, and then we'll
                     // do it again below. Refactor?
-                    .action_key(action, Some(dependency_key), &self.env)
+                    .action_key(action, Some(dependency_key), env)
                     .await
                     && let Some(cached_standalone_asset) =
                         action_cache.get(&action_key, action).await
@@ -1398,8 +1417,7 @@ impl ActionSource for DevelopmentActionSource {
                 }
             }
 
-            let filtered_env = self
-                .env
+            let filtered_env = env
                 .filter(action.action())
                 .map_err(|err| AssetLoadError::TodoError(Arc::new(format!("{err:?}").into())))?;
 
@@ -1517,6 +1535,8 @@ impl ActionSource for DevelopmentActionSource {
         Some(Box::pin(async move {
             let begin_time = Instant::now();
 
+            let env = &self.settings.env;
+
             std::dbg!(&input);
 
             let mut pack = WritablePackFile::default();
@@ -1573,7 +1593,7 @@ impl ActionSource for DevelopmentActionSource {
 
                             if let Some(dependency_graph) = &self.dependency_graph
                                 && let Some((action_key, dependency_value)) =
-                                    dependency_graph.action_key(action, None, &self.env).await
+                                    dependency_graph.action_key(action, None, env).await
                                 && let Some(action_cache) = &self.action_cache
                                 && let Some(cached_standalone_asset) =
                                     action_cache.get(&action_key, action).await
@@ -1650,7 +1670,7 @@ impl ActionSource for DevelopmentActionSource {
                         } else {
                             if let Some(dependency_graph) = &self.dependency_graph
                                 && let Some((_, dependency_value)) =
-                                    dependency_graph.action_key(action, None, &self.env).await
+                                    dependency_graph.action_key(action, None, env).await
                             {
                                 if let Some(dependency_value) = dependency_value {
                                     for dependency in dependency_value.loader_dependees() {

@@ -1560,6 +1560,8 @@ fn main() {
             ..Default::default()
         }
     } else {
+        let env = FullEnvironment::default();
+
         AssetPlugin {
             file_path: "examples/asset/basset/assets".to_string(),
             basset_action_source_builder: Some(Arc::new(DevelopmentActionSourceBuilder::new(
@@ -1590,7 +1592,8 @@ fn main() {
                             format: bevy_image::SaveImageFormatSetting::Format(ImageFormat::Png),
                         },
                     )
-                    .with_default_poly_saver(RonAssetSaver::new(registry.clone())),
+                    .with_default_poly_saver(RonAssetSaver::new(registry.clone()))
+                    .with_env(env),
             ))),
             ..Default::default()
         }
