@@ -9,8 +9,20 @@ use bevy::{
         basset::*, io::Reader, saver::AssetSaver, AssetLoader, AssetRef, ErasedLoadedAsset,
         HandleDeserializeProcessor, LoadContext, PolyAssetLoader,
     },
+    asset::{
+        basset::{
+            action::LoadPath,
+            publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
+        },
+        basset_action_version,
+        io::{AssetSourceId, Writer},
+        meta::Settings,
+        saver::{ErasedSavedAsset, PolyAssetSaver, SavedAsset},
+        AssetPath, AsyncWriteExt, EphemeralHandleBehavior, HandleSerializeProcessor,
+    },
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     ecs::error::BevyError,
+    image::{ImageSaver, ImageSaverSettings},
     light::CascadeShadowConfigBuilder,
     log::LogPlugin,
     mesh::SerializedMesh,
@@ -20,25 +32,12 @@ use bevy::{
         serde::{ReflectDeserializer, ReflectSerializer},
         TypePath,
     },
+    reflect::{TypeRegistry, TypeRegistryArc},
     render::render_resource::AsBindGroup,
+    scene::SceneDependencies,
     tasks::block_on,
     time::common_conditions::on_timer,
 };
-// XXX TODO: Should be in `use bevy` above?
-use bevy_asset::{
-    basset::{
-        action::LoadPath,
-        publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
-    },
-    basset_action_version,
-    io::{AssetSourceId, Writer},
-    meta::Settings,
-    saver::{ErasedSavedAsset, PolyAssetSaver, SavedAsset},
-    AssetPath, AsyncWriteExt, EphemeralHandleBehavior, HandleSerializeProcessor,
-};
-use bevy_image::{ImageSaver, ImageSaverSettings};
-use bevy_reflect::{TypeRegistry, TypeRegistryArc};
-use bevy_scene::SceneDependencies;
 use core::{
     hash::{Hash, Hasher},
     ops::Deref,
@@ -48,16 +47,18 @@ use serde::{de::DeserializeSeed, Deserialize, Serialize};
 use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 mod action {
-    use bevy::{math::FloatOrd, mesh::Indices};
-    use core::ops::Mul;
-    // XXX TODO: Should be in `use bevy` above?
-    use bevy_asset::RenderAssetUsages;
     #[cfg(feature = "compressed_image_saver_universal")]
-    use bevy_image::universal::CompressedImageSaverUniversal;
-    use bevy_image::{
-        ctt::{CompressedImageSaverCtt, CompressedImageSaverCttFormat},
-        CompressedImageSaverSettings,
+    use bevy::image::universal::CompressedImageSaverUniversal;
+    use bevy::{
+        asset::RenderAssetUsages,
+        image::{
+            ctt::{CompressedImageSaverCtt, CompressedImageSaverCttFormat},
+            CompressedImageSaverSettings,
+        },
+        math::FloatOrd,
+        mesh::Indices,
     };
+    use core::ops::Mul;
     use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
     use image::{DynamicImage, Rgb, RgbImage};
 
@@ -718,7 +719,7 @@ mod action {
 }
 
 mod demo {
-    use bevy_asset::{io::Writer, saver::SavedAsset, AssetPath, AsyncWriteExt};
+    use bevy::asset::{io::Writer, saver::SavedAsset, AssetPath, AsyncWriteExt};
 
     use super::*;
 
@@ -979,8 +980,7 @@ impl AssetSaver for MeshAssetSaver {
 
 mod acme {
     use super::*;
-    use bevy::pbr::experimental::meshlet::MeshletMesh3d;
-    use bevy_asset::VisitAssetDependencies;
+    use bevy::{asset::VisitAssetDependencies, pbr::experimental::meshlet::MeshletMesh3d};
 
     #[derive(Default, Debug, VisitAssetDependencies, Reflect)]
     pub struct AcmeEntity {
