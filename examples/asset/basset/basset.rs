@@ -399,23 +399,26 @@ mod action {
         }
     }
 
-    #[derive(Default, Debug, PartialEq, Reflect)]
+    #[derive(Default, Debug, PartialEq, Reflect, Hash)]
     #[reflect(BassetAction, PartialEq, Hash)]
     pub struct ResizeImage {
         pub image: AssetRef<'static>,
-        pub scale: f32,
+        // XXX TODO: Decide whether we should be encouraging `FloatOrd` or not.
+        // Avoids having to manually implement hashing, but leaks into serialiation
+        // and users initializing the struct directly.
+        pub scale: FloatOrd,
     }
 
     impl BassetAction for ResizeImage {
         basset_action_version!(crate);
     }
 
-    impl Hash for ResizeImage {
-        fn hash<H: Hasher>(&self, state: &mut H) {
-            self.image.hash(state);
-            // XXX TODO: Hashing f32 action parameters is going to be common.
-            // Should we add a wrapper or using something like `ordered_float`?
-            self.scale.to_le_bytes().hash(state);
+    impl ResizeImage {
+        pub fn new(image: impl Into<AssetRef<'static>>, scale: f32) -> Self {
+            Self {
+                image: image.into(),
+                scale: FloatOrd(scale),
+            }
         }
     }
 
@@ -470,7 +473,11 @@ mod action {
                 .take::<Image>()
                 .ok_or_else(|| BevyError::from("XXX TODO"))?;
 
-            let target_size = original_image.size().as_vec2().mul(action.scale).as_uvec2();
+            let target_size = original_image
+                .size()
+                .as_vec2()
+                .mul(action.scale.0)
+                .as_uvec2();
 
             let resized_image = resize_image(original_image, target_size);
 
@@ -1549,9 +1556,9 @@ fn main() {
             Box::new(bsn! {
                 MeshletMesh3d(action::MeshletFromMesh::new(
                     action::MeshFromHeightmap::new(
-                        action::ResizeImage { image: "heightmaps/Heightmap_08_Island_512.png".into(), scale: 0.5 })
+                        action::ResizeImage::new("heightmaps/Heightmap_08_Island_512.png", 0.5)
                     )
-                )
+                ))
                 template(|context| {
                     let s = context.resource::<AssetServer>();
                     Ok(MeshMaterial3d::<StandardMaterial>(s.add(StandardMaterial {
@@ -1567,9 +1574,9 @@ fn main() {
             Box::new(bsn! {
                 MeshletMesh3d(action::MeshletFromMesh::new(
                     action::MeshFromHeightmap::new(
-                        action::ResizeImage { image: "heightmaps/Heightmap_08_Island_512.png".into(), scale: 0.5 })
+                        action::ResizeImage::new("heightmaps/Heightmap_08_Island_512.png", 0.5)
                     )
-                )
+                ))
                 MeshMaterial3d<MeshletDebugMaterial>(asset_value(MeshletDebugMaterial::default()))
                 Transform::from_xyz(0.0, 0.1, 1.5).with_scale(vec3(0.75, 1.0, 0.75))
             }),
