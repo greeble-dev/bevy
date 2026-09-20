@@ -6,23 +6,23 @@
 use argh::FromArgs;
 use bevy::{
     asset::{
-        basset::*, io::Reader, saver::AssetSaver, AssetLoader, AssetRef, ErasedLoadedAsset,
-        HandleDeserializeProcessor, LoadContext, PolyAssetLoader,
-    },
-    asset::{
         basset::{
             action::LoadPath,
             publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
+            *,
         },
         basset_action_version,
-        io::{AssetSourceId, Writer},
+        io::{AssetSourceId, Reader, Writer},
         meta::Settings,
-        saver::{ErasedSavedAsset, PolyAssetSaver, SavedAsset},
-        AssetPath, AsyncWriteExt, EphemeralHandleBehavior, HandleSerializeProcessor,
+        saver::{AssetSaver, ErasedSavedAsset, PolyAssetSaver, SavedAsset},
+        AssetLoader, AssetPath, AssetRef, AsyncWriteExt, EphemeralHandleBehavior,
+        ErasedLoadedAsset, HandleDeserializeProcessor, HandleSerializeProcessor, LoadContext,
+        PolyAssetLoader,
     },
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     ecs::error::BevyError,
     image::{ImageSaver, ImageSaverSettings},
+    input::common_conditions::input_just_pressed,
     light::CascadeShadowConfigBuilder,
     log::LogPlugin,
     mesh::SerializedMesh,
@@ -30,9 +30,8 @@ use bevy::{
     prelude::*,
     reflect::{
         serde::{ReflectDeserializer, ReflectSerializer},
-        TypePath,
+        TypePath, TypeRegistry, TypeRegistryArc,
     },
-    reflect::{TypeRegistry, TypeRegistryArc},
     render::render_resource::AsBindGroup,
     scene::SceneDependencies,
     tasks::block_on,
@@ -1084,20 +1083,11 @@ mod acme {
         scene: &AcmeScene,
         parent_entity: Option<Entity>,
         standard_material_assets: &mut Assets<StandardMaterial>,
-        meshlet_debug_material_assets: &mut Assets<MeshletDebugMaterial>,
     ) {
         for scene_entity in &scene.entities {
             let mut world_entity = commands.spawn(scene_entity.transform);
 
-            // XXX TODO: Currently this forces the debug #material for meshlets.
-            // Should change that to be a scene conversion action. AcmeMaterial
-            // will become an enum of standard/debug materials.
-
-            if scene_entity.meshlet_mesh.is_some() {
-                world_entity.insert(MeshMaterial3d(
-                    meshlet_debug_material_assets.add(MeshletDebugMaterial::default()),
-                ));
-            } else if let Some(material) = &scene_entity.material {
+            if let Some(material) = &scene_entity.material {
                 world_entity.insert(MeshMaterial3d(
                     standard_material_assets.add(material.clone()),
                 ));
@@ -1131,7 +1121,6 @@ mod acme {
         spawners: Query<(Entity, &AcmeSceneSpawner)>,
         scene_assets: Res<Assets<AcmeScene>>,
         mut standard_material_assets: ResMut<Assets<StandardMaterial>>,
-        mut meshlet_debug_material_assets: ResMut<Assets<MeshletDebugMaterial>>,
     ) {
         for (entity, spawner) in spawners {
             let Some(scene_asset) = scene_assets.get(&spawner.0) else {
@@ -1149,7 +1138,6 @@ mod acme {
                 scene_asset,
                 Some(entity),
                 &mut standard_material_assets,
-                &mut meshlet_debug_material_assets,
             );
         }
     }
@@ -1161,6 +1149,43 @@ struct MeshletDebugMaterial {
 }
 
 impl Material for MeshletDebugMaterial {}
+
+#[derive(Component, Clone)]
+struct StashedStandardMaterial(Handle<StandardMaterial>);
+
+#[derive(Resource)]
+struct MeshletDebugMaterialHandle(Handle<MeshletDebugMaterial>);
+
+fn toggle_meshlet_debug(
+    mut commands: Commands,
+    debug_material: Res<MeshletDebugMaterialHandle>,
+    query: Query<
+        (
+            Entity,
+            Option<&MeshMaterial3d<StandardMaterial>>,
+            Option<&StashedStandardMaterial>,
+        ),
+        With<MeshletMesh3d>,
+    >,
+) {
+    for (entity, standard, stashed) in query {
+        if let Some(stashed) = stashed {
+            commands
+                .entity(entity)
+                .remove::<MeshMaterial3d<MeshletDebugMaterial>>()
+                .remove::<StashedStandardMaterial>()
+                .insert(MeshMaterial3d(stashed.0.clone()));
+        }
+
+        if let Some(standard) = standard {
+            commands
+                .entity(entity)
+                .remove::<MeshMaterial3d<StandardMaterial>>()
+                .insert(MeshMaterial3d(debug_material.0.clone()))
+                .insert(StashedStandardMaterial(standard.0.clone()));
+        }
+    }
+}
 
 #[derive(Resource)]
 struct AssetHandles(Vec<UntypedHandle>);
@@ -1229,6 +1254,10 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    commands.insert_resource(MeshletDebugMaterialHandle(
+        asset_server.add(MeshletDebugMaterial::default()),
+    ));
+
     commands.insert_resource(AssetHandles(
         asset_paths
             .regular
@@ -1277,6 +1306,17 @@ fn setup(
             ..default()
         }
         .build(),
+    ));
+
+    commands.spawn((
+        Text::new("M: Toggle meshlet debug"),
+        TextFont::from_font_size(FontSize::Px(12.0)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(12),
+            left: px(12),
+            ..Default::default()
+        },
     ));
 }
 
@@ -1572,15 +1612,6 @@ fn main() {
                 Transform::from_xyz(-2.0, 0.1, 1.5).with_scale(vec3(0.75, 1.0, 0.75))
             }),
             Box::new(bsn! {
-                MeshletMesh3d(action::MeshletFromMesh::new(
-                    action::MeshFromHeightmap::new(
-                        action::ResizeImage::new("heightmaps/Heightmap_08_Island_512.png", 0.5)
-                    )
-                ))
-                MeshMaterial3d<MeshletDebugMaterial>(asset_value(MeshletDebugMaterial::default()))
-                Transform::from_xyz(0.0, 0.1, 1.5).with_scale(vec3(0.75, 1.0, 0.75))
-            }),
-            Box::new(bsn! {
                 MeshletMesh3d(action::MeshletFromMesh::new("Duck.glb#Mesh0/Primitive0"))
                 MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
                 Transform::from_xyz(2.0, 0.0, 1.5).looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01))
@@ -1689,7 +1720,11 @@ fn main() {
                 .add_systems(Startup, setup)
                 .add_systems(Update, print)
                 .add_systems(Update, reload.run_if(on_timer(Duration::from_secs(2))))
-                .add_systems(Update, acme::tick_scene_spawners);
+                .add_systems(Update, acme::tick_scene_spawners)
+                .add_systems(
+                    Update,
+                    toggle_meshlet_debug.run_if(input_just_pressed(KeyCode::KeyM)),
+                );
 
             if args.mode == ArgMode::Development {
                 app.add_systems(Update, dump.run_if(on_timer(Duration::from_secs(4))));
