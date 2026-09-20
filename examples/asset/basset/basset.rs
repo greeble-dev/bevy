@@ -89,7 +89,7 @@ mod action {
             let mut strings = Vec::new();
 
             for path in &action.strings {
-                strings.push(context.load_dependee::<demo::StringAsset>(path).await?.0);
+                strings.push(context.load_value::<demo::StringAsset>(path).await?.0);
             }
 
             let joined = strings
@@ -125,7 +125,7 @@ mod action {
         ) -> Result<BassetActionOutput, Self::Error> {
             let string = demo::StringAsset(
                 context
-                    .load_dependee::<demo::StringAsset>(&action.string)
+                    .load_value::<demo::StringAsset>(&action.string)
                     .await?
                     .0
                     .to_uppercase(),
@@ -164,7 +164,7 @@ mod action {
             mut context: ApplyContext<'_>,
             action: &Self::Action,
         ) -> Result<BassetActionOutput, Self::Error> {
-            let gltf = context.erased_load_dependee(&action.gltf).await?;
+            let gltf = context.erased_load_value(&action.gltf).await?;
 
             let scene = acme::from_gltf(&gltf)?;
 
@@ -220,7 +220,7 @@ mod action {
             // TODO: Should we check if `MeshletPlugin` is registered so we can
             // return a sensible error?
 
-            let mesh = context.load_dependee::<Mesh>(&action.mesh).await?;
+            let mesh = context.load_value::<Mesh>(&action.mesh).await?;
 
             let meshlet =
                 MeshletMesh::from_mesh(&mesh, action.vertex_position_quantization_factor())?;
@@ -256,9 +256,7 @@ mod action {
             // TODO: Should we check if `MeshletPlugin` is registered so we can
             // return a sensible error?
 
-            let mut scene = context
-                .load_dependee::<acme::AcmeScene>(&action.scene)
-                .await?;
+            let mut scene = context.load_value::<acme::AcmeScene>(&action.scene).await?;
 
             for entity in &mut scene.entities {
                 if let Some(mesh) = entity.mesh.take() {
@@ -319,7 +317,7 @@ mod action {
         ) -> Result<BassetActionOutput, Self::Error> {
             // XXX TODO: See what can be refactored out of here.
             let uncompressed_asset = context
-                .erased_load_dependee(&action.image)
+                .erased_load_value(&action.image)
                 .await?
                 .take::<Image>()
                 .expect("XXX TODO");
@@ -468,7 +466,7 @@ mod action {
             action: &Self::Action,
         ) -> Result<BassetActionOutput, Self::Error> {
             let original_image = context
-                .erased_load_dependee(&action.image)
+                .erased_load_value(&action.image)
                 .await?
                 .take::<Image>()
                 .ok_or_else(|| BevyError::from("XXX TODO"))?;
@@ -568,7 +566,7 @@ mod action {
             action: &Self::Action,
         ) -> Result<BassetActionOutput, Self::Error> {
             let heightmap = context
-                .erased_load_dependee(&action.heightmap)
+                .erased_load_value(&action.heightmap)
                 .await?
                 .take::<Image>()
                 .ok_or_else(|| BevyError::from("XXX TODO"))?
@@ -674,7 +672,7 @@ mod action {
             action: &Self::Action,
         ) -> Result<BassetActionOutput, Self::Error> {
             let heightmap = context
-                .erased_load_dependee(&action.heightmap)
+                .erased_load_value(&action.heightmap)
                 .await?
                 .take::<Image>()
                 .ok_or_else(|| BevyError::from("XXX TODO"))?

@@ -504,7 +504,7 @@ impl ApplyContext<'_> {
         self.dependency_loading
     }
 
-    pub async fn erased_load_dependee(
+    pub async fn erased_load_value(
         &mut self,
         path: &AssetRef<'static>,
     ) -> Result<ErasedLoadedAsset, BevyError> {
@@ -533,11 +533,8 @@ impl ApplyContext<'_> {
             .map_err(|_| format!("Couldn't find labeled asset \"{path:?}\".").into())
     }
 
-    pub async fn load_dependee<T: Asset>(
-        &mut self,
-        path: &AssetRef<'static>,
-    ) -> Result<T, BevyError> {
-        match self.erased_load_dependee(path).await?.value.downcast::<T>() {
+    pub async fn load_value<T: Asset>(&mut self, path: &AssetRef<'static>) -> Result<T, BevyError> {
+        match self.erased_load_value(path).await?.value.downcast::<T>() {
             Ok(result) => Ok(*result),
             // XXX TODO: Don't panic.
             Err(original) => panic!(
