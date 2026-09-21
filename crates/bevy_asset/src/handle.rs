@@ -709,7 +709,7 @@ pub enum UntypedAssetConversionError {
 mod tests {
     use alloc::boxed::Box;
     use bevy_platform::hash::FixedHasher;
-    use bevy_reflect::{FromReflect, PartialReflect};
+    use bevy_reflect::{FromReflect, PartialReflect, TypeRegistryArc};
     use core::hash::BuildHasher;
     use uuid::Uuid;
 
@@ -825,7 +825,12 @@ mod tests {
         }
         impl Asset for MyAsset {}
         impl VisitAssetDependencies for MyAsset {
-            fn visit_dependencies(&self, _visit: &mut impl FnMut(AssetDependency)) {}
+            fn visit_dependencies(
+                &self,
+                _registry: &TypeRegistryArc,
+                _visit: &mut impl FnMut(AssetDependency),
+            ) {
+            }
         }
 
         let mut app = create_app().0;

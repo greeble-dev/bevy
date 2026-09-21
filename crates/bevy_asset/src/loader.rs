@@ -19,7 +19,7 @@ use alloc::{
 use atomicow::CowArc;
 use bevy_ecs::{error::BevyError, world::World};
 use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
-use bevy_reflect::{PartialReflect, Reflect, TypePath, TypeRegistry};
+use bevy_reflect::{PartialReflect, Reflect, TypePath, TypeRegistry, TypeRegistryArc};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
     any::{Any, TypeId},
@@ -308,9 +308,9 @@ pub struct LoadedAsset<A: Asset> {
 
 impl<A: Asset> LoadedAsset<A> {
     /// Create a new loaded asset. This will use [`VisitAssetDependencies`](crate::VisitAssetDependencies) to populate `dependencies`.
-    pub fn new_with_dependencies(value: A) -> Self {
+    pub fn new_with_dependencies(registry: &TypeRegistryArc, value: A) -> Self {
         let mut dependencies = <HashSet<_>>::default();
-        value.visit_dependencies(&mut |dependency| {
+        value.visit_dependencies(registry, &mut |dependency| {
             let Some(asset_index) = dependency
                 .id()
                 .and_then(|id| ErasedAssetIndex::try_from(id).ok())
@@ -363,11 +363,14 @@ impl<A: Asset> LoadedAsset<A> {
     }
 }
 
-impl<A: Asset> From<A> for LoadedAsset<A> {
-    fn from(asset: A) -> Self {
-        LoadedAsset::new_with_dependencies(asset)
-    }
-}
+// XXX TODO: Had to remove this to support `LoadedAsset::new_with_dependencies`
+// taking a `TypeRegistry`. Review and double check that's still needed.
+// Might need a migration guide? Is technically public but unlikely to be used.
+// impl<A: Asset> From<A> for LoadedAsset<A> {
+//     fn from(asset: A) -> Self {
+//         LoadedAsset::new_with_dependencies(asset)
+//     }
+// }
 
 /// Describes how an asset loader depended on actions and files.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Reflect)]
@@ -497,11 +500,15 @@ impl ErasedLoadedAsset {
 
     // XXX TODO: Review and justify. Also check the awkwardness where
     // this is `&mut dyn` but `VisitAssetDependencies` is `&mut impl`.
-    pub fn visit_dependencies(&self, visit: &mut dyn FnMut(AssetDependency)) {
-        self.value.visit_dependencies(visit);
+    pub fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut dyn FnMut(AssetDependency),
+    ) {
+        self.value.visit_dependencies(registry, visit);
 
         for labeled_asset in &self.labeled_assets {
-            labeled_asset.asset.visit_dependencies(visit);
+            labeled_asset.asset.visit_dependencies(registry, visit);
         }
     }
 
@@ -520,7 +527,11 @@ pub(crate) trait AssetContainer: Downcast + Any + Send + Sync + 'static {
     fn asset_type_name(&self) -> &'static str;
     // XXX TODO: Review and justify. Also check the awkwardness where
     // this is `&mut dyn` but `VisitAssetDependencies` is `&mut impl`.
-    fn visit_dependencies(&self, visit: &mut dyn FnMut(AssetDependency));
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut dyn FnMut(AssetDependency),
+    );
 }
 
 impl_downcast!(AssetContainer);
@@ -538,8 +549,14 @@ impl<A: Asset> AssetContainer for A {
         core::any::type_name::<A>()
     }
 
-    fn visit_dependencies(&self, visit: &mut dyn FnMut(AssetDependency)) {
-        VisitAssetDependencies::visit_dependencies(self, &mut |dependency| visit(dependency));
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut dyn FnMut(AssetDependency),
+    ) {
+        VisitAssetDependencies::visit_dependencies(self, registry, &mut |dependency| {
+            visit(dependency);
+        });
     }
 }
 
@@ -767,7 +784,7 @@ impl<'a> LoadContext<'a> {
         // `LoadedAsset`, `ErasedLoadedAsset`, or `LoadContext` (for mutating existing subassets),
         // we should move this to some point after those mutations are not possible. This spot is
         // convenient because we still have access to the static type of `A`.
-        value.visit_dependencies(&mut |dependency| {
+        value.visit_dependencies(self.asset_server.type_registry(), &mut |dependency| {
             // Ignore UntypedAssetId::Uuid since UUID assets are always loaded.
             if let Some(UntypedAssetId::Index { type_id, index }) = dependency.id() {
                 self.dependencies
@@ -789,21 +806,23 @@ impl<'a> LoadContext<'a> {
     pub fn finish_reflect(
         mut self,
         value: Box<dyn PartialReflect>,
-        registry: &TypeRegistry,
     ) -> Result<ErasedLoadedAsset, BevyError> {
         let type_id = value
             .get_represented_type_info()
             .expect("XXX TODO")
             .type_id();
 
-        let reflect_asset = registry
+        let reflect_asset = self
+            .asset_server
+            .type_registry()
+            .read()
             .get_type_data::<ReflectAsset>(type_id)
             .expect("XXX TODO")
             .clone();
 
         let container = reflect_asset.to_container(value);
 
-        container.visit_dependencies(&mut |dependency| {
+        container.visit_dependencies(self.asset_server.type_registry(), &mut |dependency| {
             // Ignore UntypedAssetId::Uuid since UUID assets are always loaded.
             if let Some(UntypedAssetId::Index { type_id, index }) = dependency.id() {
                 self.dependencies

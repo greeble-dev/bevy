@@ -13,6 +13,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+use bevy_reflect::TypeRegistryArc;
 use futures_lite::AsyncReadExt;
 
 use crate::{
@@ -275,7 +276,11 @@ impl Process for () {
 impl Asset for () {}
 
 impl VisitAssetDependencies for () {
-    fn visit_dependencies(&self, _visit: &mut impl FnMut(bevy_asset::AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        _registry: &TypeRegistryArc,
+        _visit: &mut impl FnMut(bevy_asset::AssetDependency),
+    ) {
         unreachable!()
     }
 }

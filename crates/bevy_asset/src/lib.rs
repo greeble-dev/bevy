@@ -226,7 +226,7 @@ use bevy_ecs::{
     world::FromWorld,
 };
 use bevy_platform::collections::{HashMap, HashSet};
-use bevy_reflect::{FromReflect, GetTypeRegistration, Reflect, TypePath};
+use bevy_reflect::{FromReflect, GetTypeRegistration, Reflect, TypePath, TypeRegistryArc};
 use core::{any::TypeId, ops::Deref};
 use tracing::error;
 
@@ -530,11 +530,19 @@ impl AssetDependency<'_> {
 /// Note that this trait is automatically implemented when deriving [`Asset`].
 pub trait VisitAssetDependencies {
     /// Apply the `visit` closure to every asset dependency.
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency));
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    );
 }
 
 impl<A: Asset> VisitAssetDependencies for Handle<A> {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        _registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         // XXX TODO: Doesn't feel great having to clone here.
         //
         // Note that if UUID assets are dropped then both `Handle<A>` and
@@ -551,91 +559,139 @@ impl<A: Asset> VisitAssetDependencies for Handle<A> {
 }
 
 impl VisitAssetDependencies for UntypedHandle {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        _registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         visit(AssetDependency::Handle(self));
     }
 }
 
 impl VisitAssetDependencies for UntypedAssetId {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        _registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         visit(AssetDependency::Id(*self));
     }
 }
 
 impl<V: VisitAssetDependencies> VisitAssetDependencies for Option<V> {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         if let Some(dependency) = self {
-            dependency.visit_dependencies(visit);
+            dependency.visit_dependencies(registry, visit);
         }
     }
 }
 
 impl<V: VisitAssetDependencies, const N: usize> VisitAssetDependencies for [V; N] {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         for dependency in self {
-            dependency.visit_dependencies(visit);
+            dependency.visit_dependencies(registry, visit);
         }
     }
 }
 
 impl<V: VisitAssetDependencies> VisitAssetDependencies for [V] {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         for dependency in self {
-            dependency.visit_dependencies(visit);
+            dependency.visit_dependencies(registry, visit);
         }
     }
 }
 
 impl<V: VisitAssetDependencies> VisitAssetDependencies for Box<V> {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
-        self.as_ref().visit_dependencies(visit);
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
+        self.as_ref().visit_dependencies(registry, visit);
     }
 }
 
 impl<V: VisitAssetDependencies> VisitAssetDependencies for Vec<V> {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         for dependency in self {
-            dependency.visit_dependencies(visit);
+            dependency.visit_dependencies(registry, visit);
         }
     }
 }
 
 impl<V: VisitAssetDependencies> VisitAssetDependencies for VecDeque<V> {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         for dependency in self {
-            dependency.visit_dependencies(visit);
+            dependency.visit_dependencies(registry, visit);
         }
     }
 }
 
 impl<V: VisitAssetDependencies> VisitAssetDependencies for HashSet<V> {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         for dependency in self {
-            dependency.visit_dependencies(visit);
+            dependency.visit_dependencies(registry, visit);
         }
     }
 }
 
 impl<V: VisitAssetDependencies, K> VisitAssetDependencies for HashMap<K, V> {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         for dependency in self.values() {
-            dependency.visit_dependencies(visit);
+            dependency.visit_dependencies(registry, visit);
         }
     }
 }
 
 impl<V: VisitAssetDependencies> VisitAssetDependencies for BTreeSet<V> {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         for dependency in self {
-            dependency.visit_dependencies(visit);
+            dependency.visit_dependencies(registry, visit);
         }
     }
 }
 
 impl<V: VisitAssetDependencies, K> VisitAssetDependencies for BTreeMap<K, V> {
-    fn visit_dependencies(&self, visit: &mut impl FnMut(AssetDependency)) {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
         for dependency in self.values() {
-            dependency.visit_dependencies(visit);
+            dependency.visit_dependencies(registry, visit);
         }
     }
 }
@@ -1814,7 +1870,7 @@ mod tests {
             dependencies: vec![dep_handle.clone()],
             sub_texts: Vec::new(),
         };
-        let a_handle = app.world().resource::<AssetServer>().load_asset(a);
+        let a_handle = app.world().resource::<AssetServer>().add(a);
 
         // load_asset does not count as a load.
         assert_eq!(get_started_load_count(app.world()), 1);

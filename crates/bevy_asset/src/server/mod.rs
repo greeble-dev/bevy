@@ -82,6 +82,7 @@ pub(crate) struct AssetServerData {
     meta_check: AssetMetaCheck,
     unapproved_path_mode: UnapprovedPathMode,
     basset_action_source: Arc<dyn ActionSource>,
+    registry: TypeRegistryArc,
 }
 
 /// The "asset mode" the server is currently in.
@@ -157,7 +158,7 @@ impl AssetServer {
         infos.watching_for_changes = watching_for_changes;
 
         let basset_action_source = basset_action_source_builder
-            .map(|s| s.build(sources.clone(), registry))
+            .map(|s| s.build(sources.clone(), registry.clone()))
             .unwrap_or_else(|| Arc::new(MinimalActionSource::default()));
         Self {
             data: Arc::new(AssetServerData {
@@ -170,6 +171,7 @@ impl AssetServer {
                 infos: RwLock::new(infos),
                 unapproved_path_mode,
                 basset_action_source,
+                registry,
             }),
         }
     }
@@ -535,8 +537,11 @@ impl AssetServer {
                 }) {
                 Ok(handle) => server.send_asset_event(InternalAssetEvent::Loaded {
                     index,
-                    loaded_asset: LoadedAsset::new_with_dependencies(LoadedUntypedAsset { handle })
-                        .into(),
+                    loaded_asset: LoadedAsset::new_with_dependencies(
+                        &server.data.registry,
+                        LoadedUntypedAsset { handle },
+                    )
+                    .into(),
                 }),
                 Err(err) => {
                     error!("{err}");
@@ -763,15 +768,21 @@ impl AssetServer {
     /// After the asset has been fully loaded by the [`AssetServer`], it will show up in the relevant [`Assets`] storage.
     #[must_use = "not using the returned strong handle may result in the unexpected release of the asset"]
     pub fn add<A: Asset>(&self, asset: A) -> Handle<A> {
-        self.load_asset(LoadedAsset::new_with_dependencies(asset))
-    }
-
-    pub(crate) fn load_asset<A: Asset>(&self, asset: impl Into<LoadedAsset<A>>) -> Handle<A> {
-        let loaded_asset: LoadedAsset<A> = asset.into();
+        let loaded_asset = LoadedAsset::new_with_dependencies(&self.data.registry, asset);
         let erased_loaded_asset: ErasedLoadedAsset = loaded_asset.into();
         self.load_asset_untyped(None, erased_loaded_asset)
             .typed_debug_checked()
     }
+
+    // XXX TODO: This was removed. `Into<LoadedAsset<A>>` had to go because
+    // `LoadedAsset::new_with_dependencies` now requires a type registry. So `load_asset`
+    // would have to take just an `A: Asset`, at which point it's no different to `AssetServer::add`.
+    // pub(crate) fn load_asset<A: Asset>(&self, asset: impl Into<LoadedAsset<A>>) -> Handle<A> {
+    //     let loaded_asset: LoadedAsset<A> = asset.into();
+    //     let erased_loaded_asset: ErasedLoadedAsset = loaded_asset.into();
+    //     self.load_asset_untyped(None, erased_loaded_asset)
+    //         .typed_debug_checked()
+    // }
 
     #[must_use = "not using the returned strong handle may result in the unexpected release of the asset"]
     pub(crate) fn load_asset_untyped(
@@ -827,11 +838,12 @@ impl AssetServer {
         let index = (&handle).try_into().unwrap();
 
         let event_sender = self.data.asset_event_sender.clone();
+        let registry = self.data.registry.clone();
 
         let task = IoTaskPool::get().spawn(async move {
             match future.await {
                 Ok(asset) => {
-                    let loaded_asset = LoadedAsset::new_with_dependencies(asset).into();
+                    let loaded_asset = LoadedAsset::new_with_dependencies(&registry, asset).into();
                     event_sender
                         .send(InternalAssetEvent::Loaded {
                             index,
@@ -965,6 +977,7 @@ impl AssetServer {
                     Ok(_) => server.send_asset_event(InternalAssetEvent::Loaded {
                         index,
                         loaded_asset: LoadedAsset::new_with_dependencies(
+                            &server.data.registry,
                             LoadedFolder { handles },
                         )
                         .into(),
@@ -1110,7 +1123,7 @@ impl AssetServer {
     pub fn are_dependencies_loaded(&self, value: &impl VisitAssetDependencies) -> bool {
         let infos = self.read_infos();
         let mut loaded = true;
-        value.visit_dependencies(&mut |asset_dependency| {
+        value.visit_dependencies(&self.data.registry, &mut |asset_dependency| {
             let index = match asset_dependency.id() {
                 // Ignore UUID assets - this effectively makes them considered loaded.
                 Some(UntypedAssetId::Uuid { .. }) | None => return,
@@ -1137,7 +1150,7 @@ impl AssetServer {
     pub fn are_direct_dependencies_loaded(&self, value: &impl VisitAssetDependencies) -> bool {
         let infos = self.read_infos();
         let mut loaded = true;
-        value.visit_dependencies(&mut |asset_dependency| {
+        value.visit_dependencies(&self.data.registry, &mut |asset_dependency| {
             let index = match asset_dependency.id() {
                 // Ignore UUID assets - this effectively makes them considered loaded.
                 Some(UntypedAssetId::Uuid { .. }) | None => return,
@@ -1633,6 +1646,10 @@ impl AssetServer {
     // XXX TODO: Document. Review visibility.
     pub fn basset_action_source<'a>(&'a self) -> &'a Arc<dyn ActionSource> {
         &self.data.basset_action_source
+    }
+
+    pub fn type_registry<'a>(&'a self) -> &'a TypeRegistryArc {
+        &self.data.registry
     }
 }
 

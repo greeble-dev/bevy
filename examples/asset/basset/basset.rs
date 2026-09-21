@@ -1057,7 +1057,7 @@ impl PolyAssetLoader for RonAssetLoader {
             .deserialize(&mut ron::de::Deserializer::from_bytes(&bytes).expect("XXX TODO"))
             .expect("XXX TODO");
 
-        load_context.finish_reflect(reflected, &registry)
+        load_context.finish_reflect(reflected)
     }
 
     fn extensions(&self) -> &[&str] {

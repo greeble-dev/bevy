@@ -564,7 +564,8 @@ impl ApplyContext<'_> {
     }
 
     pub fn finish<A: Asset>(self, asset: A) -> BassetActionOutput {
-        let mut loaded_asset = LoadedAsset::new_with_dependencies(asset);
+        let mut loaded_asset =
+            LoadedAsset::new_with_dependencies(self.asset_server.type_registry(), asset);
 
         loaded_asset.loader_dependencies = self.loader_dependencies;
 
@@ -662,7 +663,7 @@ fn load_dependencies(
         .collect::<Vec<_>>();
 
     if dependency_loading == DependencyLoading::Yes {
-        asset.visit_dependencies(&mut |dependency| {
+        asset.visit_dependencies(asset_server.type_registry(), &mut |dependency| {
             match dependency {
                 AssetDependency::Id(_) => panic!("XXX TODO: Not supported"),
                 AssetDependency::Path(_) => (),
@@ -1359,7 +1360,7 @@ impl DevelopmentActionSource {
 
                 let mut external_dependees = HashSet::<RootAssetRef>::new();
 
-                asset.visit_dependencies(&mut |dependency| {
+                asset.visit_dependencies(&self.registry, &mut |dependency| {
                     if let Some(path) = match dependency {
                         AssetDependency::Id(_) => todo!(
                             "Decide if we disallow ids. Dependency tracking requires the path."
@@ -1629,7 +1630,7 @@ impl ActionSource for DevelopmentActionSource {
                                     .await
                                     .expect("XXX TODO");
 
-                                loaded.visit_dependencies(&mut |dependency| {
+                                loaded.visit_dependencies(&self.registry, &mut |dependency| {
                                     if let Some(path) = match dependency {
                                         AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
                                         AssetDependency::Handle(handle) => handle.path().cloned(),
@@ -1709,7 +1710,7 @@ impl ActionSource for DevelopmentActionSource {
                                     input_stack.push(dependency.clone().into());
                                 }
 
-                                loaded.visit_dependencies(&mut |dependency| {
+                                loaded.visit_dependencies(&self.registry, &mut |dependency| {
                                     if let Some(path) = match dependency {
                                         AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
                                         AssetDependency::Handle(handle) => handle.path().cloned(),
