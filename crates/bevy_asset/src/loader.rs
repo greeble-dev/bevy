@@ -456,15 +456,11 @@ impl ErasedLoadedAsset {
     )]
     pub fn take_labeled(
         mut self,
-        label: Option<impl AsRef<str>>,
+        label: impl AsRef<str>,
     ) -> Result<ErasedLoadedAsset, ErasedLoadedAsset> {
-        if let Some(label) = label {
-            match self.label_to_asset_index.get(label.as_ref()) {
-                Some(index) => Ok(self.labeled_assets.remove(*index).asset),
-                None => Err(self),
-            }
-        } else {
-            Ok(self)
+        match self.label_to_asset_index.get(label.as_ref()) {
+            Some(index) => Ok(self.labeled_assets.remove(*index).asset),
+            None => Err(self),
         }
     }
 
@@ -509,6 +505,7 @@ impl ErasedLoadedAsset {
         }
     }
 
+    // XXX TODO: Review and justify.
     pub fn as_partial_reflect<'b>(
         &'b self,
         registry: &TypeRegistry,

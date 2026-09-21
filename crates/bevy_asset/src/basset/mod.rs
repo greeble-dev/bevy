@@ -528,9 +528,13 @@ impl ApplyContext<'_> {
             (hash, dependency_key),
         );
 
-        asset
-            .take_labeled(path.label_cow())
-            .map_err(|_| format!("Couldn't find labeled asset \"{path:?}\".").into())
+        if let Some(label) = path.label_cow() {
+            asset
+                .take_labeled(label)
+                .map_err(|_| format!("Couldn't find labeled asset \"{path:?}\".").into())
+        } else {
+            Ok(asset)
+        }
     }
 
     pub async fn load_value<T: Asset>(&mut self, path: &AssetRef<'static>) -> Result<T, BevyError> {
@@ -542,6 +546,13 @@ impl ApplyContext<'_> {
                 type_name::<T>(),
                 original.asset_type_name(),
             ),
+        }
+    }
+
+    pub fn load_handle<T: Asset>(&self, path: impl Into<AssetRef<'static>>) -> Handle<T> {
+        match self.dependency_loading {
+            DependencyLoading::Yes => self.asset_server.load(path),
+            DependencyLoading::No => self.asset_server.get_or_create_path_handle(path, None),
         }
     }
 
@@ -1864,9 +1875,13 @@ impl PolyAssetLoader for BassetLoader {
             })?;
 
         // XXX TODO: Maybe wrong. See comment on `BassetFileSerializable::root`.
-        asset
-            .take_labeled(basset.root.label_cow())
-            .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", basset.root).into())
+        if let Some(label) = basset.root.label_cow() {
+            asset
+                .take_labeled(label)
+                .map_err(|_| format!("Couldn't find labeled asset \"{:?}\".", basset.root).into())
+        } else {
+            Ok(asset)
+        }
     }
 
     fn extensions(&self) -> &[&str] {
