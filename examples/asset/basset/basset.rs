@@ -20,11 +20,12 @@ use bevy::{
         PolyAssetLoader,
     },
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
-    ecs::error::BevyError,
+    ecs::{error::BevyError, system::RunSystemOnce},
     image::{ImageSaver, ImageSaverSettings},
     input::common_conditions::input_just_pressed,
     light::CascadeShadowConfigBuilder,
     log::LogPlugin,
+    math::FloatOrd,
     mesh::SerializedMesh,
     pbr::experimental::meshlet::*,
     prelude::*,
@@ -36,6 +37,7 @@ use bevy::{
     scene::SceneDependencies,
     tasks::block_on,
     time::common_conditions::on_timer,
+    world_serialization::WorldAssetLoader,
 };
 use core::{
     hash::{Hash, Hasher},
@@ -54,7 +56,6 @@ mod action {
             ctt::{CompressedImageSaverCtt, CompressedImageSaverCttFormat},
             CompressedImageSaverSettings,
         },
-        math::FloatOrd,
         mesh::Indices,
     };
     use core::ops::Mul;
@@ -397,6 +398,8 @@ mod action {
         }
     }
 
+    // XXX TODO: Should this be called `ScaleImage`? Maybe resize is more explicit...
+    // scale could mean something like changing dynamic range.
     #[derive(Default, Debug, PartialEq, Reflect, Hash)]
     #[reflect(BassetAction, PartialEq, Hash)]
     pub struct ResizeImage {
@@ -713,6 +716,187 @@ mod action {
             )))
         }
     }
+
+    // XXX TODO: Investigate making this more generic for all materials. Either
+    // we extend `VisitAssetDependencies` to allow mutation (but how do we get
+    // from an unknown asset type to that trait?), or use reflection.
+    #[derive(Debug, PartialEq, Hash, Reflect)]
+    #[reflect(BassetAction, PartialEq, Hash)]
+    pub struct OptimizeStandardMaterial {
+        pub material: AssetRef<'static>,
+        pub compress_textures: bool,
+        pub scale_textures: Option<FloatOrd>,
+    }
+
+    impl BassetAction for OptimizeStandardMaterial {
+        basset_action_version!(crate);
+    }
+
+    impl Default for OptimizeStandardMaterial {
+        fn default() -> Self {
+            Self {
+                material: Default::default(),
+                compress_textures: true,
+                scale_textures: None,
+            }
+        }
+    }
+
+    impl From<OptimizeStandardMaterial> for AssetRef<'static> {
+        fn from(value: OptimizeStandardMaterial) -> Self {
+            AssetRef::new(value)
+        }
+    }
+
+    #[derive(TypePath)]
+    pub struct OptimizeStandardMaterialFunction;
+
+    fn optimize_texture(
+        context: &mut ApplyContext<'_>,
+        options: &OptimizeStandardMaterial,
+        handle: &mut Option<Handle<Image>>,
+    ) {
+        if let Some(handle) = handle {
+            if let Some(scale) = options.scale_textures {
+                *handle = context
+                    .load_handle(ResizeImage::new(handle.path().expect("XXX TODO"), scale.0));
+            }
+
+            if options.compress_textures {
+                *handle = context.load_handle(CompressImage::new(handle.path().expect("XXX TODO")));
+            }
+        }
+    }
+
+    impl BassetActionFunction for OptimizeStandardMaterialFunction {
+        type Action = OptimizeStandardMaterial;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            mut context: ApplyContext<'_>,
+            action: &Self::Action,
+        ) -> Result<BassetActionOutput, Self::Error> {
+            let mut material = context
+                .erased_load_value(&action.material)
+                .await?
+                .take::<StandardMaterial>()
+                .expect("XXX TODO");
+
+            // XXX TODO: This misses some textures because I didn't want to
+            // faff around with feature flags. In future this should be done
+            // more generically - see comment on `CompressStandardMaterialTextures`.
+            optimize_texture(&mut context, action, &mut material.base_color_texture);
+            optimize_texture(&mut context, action, &mut material.emissive_texture);
+            optimize_texture(
+                &mut context,
+                action,
+                &mut material.metallic_roughness_texture,
+            );
+            optimize_texture(&mut context, action, &mut material.normal_map_texture);
+            optimize_texture(&mut context, action, &mut material.occlusion_texture);
+            optimize_texture(&mut context, action, &mut material.depth_map);
+
+            Ok(context.finish(material))
+        }
+    }
+
+    #[derive(Default, Clone, Debug, PartialEq, Hash, Reflect)]
+    #[reflect(BassetAction, PartialEq, Hash)]
+    pub struct OptimizeGltfScene {
+        pub gltf: AssetRef<'static>,
+        pub convert_meshes_to_meshlets: bool,
+        pub compress_textures: bool,
+        pub scale_textures: Option<FloatOrd>,
+    }
+
+    impl BassetAction for OptimizeGltfScene {
+        basset_action_version!(crate);
+    }
+
+    impl From<OptimizeGltfScene> for AssetRef<'static> {
+        fn from(value: OptimizeGltfScene) -> Self {
+            AssetRef::new(value)
+        }
+    }
+
+    #[derive(TypePath)]
+    pub struct OptimizeGltfSceneFunction;
+
+    impl BassetActionFunction for OptimizeGltfSceneFunction {
+        type Action = OptimizeGltfScene;
+        type Error = BevyError;
+
+        async fn apply(
+            &self,
+            mut context: ApplyContext<'_>,
+            action: &Self::Action,
+        ) -> Result<BassetActionOutput, Self::Error> {
+            let asset = context.erased_load_value(&action.gltf).await?;
+
+            // XXX TODO: Add a way to select the scene?
+            let scene_label = asset.get::<Gltf>().expect("XXX TODO").scenes[0]
+                .path()
+                .expect("XXX TODO")
+                .label_cow()
+                .expect("XXX TODO");
+
+            let mut scene = asset
+                .take_labeled(scene_label)
+                .ok()
+                .expect("XXX TODO")
+                .take::<WorldAsset>()
+                .expect("XXX TODO")
+                .world;
+
+            if action.convert_meshes_to_meshlets {
+                let asset_server = context.asset_server().clone();
+
+                scene
+                    .run_system_once(
+                        move |mut commands: Commands, mut query: Query<(Entity, &Mesh3d)>| {
+                            for (entity, mesh) in query.iter_mut() {
+                                // XXX TODO: We should be using `ApplyContext::load_handle`,
+                                // not `AssetServer::load`. But I couldn't work out how to
+                                // borrow `ApplyContext` correctly - keeps complaining that
+                                // the closure can outlive this function. Try again?
+                                let meshlet = MeshletMesh3d(asset_server.load(
+                                    MeshletFromMesh::new(mesh.0.path().expect("XXX TODO").clone()),
+                                ));
+
+                                commands.entity(entity).remove::<Mesh3d>().insert(meshlet);
+                            }
+                        },
+                    )
+                    .expect("XXX TODO");
+            }
+
+            if action.compress_textures || action.scale_textures.is_some() {
+                // XXX TODO: As above, annoying borrow issues.
+                let asset_server = context.asset_server().clone();
+                let action = action.clone();
+
+                scene
+                    .run_system_once(
+                        move |mut query: Query<&mut MeshMaterial3d<StandardMaterial>>| {
+                            for mut material in query.iter_mut() {
+                                // XXX TODO: As above, should be avoiding `AssetServer::load`.
+                                material.0 = asset_server.load(OptimizeStandardMaterial {
+                                    material: material.0.path().expect("XXX TODO").into(),
+                                    compress_textures: action.compress_textures,
+                                    scale_textures: action.scale_textures,
+                                });
+                            }
+                        },
+                    )
+                    .expect("XXX TODO");
+            }
+
+            scene.flush();
+
+            Ok(context.finish(WorldAsset::new(scene)))
+        }
+    }
 }
 
 mod demo {
@@ -968,6 +1152,46 @@ impl AssetSaver for MeshAssetSaver {
     ) -> Result<<Self::OutputLoader as AssetLoader>::Settings, Self::Error> {
         let mesh = SerializedMesh::from_mesh(asset.deref().clone());
         let string = ron::ser::to_string(&mesh).expect("XXX TODO");
+
+        writer.write_all(string.as_bytes()).await?;
+
+        Ok(())
+    }
+}
+
+// XXX TODO: Should this go in `bevy_world_serialization`? Seems odd that it
+// provides a loader but not a saver.
+#[derive(TypePath)]
+struct WorldAssetSaver {
+    registry: TypeRegistryArc,
+}
+
+impl WorldAssetSaver {
+    fn new(registry: TypeRegistryArc) -> Self {
+        Self { registry }
+    }
+}
+
+impl AssetSaver for WorldAssetSaver {
+    type Asset = WorldAsset;
+    type Settings = ();
+    type OutputLoader = WorldAssetLoader;
+    type Error = BevyError;
+
+    async fn save(
+        &self,
+        writer: &mut Writer,
+        asset: SavedAsset<'_, '_, Self::Asset>,
+        _settings: &Self::Settings,
+        _asset_path: AssetPath<'_>,
+    ) -> Result<<WorldAssetLoader as AssetLoader>::Settings, Self::Error> {
+        let string = {
+            let registry = self.registry.read();
+
+            DynamicWorld::from_world_with(&asset.world, &registry)
+                .serialize(&registry)
+                .expect("XXX TODO")
+        };
 
         writer.write_all(string.as_bytes()).await?;
 
@@ -1266,7 +1490,7 @@ fn setup(
 
     for (path, transform) in &asset_paths.scenes {
         commands.spawn((
-            acme::AcmeSceneSpawner(asset_server.load::<acme::AcmeScene>(path.clone())),
+            WorldAssetRoot(asset_server.load::<WorldAsset>(path.clone())),
             *transform,
         ));
     }
@@ -1575,19 +1799,34 @@ fn main() {
             // ),
         ],
         scenes: vec![
+            // (
+            //     "scene_from_gltf_with_dependencies.basset".into(),
+            //     Transform::from_xyz(-2.0, 1.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
+            // (
+            //     "scene_from_gltf.basset".into(),
+            //     Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
+            // (
+            //     "meshlet_scene.basset".into(),
+            //     Transform::from_xyz(2.0, 0.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
             (
-                "scene_from_gltf_with_dependencies.basset".into(),
-                Transform::from_xyz(-2.0, 1.0, 0.0)
+                "Duck.glb#Scene0".into(),
+                Transform::from_xyz(-2.0, 0.0, 0.0)
                     .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             ),
             (
-                "scene_from_gltf.basset".into(),
+                action::OptimizeGltfScene {
+                    gltf: "Duck.glb".into(),
+                    convert_meshes_to_meshlets: true,
+                    compress_textures: true,
+                    ..Default::default()
+                }
+                .into(),
                 Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            ),
-            (
-                "meshlet_scene.basset".into(),
-                Transform::from_xyz(2.0, 0.0, 0.0)
-                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             ),
         ],
         bsns: vec![
@@ -1665,10 +1904,13 @@ fn main() {
                     .with_action(action::ResizeImageFunction)
                     .with_action(action::MeshFromHeightmapFunction)
                     .with_action(action::ColorizeHeightmapFunction)
+                    .with_action(action::OptimizeStandardMaterialFunction)
+                    .with_action(action::OptimizeGltfSceneFunction)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
                     .with_saver(MeshletMeshSaver)
                     .with_saver(MeshAssetSaver)
+                    .with_saver(WorldAssetSaver::new(registry.clone()))
                     .with_saver_and_settings(
                         ImageSaver,
                         ImageSaverSettings {

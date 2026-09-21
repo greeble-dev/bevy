@@ -208,7 +208,10 @@ impl InheritedVisibility {
 #[derive(Clone, Component, Default, Reflect, Deref, DerefMut)]
 #[reflect(Component, Default, Clone)]
 #[component(clone_behavior=Ignore)]
-pub struct VisibilityClass(pub SmallVec<[TypeId; 1]>);
+// XXX TODO: Added `reflect(ignore)` to get world serialization working. Not sure
+// if correct? We want it to be ignored by serialization, but not necessarily
+// all reflection?
+pub struct VisibilityClass(#[reflect(ignore)] pub SmallVec<[TypeId; 1]>);
 
 /// Algorithmically computed indication of whether an entity is visible and should be extracted for
 /// rendering.

@@ -43,8 +43,8 @@ use self::{
     },
     visibility_buffer_raster_node::meshlet_visibility_buffer_raster,
 };
+use crate::meshlet::meshlet_mesh_manager::init_meshlet_mesh_manager;
 use crate::render::{per_view_shadow_pass, EARLY_SHADOW_PASS};
-use crate::{meshlet::meshlet_mesh_manager::init_meshlet_mesh_manager, PreviousGlobalTransform};
 use bevy_app::{App, Plugin};
 use bevy_asset::{embedded_asset, AssetApp, AssetId, Handle};
 use bevy_camera::visibility::{self, Visibility, VisibilityClass};
@@ -230,7 +230,11 @@ fn check_meshlet_features(render_device: Res<RenderDevice>) {
     Component, FromTemplate, Clone, Debug, Default, Deref, DerefMut, Reflect, PartialEq, Eq, From,
 )]
 #[reflect(Component, Default, Clone, PartialEq)]
-#[require(Transform, PreviousGlobalTransform, Visibility, VisibilityClass)]
+// XXX TODO: `PreviousGlobalTransform` was removed here because it doesn't implement reflect,
+// which prevents `MeshletMesh3d` being added to a `WorldAsset`. Decide if we should
+// make `PreviousGlobalTransform` implement reflect, or drop support for adding meshlets
+// to `WorldAsset` (see `OptimizeGltf::convert_meshes_to_meshlets`).
+#[require(Transform, /*PreviousGlobalTransform,*/ Visibility, VisibilityClass)]
 #[component(on_add = visibility::add_visibility_class::<MeshletMesh3d>)]
 pub struct MeshletMesh3d(pub Handle<MeshletMesh>);
 
