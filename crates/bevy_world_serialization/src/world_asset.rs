@@ -2,7 +2,7 @@ use core::any::TypeId;
 
 use crate::reflect_utils::clone_reflect_value;
 use crate::{DynamicWorld, WorldInstanceSpawnError};
-use bevy_asset::Asset;
+use bevy_asset::{Asset, AssetDependency, VisitAssetDependencies};
 use bevy_ecs::resource::IS_RESOURCE;
 use bevy_ecs::{
     component::ComponentCloneBehavior,
@@ -12,18 +12,22 @@ use bevy_ecs::{
     relationship::RelationshipHookMode,
     world::World,
 };
-use bevy_reflect::{TypePath, TypeRegistry};
+use bevy_reflect::{TypePath, TypeRegistry, TypeRegistryArc};
 
 /// A composition of [`World`] objects.
 ///
 /// To spawn a [`WorldAsset`], you can use either:
 /// * [`WorldInstanceSpawner::spawn`](crate::WorldInstanceSpawner::spawn)
 /// * adding the [`WorldAssetRoot`](crate::components::WorldAssetRoot) component to an entity.
-#[derive(Asset, TypePath, Debug)]
+#[derive(TypePath, Debug)]
 pub struct WorldAsset {
     /// The world, containing its entities and resources.
     pub world: World,
 }
+
+// XXX TODO: We made this a manual derive so we could have a custom `VisitAssetDependencies`
+// Review alternatives.
+impl Asset for WorldAsset {}
 
 impl WorldAsset {
     /// Creates a new [`WorldAsset`] with the given world.
@@ -202,5 +206,19 @@ impl WorldAsset {
         }
 
         Ok(())
+    }
+}
+
+impl VisitAssetDependencies for WorldAsset {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
+        // XXX TODO: Can we avoid this conversion to `DynamicWorld`? Would
+        // involve a bit of duplication. On the other hand, does `WorldAsset`
+        // really need an efficient `visit_dependencies` since it doesn't get
+        // saved or loaded directly?
+        DynamicWorld::from_world_asset(self, &registry.read()).visit_dependencies(registry, visit);
     }
 }

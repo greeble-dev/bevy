@@ -1,12 +1,15 @@
 use crate::{DynamicWorldBuilder, WorldAsset, WorldInstanceSpawnError};
-use bevy_asset::Asset;
+use bevy_asset::{
+    Asset, AssetDependency, AssetPath, AssetRef, ReflectHandle, UntypedHandle,
+    VisitAssetDependencies,
+};
 use bevy_ecs::reflect::ReflectResource;
 use bevy_ecs::{
     entity::{Entity, EntityHashMap, SceneEntityMapper},
     reflect::{AppTypeRegistry, ReflectComponent},
     world::World,
 };
-use bevy_reflect::{PartialReflect, TypePath, TypeRegistry};
+use bevy_reflect::{PartialReflect, ReflectRef, TypePath, TypeRegistry, TypeRegistryArc};
 
 use bevy_ecs::component::ComponentCloneBehavior;
 use bevy_ecs::relationship::RelationshipHookMode;
@@ -21,13 +24,17 @@ use {crate::serde::DynamicWorldSerializer, serde::Serialize};
 /// * [`WorldInstanceSpawner::spawn_dynamic`](crate::WorldInstanceSpawner::spawn_dynamic)
 /// * adding the [`DynamicWorldRoot`](crate::components::DynamicWorldRoot) component to an entity.
 /// * using the [`DynamicWorldBuilder`] to construct a `DynamicWorld` from `World`.
-#[derive(Asset, TypePath, Default)]
+#[derive(TypePath, Default)]
 pub struct DynamicWorld {
     /// Resources stored in the dynamic world.
     pub resources: Vec<Box<dyn PartialReflect>>,
     /// Entities contained in the dynamic world.
     pub entities: Vec<DynamicEntity>,
 }
+
+// XXX TODO: We made this a manual derive so we could have a custom `VisitAssetDependencies`
+// Review alternatives.
+impl Asset for DynamicWorld {}
 
 /// A reflection-powered serializable representation of an entity and its components.
 pub struct DynamicEntity {
@@ -241,6 +248,123 @@ where
         .indentor("  ".to_string())
         .new_line("\n".to_string());
     ron::ser::to_string_pretty(&serialize, pretty_config)
+}
+
+// If the given value is an `UntypedHandle`, `Handle<A>`, `AssetRef` or `AssetPath`
+// then return it as an `AssetDependency`.
+//
+// XXX TODO: Also support `AssetDependency::Id`?
+//
+// XXX TODO: Partly adapted from HandleSerializerProcessor::try_serialize. Maybe can
+// refactor to share more?
+fn try_dependency(registry: &TypeRegistry, value: &dyn PartialReflect) -> Option<AssetDependency> {
+    let value = value.try_as_reflect()?;
+
+    if let Some(untyped_handle) = value.downcast_ref::<UntypedHandle>() {
+        return Some(AssetDependency::Handle(untyped_handle.clone()));
+    }
+
+    // XXX TODO: Do we need to support non-'static `AssetRef`s?
+    if let Some(path) = value.downcast_ref::<AssetRef<'static>>() {
+        return Some(AssetDependency::Path(path.clone()));
+    }
+
+    // XXX TODO: Do we need to support non-'static `AssetPath`s?
+    if let Some(path) = value.downcast_ref::<AssetPath<'static>>() {
+        return Some(AssetDependency::Path(path.clone().into()));
+    }
+
+    let Some(handle_registration) = registry.get(value.type_id()) else {
+        if let Some(type_info) = value.get_represented_type_info()
+            && type_info.type_path().starts_with("bevy_asset::Handle")
+        {
+            // XXX TODO: Decide what to do here. Need to depend on tracing crate
+            // if we use warn.
+            panic!(
+                    "HandleSerializeProcessor attempted to serialize a handle type \"{}\" without type data. This likely means the asset type was not registered.",
+                    type_info.type_path()
+                );
+            // warn!(
+            //         "HandleSerializeProcessor attempted to serialize a handle type \"{}\" without type data. This likely means the asset type was not registered.",
+            //         type_info.type_path()
+            //     );
+        }
+        return None;
+    };
+
+    let reflect_handle = handle_registration.data::<ReflectHandle>()?;
+
+    Some(AssetDependency::Handle(
+        reflect_handle
+            .downcast_handle_untyped(value.as_any())
+            .expect(
+            "type includes `ReflectHandle` type data, so it must be a handle matching that type",
+        ),
+    ))
+}
+
+impl VisitAssetDependencies for DynamicWorld {
+    fn visit_dependencies(
+        &self,
+        registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
+        let registry = registry.read();
+
+        // XXX TODO: Could try and guess a maximum stack size and avoid rellocation?
+        // Not sure if worth it since we'd have to iterate over all entities to
+        // count the components.
+        let mut stack = Vec::<&dyn PartialReflect>::new();
+
+        for entity in self.entities.iter() {
+            for component in entity.components.iter() {
+                stack.push(&**component);
+            }
+        }
+
+        let mut dependencies = Vec::<AssetDependency>::new();
+
+        while let Some(value) = stack.pop() {
+            if let Some(dependency) = try_dependency(&registry, value) {
+                dependencies.push(dependency);
+            } else {
+                match value.reflect_ref() {
+                    ReflectRef::TupleStruct(value) => {
+                        stack.extend(value.iter_fields());
+                    }
+                    ReflectRef::Struct(value) => {
+                        stack.extend(value.iter_fields().map(|(_, field)| field));
+                    }
+                    ReflectRef::Tuple(value) => {
+                        stack.extend(value.iter_fields());
+                    }
+                    ReflectRef::List(value) => {
+                        stack.extend(value.iter());
+                    }
+                    ReflectRef::Array(value) => {
+                        stack.extend(value.iter());
+                    }
+                    ReflectRef::Map(value) => {
+                        stack.extend(value.iter().flat_map(|(k, v)| [k, v].into_iter()));
+                    }
+                    ReflectRef::Set(value) => {
+                        stack.extend(value.iter());
+                    }
+                    ReflectRef::Enum(value) => {
+                        stack.extend(value.iter_fields().map(|field| field.value()));
+                    }
+                    // XXX TODO: Ideally we've be exhaustive, but that means faffing
+                    // around with features because of `ReflectRef::Function`. Still
+                    // worth doing though?
+                    _ => {}
+                }
+            }
+        }
+
+        for dependency in dependencies.into_iter() {
+            visit(dependency);
+        }
+    }
 }
 
 #[cfg(test)]
