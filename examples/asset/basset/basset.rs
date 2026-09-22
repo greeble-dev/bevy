@@ -801,31 +801,32 @@ mod action {
         }
     }
 
-    // XXX TODO: This returns a `DynamicScene` asset, not a `WorldAsset`.
     #[derive(Default, Clone, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetAction, PartialEq, Hash)]
-    pub struct OptimizeGltfScene {
-        pub gltf: AssetRef<'static>,
+    pub struct OptimizeScene {
+        // XXX TODO: Maybe want typed `AssetRef` here? But gets weird because
+        // in theory we could support both `WorldAsset` and `DynamicWorld`.
+        pub scene: AssetRef<'static>,
         pub convert_meshes_to_meshlets: bool,
         pub compress_textures: bool,
         pub scale_textures: Option<FloatOrd>,
     }
 
-    impl BassetAction for OptimizeGltfScene {
+    impl BassetAction for OptimizeScene {
         basset_action_version!(crate);
     }
 
-    impl From<OptimizeGltfScene> for AssetRef<'static> {
-        fn from(value: OptimizeGltfScene) -> Self {
+    impl From<OptimizeScene> for AssetRef<'static> {
+        fn from(value: OptimizeScene) -> Self {
             AssetRef::new(value)
         }
     }
 
     #[derive(TypePath)]
-    pub struct OptimizeGltfSceneFunction;
+    pub struct OptimizeSceneFunction;
 
-    impl BassetActionFunction for OptimizeGltfSceneFunction {
-        type Action = OptimizeGltfScene;
+    impl BassetActionFunction for OptimizeSceneFunction {
+        type Action = OptimizeScene;
         type Error = BevyError;
 
         async fn apply(
@@ -833,22 +834,20 @@ mod action {
             mut context: ApplyContext<'_>,
             action: &Self::Action,
         ) -> Result<BassetActionOutput, Self::Error> {
-            let asset = context.erased_load_value(&action.gltf).await?;
-
-            // XXX TODO: Add a way to select the scene?
-            let scene_label = asset.get::<Gltf>().expect("XXX TODO").scenes[0]
-                .path()
-                .expect("XXX TODO")
-                .label_cow()
-                .expect("XXX TODO");
-
-            let mut scene = asset
-                .take_labeled(scene_label)
-                .ok()
-                .expect("XXX TODO")
+            // XXX TODO: Consider supporting `DynamicWorld` as well? That would
+            // mean we can load `.scn`/`.scn.ron`.
+            let mut scene = context
+                .erased_load_value(&action.scene)
+                .await?
                 .take::<WorldAsset>()
                 .expect("XXX TODO")
                 .world;
+
+            // XXX TODO: There's some lifetime issues below due to using queries.
+            // Given that we have to convert `World` to `DynamicWorld` at the end
+            // for serialization, maybe we should use `DynamicWorld` directly?
+            // That would avoid the lifetime issues... but on the other hand
+            // using queries is quite elegant?
 
             if action.convert_meshes_to_meshlets {
                 let asset_server = context.asset_server().clone();
@@ -1834,8 +1833,8 @@ fn main() {
             ),
         ],
         dynamic_scenes: vec![(
-            action::OptimizeGltfScene {
-                gltf: "Duck.glb".into(),
+            action::OptimizeScene {
+                scene: "Duck.glb#Scene0".into(),
                 convert_meshes_to_meshlets: true,
                 compress_textures: true,
                 ..Default::default()
@@ -1919,7 +1918,7 @@ fn main() {
                     .with_action(action::MeshFromHeightmapFunction)
                     .with_action(action::ColorizeHeightmapFunction)
                     .with_action(action::OptimizeStandardMaterialFunction)
-                    .with_action(action::OptimizeGltfSceneFunction)
+                    .with_action(action::OptimizeSceneFunction)
                     .with_saver(demo::StringAssetSaver)
                     .with_saver(demo::IntAssetSaver)
                     .with_saver(MeshletMeshSaver)
