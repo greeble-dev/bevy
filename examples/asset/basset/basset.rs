@@ -719,7 +719,8 @@ mod action {
 
     // XXX TODO: Investigate making this more generic for all materials. Either
     // we extend `VisitAssetDependencies` to allow mutation (but how do we get
-    // from an unknown asset type to that trait?), or use reflection.
+    // from an unknown asset type to that trait?), or use reflection to find
+    // image handles.
     #[derive(Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetAction, PartialEq, Hash)]
     pub struct OptimizeStandardMaterial {
@@ -876,6 +877,8 @@ mod action {
                 let asset_server = context.asset_server().clone();
                 let action = action.clone();
 
+                // XXX TODO: Hard-coding this to `StandardMaterial` is inadequate.
+                // See comment on `OptimizeStandardMaterial`.
                 scene
                     .run_system_once(
                         move |mut query: Query<&mut MeshMaterial3d<StandardMaterial>>| {
