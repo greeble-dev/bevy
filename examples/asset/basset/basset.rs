@@ -801,6 +801,7 @@ mod action {
         }
     }
 
+    // XXX TODO: This returns a `DynamicScene` asset, not a `WorldAsset`.
     #[derive(Default, Clone, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetAction, PartialEq, Hash)]
     pub struct OptimizeGltfScene {
@@ -894,7 +895,12 @@ mod action {
 
             scene.flush();
 
-            Ok(context.finish(WorldAsset::new(scene)))
+            let asset = DynamicWorld::from_world_with(
+                &scene,
+                &context.asset_server().type_registry().read(),
+            );
+
+            Ok(context.finish(asset))
         }
     }
 }
@@ -1160,20 +1166,21 @@ impl AssetSaver for MeshAssetSaver {
 }
 
 // XXX TODO: Should this go in `bevy_world_serialization`? Seems odd that it
-// provides a loader but not a saver.
+// provides a loader but not a saver. Note that `WorldAssetLoader` loads a
+// `DynamicWorld`, not a `WorldAsset`.
 #[derive(TypePath)]
-struct WorldAssetSaver {
+struct DynamicWorldAssetSaver {
     registry: TypeRegistryArc,
 }
 
-impl WorldAssetSaver {
+impl DynamicWorldAssetSaver {
     fn new(registry: TypeRegistryArc) -> Self {
         Self { registry }
     }
 }
 
-impl AssetSaver for WorldAssetSaver {
-    type Asset = WorldAsset;
+impl AssetSaver for DynamicWorldAssetSaver {
+    type Asset = DynamicWorld;
     type Settings = ();
     type OutputLoader = WorldAssetLoader;
     type Error = BevyError;
@@ -1188,9 +1195,7 @@ impl AssetSaver for WorldAssetSaver {
         let string = {
             let registry = self.registry.read();
 
-            DynamicWorld::from_world_with(&asset.world, &registry)
-                .serialize(&registry)
-                .expect("XXX TODO")
+            asset.serialize(&registry).expect("XXX TODO")
         };
 
         writer.write_all(string.as_bytes()).await?;
@@ -1416,6 +1421,7 @@ struct AssetHandles(Vec<UntypedHandle>);
 struct AssetPaths {
     regular: Vec<(TypeId, AssetRef<'static>)>,
     scenes: Vec<(AssetRef<'static>, Transform)>,
+    dynamic_scenes: Vec<(AssetRef<'static>, Transform)>,
     // XXX TODO: Maybe better to store as functions to scenes? Then we can don't
     // have to consume them (since `spawn_scene` consumes the `Scene`).
     bsns: Vec<Box<dyn SceneList>>,
@@ -1433,6 +1439,7 @@ impl AssetPaths {
             .iter()
             .map(|(_, path)| path)
             .chain(self.scenes.iter().map(|(path, _)| path))
+            .chain(self.dynamic_scenes.iter().map(|(path, _)| path))
             .chain(bsns.iter())
             .map(|path| PublishDependency::Load(RootAssetRef::without_label(path.clone())))
             .collect()
@@ -1491,6 +1498,13 @@ fn setup(
     for (path, transform) in &asset_paths.scenes {
         commands.spawn((
             WorldAssetRoot(asset_server.load::<WorldAsset>(path.clone())),
+            *transform,
+        ));
+    }
+
+    for (path, transform) in &asset_paths.dynamic_scenes {
+        commands.spawn((
+            DynamicWorldRoot(asset_server.load::<DynamicWorld>(path.clone())),
             *transform,
         ));
     }
@@ -1818,17 +1832,17 @@ fn main() {
                 Transform::from_xyz(-2.0, 0.0, 0.0)
                     .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             ),
-            (
-                action::OptimizeGltfScene {
-                    gltf: "Duck.glb".into(),
-                    convert_meshes_to_meshlets: true,
-                    compress_textures: true,
-                    ..Default::default()
-                }
-                .into(),
-                Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            ),
         ],
+        dynamic_scenes: vec![(
+            action::OptimizeGltfScene {
+                gltf: "Duck.glb".into(),
+                convert_meshes_to_meshlets: true,
+                compress_textures: true,
+                ..Default::default()
+            }
+            .into(),
+            Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+        )],
         bsns: vec![
             Box::new(bsn! {
                 MeshletMesh3d(action::MeshletFromMesh::new(
@@ -1910,14 +1924,13 @@ fn main() {
                     .with_saver(demo::IntAssetSaver)
                     .with_saver(MeshletMeshSaver)
                     .with_saver(MeshAssetSaver)
-                    .with_saver(WorldAssetSaver::new(registry.clone()))
+                    .with_saver(DynamicWorldAssetSaver::new(registry.clone()))
                     .with_saver_and_settings(
                         ImageSaver,
                         ImageSaverSettings {
                             // XXX TODO: Review. Not sure if this will be a problem.
                             // It's only for cache action values, so we really want
-                            // some default "use the most appropriate format". Maybe
-                            // PNG is good enough.
+                            // some default "use the most appropriate format".
                             format: bevy_image::SaveImageFormatSetting::Format(ImageFormat::Png),
                         },
                     )
