@@ -497,15 +497,21 @@ pub trait AsAssetId: Component {
 }
 
 /// XXX TODO: Document.
-pub enum AssetDependency<'a> {
-    // XXX TODO: Might have to remove ID support, since the dependency graph needs the full path.
+//
+// XXX TODO: Consider changing to use references instead of values. This is
+// inconvenient in some cases, and right now is not much of a performance win
+// (since `Handle<A>` has to be cloned into an `UntypedHandle`). But that could
+// change.
+pub enum AssetDependency {
+    // XXX TODO: Consider removing ID support, since the dependency graph needs
+    // the full path. Or maybe keep and treat it as a runtime error? Or ignore
+    // since it's essentially a weak reference?
     Id(UntypedAssetId),
-    Handle(&'a UntypedHandle),
-    // XXX TODO: Should expose `AssetRef` lifetime parameter?
-    Path(&'a AssetRef<'static>),
+    Handle(UntypedHandle),
+    Path(AssetRef<'static>),
 }
 
-impl AssetDependency<'_> {
+impl AssetDependency {
     fn id(&self) -> Option<UntypedAssetId> {
         match self {
             AssetDependency::Handle(handle) => Some(handle.id()),
@@ -543,18 +549,7 @@ impl<A: Asset> VisitAssetDependencies for Handle<A> {
         _registry: &TypeRegistryArc,
         visit: &mut impl FnMut(AssetDependency),
     ) {
-        // XXX TODO: Doesn't feel great having to clone here.
-        //
-        // Note that if UUID assets are dropped then both `Handle<A>` and
-        // `UntypedHandle` are basically a `StrongHandle`, so maybe `Handle<A>`
-        // could simply be a wrapper around `UntypedHandle`?
-        //
-        // Another option might be for `AssetDependency` to include a `StrongHandle`
-        // variant?
-        //
-        // Yet another option is to give `VisitAssetDependencies` two separate visits -
-        // one for paths and one for handles/ids.
-        visit(AssetDependency::Handle(&self.clone().untyped()));
+        visit(AssetDependency::Handle(self.clone().untyped()));
     }
 }
 
@@ -564,7 +559,7 @@ impl VisitAssetDependencies for UntypedHandle {
         _registry: &TypeRegistryArc,
         visit: &mut impl FnMut(AssetDependency),
     ) {
-        visit(AssetDependency::Handle(self));
+        visit(AssetDependency::Handle(self.clone()));
     }
 }
 
@@ -575,6 +570,26 @@ impl VisitAssetDependencies for UntypedAssetId {
         visit: &mut impl FnMut(AssetDependency),
     ) {
         visit(AssetDependency::Id(*self));
+    }
+}
+
+impl<'a> VisitAssetDependencies for AssetRef<'a> {
+    fn visit_dependencies(
+        &self,
+        _registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
+        visit(AssetDependency::Path(self.clone_owned()));
+    }
+}
+
+impl<'a> VisitAssetDependencies for AssetPath<'a> {
+    fn visit_dependencies(
+        &self,
+        _registry: &TypeRegistryArc,
+        visit: &mut impl FnMut(AssetDependency),
+    ) {
+        visit(AssetDependency::Path(self.clone_owned().into()));
     }
 }
 

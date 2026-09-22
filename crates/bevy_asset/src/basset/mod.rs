@@ -668,7 +668,7 @@ fn load_dependencies(
                 AssetDependency::Id(_) => panic!("XXX TODO: Not supported"),
                 AssetDependency::Path(_) => (),
                 AssetDependency::Handle(handle) => {
-                    if !subasset_handles.contains(handle)
+                    if !subasset_handles.contains(&handle)
                         && let Some(path) = handle.path()
                     {
                         // XXX TODO: Review if there's a better way to load directly from
