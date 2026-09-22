@@ -1236,8 +1236,8 @@ pub(crate) struct DevelopmentActionSource {
     // see to avoid cloning things like `BassetSettings::asset_type_name_to_action'.
     // See also comment on `AssetPlugin::basset_settings`.
     settings: Arc<DevelopmentActionSourceSettings>,
-    dependency_graph: Option<DependencyGraph>,
-    action_cache: Option<MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>>,
+    dependency_graph: DependencyGraph,
+    action_cache: MemoryAndFileCache<ActionCacheKey, Arc<[u8]>>,
     registry: TypeRegistryArc,
 }
 
@@ -1248,14 +1248,19 @@ pub enum MissingActionFunctionError {
     NotFound(&'static str),
 }
 
+// XXX TODO: Temporary name. Review.
+pub(crate) enum CachedOrUncached {
+    Cached(StandaloneAssetData),
+    Uncached(ErasedLoadedAsset),
+}
+
 impl DevelopmentActionSource {
     pub(crate) fn new(
         settings: Arc<DevelopmentActionSourceSettings>,
         sources: Arc<AssetSources>,
         registry: TypeRegistryArc,
     ) -> Self {
-        // TODO: Dependency graph should be optional based on a setting?
-        let dependency_graph = Some(DependencyGraph::new(
+        let dependency_graph = DependencyGraph::new(
             settings
                 .file_cache_path
                 .as_ref()
@@ -1263,14 +1268,14 @@ impl DevelopmentActionSource {
             settings.validate_dependency_cache,
             sources,
             registry.clone(),
-        ));
+        );
 
-        let action_cache = Some(MemoryAndFileCache::new(
+        let action_cache = MemoryAndFileCache::new(
             "action_cache",
             settings.file_cache_path.as_ref().map(|p| p.join("action")),
             settings.validate_action_cache,
             registry.clone(),
-        ));
+        );
 
         Self {
             settings,
@@ -1337,53 +1342,157 @@ impl DevelopmentActionSource {
         asset: &'a ErasedLoadedAsset,
         // XXX TODO: We don't do anything if this is `None`. Review and maybe
         // remove `Option`.
-        dependency_key: Option<DependencyCacheKey>,
-    ) -> Option<BoxedFuture<'a, Option<ActionCacheKey>>> {
-        if let Some(dependency_key) = dependency_key
-            && let Some(dependency_graph) = &self.dependency_graph
-        {
-            Some(Box::pin(async move {
-                let mut loader_dependencies =
-                    Vec::<CacheLoaderDependency>::with_capacity(asset.loader_dependencies.len());
+        dependency_key: DependencyCacheKey,
+    ) -> BoxedFuture<'a, (Option<ActionCacheKey>, Arc<DependencyCacheValue>)> {
+        Box::pin(async move {
+            let mut loader_dependencies =
+                Vec::<CacheLoaderDependency>::with_capacity(asset.loader_dependencies.len());
 
-                for (loader_dependency, (_, dependency_key)) in &asset.loader_dependencies {
-                    if let Some(dependency_key) = dependency_key {
-                        loader_dependencies.push(CacheLoaderDependency::new(
-                            loader_dependency.clone(),
-                            *dependency_key,
-                        ));
-                    } else {
-                        warn!("Missing dependency key for loader dependency. path: {path:?} dependency: {loader_dependency:?}");
-                        return None;
-                    }
+            for (loader_dependency, (_, dependency_key)) in &asset.loader_dependencies {
+                if let Some(dependency_key) = dependency_key {
+                    loader_dependencies.push(CacheLoaderDependency::new(
+                        loader_dependency.clone(),
+                        *dependency_key,
+                    ));
+                } else {
+                    // XXX TODO: Proper error handling.
+                    panic!("Missing dependency key for loader dependency. path: {path:?} dependency: {loader_dependency:?}");
                 }
+            }
 
-                let mut external_dependees = HashSet::<RootAssetRef>::new();
+            let mut external_dependees = HashSet::<RootAssetRef>::new();
 
-                asset.visit_dependencies(&self.registry, &mut |dependency| {
-                    if let Some(path) = match dependency {
-                        AssetDependency::Id(_) => todo!(
-                            "Decide if we disallow ids. Dependency tracking requires the path."
-                        ),
-                        AssetDependency::Handle(handle) => handle.path().cloned(),
-                        AssetDependency::Path(path) => Some(path.clone()),
-                    } {
-                        external_dependees.insert(RootAssetRef::without_label(path));
+            asset.visit_dependencies(&self.registry, &mut |dependency| {
+                if let Some(path) = match dependency {
+                    AssetDependency::Id(_) => {
+                        todo!("Decide if we disallow ids. Dependency tracking requires the path.")
                     }
-                });
+                    AssetDependency::Handle(handle) => handle.path().cloned(),
+                    AssetDependency::Path(path) => Some(path.clone()),
+                } {
+                    external_dependees.insert(RootAssetRef::without_label(path));
+                }
+            });
 
-                // XXX TODO: Are we accounting for sub-asset dependencies?
+            // XXX TODO: Are we accounting for sub-asset dependencies?
 
-                let dependency_value = DependencyCacheValue::new(
-                    loader_dependencies.into_iter(),
-                    external_dependees.into_iter(),
+            let dependency_value = Arc::new(DependencyCacheValue::new(
+                loader_dependencies.into_iter(),
+                external_dependees.into_iter(),
+            ));
+
+            (
+                self.dependency_graph.register_dependencies_load(
+                    path,
+                    dependency_key,
+                    dependency_value.clone(),
+                ),
+                dependency_value,
+            )
+        })
+    }
+
+    fn internal_apply<'a>(
+        &'a self,
+        action: &'a RootAssetRef,
+        asset_server: &'a AssetServer,
+        dependency_loading: DependencyLoading,
+        dependency_key: DependencyCacheKey,
+    ) -> BoxedFuture<'a, Result<(CachedOrUncached, Arc<DependencyCacheValue>), AssetLoadError>>
+    {
+        Box::pin(async move {
+            let action_function = self.action_function(action.action())?;
+
+            let env = &self.settings.env;
+
+            if action_function.cacheable() {
+                // XXX TODO: Maybe early out here if there's no saver? Depends if we end
+                // up in a situation where the saver has been compiled out but we still
+                // want to read from the cache.
+
+                if let Some((action_key, dependency_value)) = self
+                    .dependency_graph
+                    // XXX TODO: `action_key` will filter the environment, and then we'll
+                    // do it again below. Refactor?
+                    .action_key(action, dependency_key, env)
+                    .await
+                    && let Some(cached_standalone_asset) =
+                        self.action_cache.get(&action_key, action).await
+                {
+                    let standalone_asset = read_standalone_asset(&cached_standalone_asset)?;
+
+                    return Ok((CachedOrUncached::Cached(standalone_asset), dependency_value));
+                }
+            }
+
+            let filtered_env = env
+                .filter(action.action())
+                .map_err(|err| AssetLoadError::TodoError(Arc::new(format!("{err:?}").into())))?;
+
+            let apply_context = ApplyContext::new(asset_server, dependency_loading, filtered_env);
+
+            let output = action_function.apply(apply_context, action).await?;
+
+            // XXX TODO: Is settings parameter correct?
+            let (action_key, dependency_value) = self
+                .register_dependencies(action, None, &output.asset, dependency_key)
+                .await;
+
+            let Some(action_key) = action_key else {
+                warn!(
+                    ?action,
+                    "Register dependencies did not return an action key."
                 );
 
-                dependency_graph.register_dependencies_load(path, dependency_key, dependency_value)
-            }))
-        } else {
-            None
-        }
+                // XXX TODO: Should this be treated as an error instead of returning
+                // `Uncached`?
+                return Ok((CachedOrUncached::Uncached(output.asset), dependency_value));
+            };
+
+            if !action_function.cacheable() {
+                return Ok((CachedOrUncached::Uncached(output.asset), dependency_value));
+            }
+
+            let standalone_asset = if let Some(saved) = output.saved {
+                saved
+            } else {
+                if let Some((saver, settings)) = self.saver(&output.asset, &self.registry) {
+                    // XXX TODO: Support action outputs with sub-assets. Could be troublesome
+                    // as there's two potential cases:
+                    //
+                    // 1. The asset saver for the root asset expects to be given the sub-assets.
+                    // 2. The root asset and sub-assets should be saved by separate savers.
+                    assert!(
+                        output.asset.labeled_assets.is_empty(),
+                        "XXX TODO. Not supported yet. {action:?}",
+                    );
+
+                    // XXX TODO: Loader lookup could move into `save_standalone_asset`?
+                    let loader = asset_server
+                        .get_asset_loader_with_type_name(saver.loader_type_name())
+                        .await?;
+
+                    save_standalone_asset(&output.asset, &*loader, saver, settings)
+                        .await
+                        .map_err(|e| AssetLoadError::TodoError(e.into()))?
+                } else {
+                    let type_name = output.asset.asset_type_name();
+                    debug!(?type_name, ?action, "Cache ineligible, no saver for type.");
+
+                    // XXX TODO: Try to avoid this awkward return in the middle of other
+                    // clauses that don't return.
+                    return Ok((CachedOrUncached::Uncached(output.asset), dependency_value));
+                }
+            };
+
+            let standalone_asset_blob = write_standalone_asset(&standalone_asset)
+                .map_err(|e| AssetLoadError::TodoError(e.into()))?;
+
+            self.action_cache
+                .put(action_key, standalone_asset_blob.into(), action);
+
+            Ok((CachedOrUncached::Cached(standalone_asset), dependency_value))
+        })
     }
 }
 
@@ -1396,123 +1505,23 @@ impl ActionSource for DevelopmentActionSource {
     ) -> BoxedFuture<'a, Result<(ErasedLoadedAsset, Option<DependencyCacheKey>), AssetLoadError>>
     {
         Box::pin(async move {
-            let action_function = self.action_function(action.action())?;
-
-            let env = &self.settings.env;
-
-            // XXX TODO: Avoid clone?
             let dependency_key = self
                 .dependency_graph
-                .as_ref()
                 // XXX TODO: `action_dependency_key` will filter the environment, and then we'll
-                // do it again below. Refactor?
-                .map(|dependency_graph| dependency_graph.action_dependency_key(action, env));
+                // do it again inside `internal_apply`. Refactor?
+                .action_dependency_key(action, &self.settings.env);
 
-            if action_function.cacheable()
-                && let Some(dependency_key) = dependency_key
-                && let Some(action_cache) = &self.action_cache
-                && let Some(dependency_graph) = &self.dependency_graph
-            {
-                // XXX TODO: Maybe early out here if there's no saver? Depends if we end
-                // up in a situation where the saver has been compiled out but we still
-                // want to read from the cache.
+            let (asset, _) = self
+                .internal_apply(action, asset_server, dependency_loading, dependency_key)
+                .await?;
 
-                if let Some((action_key, _)) = dependency_graph
-                    // XXX TODO: `action_key` will filter the environment, and then we'll
-                    // do it again below. Refactor?
-                    .action_key(action, Some(dependency_key), env)
-                    .await
-                    && let Some(cached_standalone_asset) =
-                        action_cache.get(&action_key, action).await
-                {
-                    let standalone_asset = read_standalone_asset(&cached_standalone_asset)?;
-
-                    return Ok((
-                        load_standalone_asset(&standalone_asset, asset_server, dependency_loading)
-                            .await?,
-                        Some(dependency_key),
-                    ));
-                }
+            match asset {
+                CachedOrUncached::Cached(asset) => Ok((
+                    load_standalone_asset(&asset, asset_server, dependency_loading).await?,
+                    Some(dependency_key),
+                )),
+                CachedOrUncached::Uncached(asset) => Ok((asset, Some(dependency_key))),
             }
-
-            let filtered_env = env
-                .filter(action.action())
-                .map_err(|err| AssetLoadError::TodoError(Arc::new(format!("{err:?}").into())))?;
-
-            let apply_context = ApplyContext::new(asset_server, dependency_loading, filtered_env);
-
-            let output = action_function.apply(apply_context, action).await?;
-
-            // XXX TODO: Review logging. Bit spammy right now.
-            /*
-            if let Some(keys) = asset.keys.as_ref()
-                && !keys.immediate_dependee_action_keys.is_empty()
-            {
-                info!(
-                    "{:?}: Dependencies = {:?}",
-                    action, keys.immediate_dependee_action_keys,
-                );
-            }
-            */
-
-            // XXX TODO: Is settings parameter correct?
-            let action_key = if let Some(future) =
-                self.register_dependencies(action, None, &output.asset, dependency_key)
-            {
-                future.await
-            } else {
-                None
-            };
-
-            if let Some(action_key) = action_key {
-                if action_function.cacheable()
-                    && let Some(action_cache) = &self.action_cache
-                {
-                    if let Some(saved) = output.saved {
-                        // XXX TODO: Slightly duplicates the other path. Refactor?
-                        let standalone_asset_blob = write_standalone_asset(&saved)
-                            .map_err(|e| AssetLoadError::TodoError(e.into()))?;
-                        action_cache.put(action_key, standalone_asset_blob.into(), action);
-                    } else if let Some((saver, settings)) =
-                        self.saver(&output.asset, &self.registry)
-                    {
-                        // XXX TODO: Support action outputs with sub-assets. Could be troublesome
-                        // as there's two potential cases:
-                        //
-                        // 1. The asset saver for the root asset expects to be given the sub-assets.
-                        // 2. The root asset and sub-assets should be saved by separate savers.
-                        assert!(
-                            output.asset.labeled_assets.is_empty(),
-                            "XXX TODO. Not supported yet. {action:?}",
-                        );
-
-                        // XXX TODO: Loader lookup could move into `save_standalone_asset`?
-                        let loader = asset_server
-                            .get_asset_loader_with_type_name(saver.loader_type_name())
-                            .await?;
-
-                        let standalone_asset =
-                            save_standalone_asset(&output.asset, &*loader, saver, settings)
-                                .await
-                                .map_err(|e| AssetLoadError::TodoError(e.into()))?;
-
-                        let standalone_asset_blob = write_standalone_asset(&standalone_asset)
-                            .map_err(|e| AssetLoadError::TodoError(e.into()))?;
-
-                        action_cache.put(action_key, standalone_asset_blob.into(), action);
-                    } else {
-                        let type_name = output.asset.asset_type_name();
-                        debug!(?type_name, ?action, "Cache ineligible, no saver for type.");
-                    }
-                }
-            } else {
-                warn!(
-                    ?action,
-                    "Register dependencies did not return an action key."
-                );
-            }
-
-            Ok((output.asset, dependency_key))
         })
     }
 
@@ -1524,22 +1533,17 @@ impl ActionSource for DevelopmentActionSource {
     {
         // XXX TODO: Make future optional when there's no dependency graph?
         Box::pin(async move {
-            if let Some(dependency_graph) = &self.dependency_graph {
-                let (reader, dependency_key) =
-                    dependency_graph.read_asset_bytes(&path, reader).await?;
-
-                Ok(Some((reader, dependency_key)))
-            } else {
-                Ok(None)
-            }
+            Ok(Some(
+                self.dependency_graph
+                    .read_asset_bytes(&path, reader)
+                    .await?,
+            ))
         })
     }
 
     // XXX TODO: Less hacky debugging
     fn dump_dependency_graph(&self) {
-        self.dependency_graph
-            .as_ref()
-            .inspect(|g| info!("GRAPH DUMP\n{:?}", g));
+        info!("GRAPH DUMP\n{:?}", &self.dependency_graph);
     }
 
     fn publish<'a>(
@@ -1584,151 +1588,74 @@ impl ActionSource for DevelopmentActionSource {
 
                 match &input_asset {
                     PublishDependency::Load(action) => {
-                        let action_function = self.action_function(action.action())?;
+                        let dependency_key = self
+                            .dependency_graph
+                            // XXX TODO: `action_dependency_key` will filter the environment, and then we'll
+                            // do it again below. Refactor?
+                            .action_dependency_key(action, env);
 
-                        // XXX TODO: Review all the code in here to avoid duplication.
-                        //
-                        // There's currently four cases:
-                        //
-                        // 1. Action cacheable, dependency and action cache hit.
-                        //     - Copy from action cache, add external dependencies to stack.
-                        // 2. Action cacheable, dependency or action cache miss.
-                        //     - Apply action and save, add external dependencies to stack.
-                        // 3. Action not cacheable, dependency cache hit.
-                        //     - Add loader and external dependencies to stack.
-                        // 4. Action not cacheable, dependency cache miss.
-                        //     - Apply action, add loader and external dependencies to stack.
-                        //
-                        // Some of the paths are similar. And some already do redundant work,
-                        // like the action cache miss repeats the action cache lookup.
-
-                        if action_function.cacheable() {
-                            // XXX TODO: Add debug switch to disable use of the cache. Also
-                            // consider debug switch that does both the cached and uncached
-                            // paths and checks that the standalone asset and dependencies
-                            // are the same.
-                            let standalone_asset;
-
-                            if let Some(dependency_graph) = &self.dependency_graph
-                                && let Some((action_key, dependency_value)) =
-                                    dependency_graph.action_key(action, None, env).await
-                                && let Some(action_cache) = &self.action_cache
-                                && let Some(cached_standalone_asset) =
-                                    action_cache.get(&action_key, action).await
-                            {
-                                if let Some(dependency_value) = dependency_value {
-                                    for dependency in dependency_value.external_dependees() {
-                                        input_stack
-                                            .push(PublishDependency::Load(dependency.clone()));
-                                    }
-                                }
-
-                                standalone_asset = read_standalone_asset(&cached_standalone_asset)?;
-                            } else {
-                                let (loaded, _) = self
-                                    .apply(action, asset_server, DependencyLoading::No)
-                                    .await
-                                    .expect("XXX TODO");
-
-                                loaded.visit_dependencies(&self.registry, &mut |dependency| {
-                                    if let Some(path) = match dependency {
-                                        AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
-                                        AssetDependency::Handle(handle) => handle.path().cloned(),
-                                        AssetDependency::Path(path) => Some(path.clone()),
-                                    } {
-                                        // XXX TODO: Similar to case above - shouldn't assume PublishDependency::Load.
-                                        input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
-                                    };
-                                });
-
-                                // XXX TODO: If the above call to `apply` wrote to the cache
-                                // then we're duplicating that work here. Maybe `apply` should
-                                // optionally return the cached value? Or factor out the code
-                                // shared between here and apply.
-                                let (saver, saver_settings) =
-                                    self.saver(&loaded, &self.registry).ok_or_else(|| {
-                                        format!(
-                                            "Couldn't find saver for asset type \"{}\".",
-                                            loaded.asset_type_name()
-                                        )
-                                    })?;
-
-                                // XXX TODO: Other paths that call `save_standalone_asset` also do
-                                // this loader lookup. Maybe refactor into `save_standalone_asset`?
-                                let loader = asset_server
-                                    .get_asset_loader_with_type_name(saver.loader_type_name())
-                                    .await?;
-
-                                standalone_asset =
-                                    save_standalone_asset(&loaded, &*loader, saver, saver_settings)
-                                        .await
-                                        .expect("XXX TODO");
-                            }
-
-                            let header = ron::de::from_bytes::<StandaloneAssetHeader>(
-                                &standalone_asset.header,
+                        let (asset, dependency_value) = self
+                            .internal_apply(
+                                action,
+                                asset_server,
+                                DependencyLoading::No,
+                                dependency_key,
                             )
+                            .await
                             .expect("XXX TODO");
 
-                            let loader = asset_server
-                                .get_asset_loader_with_type_name(&header.loader)
-                                .await?;
+                        match asset {
+                            CachedOrUncached::Cached(asset) => {
+                                // This action is publishable. Get the output and
+                                // recurse its external dependencies.
 
-                            let meta_bytes = loader.serialize_meta_from_serialized_settings(
-                                header.loader_settings.as_bytes(),
-                            );
-
-                            pack.actions.insert(
-                                Box::<str>::from(action.to_string()),
-                                StagedAsset {
-                                    asset_bytes: standalone_asset.asset.into(),
-                                    meta_bytes: Some(meta_bytes.into_boxed_slice()),
-                                },
-                            );
-                        } else {
-                            if let Some(dependency_graph) = &self.dependency_graph
-                                && let Some((_, dependency_value)) =
-                                    dependency_graph.action_key(action, None, env).await
-                            {
-                                if let Some(dependency_value) = dependency_value {
-                                    for dependency in dependency_value.loader_dependees() {
-                                        input_stack.push(dependency.0.clone().into());
-                                    }
-
-                                    for dependency in dependency_value.external_dependees() {
-                                        input_stack
-                                            .push(PublishDependency::Load(dependency.clone()));
-                                    }
-                                }
-                            } else {
-                                let (loaded, _) = self
-                                    .apply(action, asset_server, DependencyLoading::No)
-                                    .await
-                                    .expect("XXX TODO");
-
-                                for dependency in loaded.loader_dependencies.keys() {
-                                    input_stack.push(dependency.clone().into());
+                                for dependency in dependency_value.external_dependees() {
+                                    input_stack.push(PublishDependency::Load(dependency.clone()));
                                 }
 
-                                loaded.visit_dependencies(&self.registry, &mut |dependency| {
-                                    if let Some(path) = match dependency {
-                                        AssetDependency::Id(_) => todo!("Decide if we disallow ids. Dependency tracking requires the path."),
-                                        AssetDependency::Handle(handle) => handle.path().cloned(),
-                                        AssetDependency::Path(path) => Some(path.clone()),
-                                    } {
-                                        // XXX TODO: Skip sub-assets and self references?
-                                        // XXX TODO: Can we assume `PublishDependency::Load`? Technically the path
-                                        // could have been used by `read_asset_bytes`. Maybe just have to accept
-                                        // that we don't know or `#[dependency]` needs some annotation.
-                                        input_stack.push(PublishDependency::Load(RootAssetRef::without_label(path)));
-                                    };
-                                });
+                                // XXX TODO: Maybe refactor this? Basically converts `StandaloneAsset`
+                                // to `StagedAsset`.
+
+                                let header =
+                                    ron::de::from_bytes::<StandaloneAssetHeader>(&asset.header)
+                                        .expect("XXX TODO");
+
+                                let loader = asset_server
+                                    .get_asset_loader_with_type_name(&header.loader)
+                                    .await?;
+
+                                let meta_bytes = loader.serialize_meta_from_serialized_settings(
+                                    header.loader_settings.as_bytes(),
+                                );
+
+                                pack.actions.insert(
+                                    Box::<str>::from(action.to_string()),
+                                    StagedAsset {
+                                        asset_bytes: asset.asset.into(),
+                                        meta_bytes: Some(meta_bytes.into_boxed_slice()),
+                                    },
+                                );
+                            }
+                            CachedOrUncached::Uncached(_) => {
+                                // This action is not publishable. Recurse both the
+                                // external and loader dependencies.
+                                //
+                                // XXX TODO: Check that `Uncached` = "not publishable" is correct.
+                                // Might be cases where an asset should have been publishable but
+                                // returned `Uncached` for other reasons.
+                                //
+                                // XXX TODO: Minor duplication - both branches of the match
+                                // add `external_dependees` to `input_stack`.
+
+                                for dependency in dependency_value.external_dependees() {
+                                    input_stack.push(PublishDependency::Load(dependency.clone()));
+                                }
+
+                                for dependency in dependency_value.loader_dependees() {
+                                    input_stack.push(dependency.0.clone().into());
+                                }
                             }
                         }
-
-                        // XXX TODO: We're not accounting for the standalone asset having
-                        // loader dependencies. Not sure if we can work them out unless
-                        // we do a fake load?
                     }
                     PublishDependency::File(path) => {
                         let reader = asset_server

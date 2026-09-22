@@ -32,7 +32,9 @@ struct KnownAssetState {
     node_index: NodeIndex,
     action_key: ActionCacheKey,
     dependency_key: DependencyCacheKey,
-    dependency_value: Option<Arc<DependencyCacheValue>>,
+    // XXX TODO: This is often empty. Could optimize for that case and avoid the
+    // `Arc`?
+    dependency_value: Arc<DependencyCacheValue>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -131,7 +133,7 @@ impl InternalGraph {
                     node_index: node_id,
                     action_key,
                     dependency_key,
-                    dependency_value: Some(dependency_value),
+                    dependency_value,
                 }),
             );
 
@@ -173,7 +175,7 @@ impl InternalGraph {
                 node_index: node_id,
                 action_key,
                 dependency_key,
-                dependency_value: None,
+                dependency_value: Arc::new(DependencyCacheValue::default()),
             }),
         );
 
@@ -183,7 +185,7 @@ impl InternalGraph {
     fn get_action(
         &self,
         path: &RootAssetRef,
-    ) -> Option<(ActionCacheKey, Option<Arc<DependencyCacheValue>>)> {
+    ) -> Option<(ActionCacheKey, Arc<DependencyCacheValue>)> {
         self.action_to_state
             .get(path)
             .and_then(|state| match state {
@@ -321,7 +323,7 @@ pub(crate) struct DependencyGraph {
     // XXX TODO: Would have preferred `RwLock`, but we can't because `petgraph::Acyclic`
     // is not `Sync` due to using `RefCell`.
     graph: Mutex<InternalGraph>,
-    dependency_cache: Option<MemoryAndFileCache<DependencyCacheKey, Arc<DependencyCacheValue>>>,
+    dependency_cache: MemoryAndFileCache<DependencyCacheKey, Arc<DependencyCacheValue>>,
     content_cache: ContentCache,
     // XXX TODO: We should have loader versions here for calculating dependency keys?
 }
@@ -361,13 +363,12 @@ impl DependencyGraph {
     ) -> Self {
         Self {
             graph: Default::default(),
-            // XXX TODO: Add an option to disable the dependency memory cache?
-            dependency_cache: Some(MemoryAndFileCache::new(
+            dependency_cache: MemoryAndFileCache::new(
                 "dependency_cache",
                 dependency_cache_path,
                 validate,
                 registry,
-            )),
+            ),
             content_cache: ContentCache::new(sources),
         }
     }
@@ -455,16 +456,9 @@ impl DependencyGraph {
     pub(crate) async fn action_key(
         &self,
         root_action: &RootAssetRef,
-        root_dependency_key: Option<DependencyCacheKey>,
+        root_dependency_key: DependencyCacheKey,
         env: &FullEnvironment,
-    ) -> Option<(ActionCacheKey, Option<Arc<DependencyCacheValue>>)> {
-        let Some(cache) = &self.dependency_cache else {
-            return None;
-        };
-
-        let root_dependency_key =
-            root_dependency_key.unwrap_or_else(|| self.action_dependency_key(root_action, env));
-
+    ) -> Option<(ActionCacheKey, Arc<DependencyCacheValue>)> {
         // Early out if possible.
         if let Some(existing) = self.graph().get_action(root_action) {
             return Some(existing);
@@ -481,8 +475,10 @@ impl DependencyGraph {
             IndexMap::<RootAssetPath<'static>, Option<DependencyCacheKey>>::new();
 
         // XXX TODO: This duplicates a similar block within the loop below. Refactor?
-        let root_pending_action = if let Some(root_dependency_value) =
-            cache.get(&root_dependency_key, root_action).await
+        let root_pending_action = if let Some(root_dependency_value) = self
+            .dependency_cache
+            .get(&root_dependency_key, root_action)
+            .await
         {
             for CacheLoaderDependency(dependee_path, dependee_key) in
                 root_dependency_value.loader_dependees()
@@ -533,8 +529,10 @@ impl DependencyGraph {
                     // XXX TODO: Keep?
                     assert!(!pending_actions.contains_key(&action));
 
-                    let pending_action = if let Some(dependency_value) =
-                        cache.get(&current_dependency_key, &action).await
+                    let pending_action = if let Some(dependency_value) = self
+                        .dependency_cache
+                        .get(&current_dependency_key, &action)
+                        .await
                     {
                         for CacheLoaderDependency(dependee_path, dependee_key) in
                             dependency_value.loader_dependees()
@@ -594,17 +592,14 @@ impl DependencyGraph {
         &self,
         path: &RootAssetRef,
         dependency_key: DependencyCacheKey,
-        dependency_value: DependencyCacheValue,
+        dependency_value: Arc<DependencyCacheValue>,
     ) -> Option<ActionCacheKey> {
-        let dependency_value = Arc::new(dependency_value);
-
         let action_key =
             self.graph()
                 .set_action(path.clone(), dependency_key, dependency_value.clone());
 
-        if let Some(cache) = &self.dependency_cache {
-            cache.put(dependency_key, dependency_value, path);
-        }
+        self.dependency_cache
+            .put(dependency_key, dependency_value, path);
 
         action_key
     }
