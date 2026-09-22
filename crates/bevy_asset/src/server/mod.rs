@@ -640,7 +640,7 @@ impl AssetServer {
                                             .asset
                                             .value
                                             .asset_type_name(),
-                                        loader_name: "XXX TODO: Was loader.type_path()",
+                                        loader_name: "XXX TODO", // XXX TODO: Can we support this? Was loader.type_path()",
                                     })
                                     .into();
                                 self.send_asset_event(InternalAssetEvent::Failed {
@@ -688,6 +688,23 @@ impl AssetServer {
                         }
                     }
                 } else {
+                    // XXX TODO: Somewhat duplicates labeled asset path. Could combine?
+                    if asset_id.type_id != loaded_asset.asset_type_id() {
+                        let error: AssetLoadError = Box::new(RequestedHandleTypeMismatchError {
+                            path: path.clone_owned(),
+                            requested: asset_id.type_id,
+                            actual_asset_name: loaded_asset.asset_type_name(),
+                            loader_name: "XXX TODO", // XXX TODO: Can we support this? Was loader.type_path()",
+                        })
+                        .into();
+                        self.send_asset_event(InternalAssetEvent::Failed {
+                            index: asset_id,
+                            error: error.clone(),
+                            path: path.into_owned(),
+                        });
+                        return Err(error);
+                    }
+
                     // XXX TODO: Avoid clone?
                     (fetched_handle, asset_id)
                 };
