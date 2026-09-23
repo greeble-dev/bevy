@@ -39,13 +39,16 @@ use bevy::{
     time::common_conditions::on_timer,
     world_serialization::WorldAssetLoader,
 };
+use bevy_ecs::template::TemplateAssetDependencies;
+use bevy_scene::{ResolvedSceneListRoot, ScenePatch};
 use core::{
+    any::TypeId,
     hash::{Hash, Hasher},
     ops::Deref,
     result::Result,
 };
 use serde::{de::DeserializeSeed, Deserialize, Serialize};
-use std::{any::TypeId, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
 mod action {
     #[cfg(feature = "compressed_image_saver_universal")]
@@ -1430,36 +1433,67 @@ struct AssetPaths {
 }
 
 impl AssetPaths {
-    fn publish(&self) -> Vec<PublishDependency> {
+    fn publish(self, asset_server: &AssetServer) -> Vec<PublishDependency> {
         let bsns = self
             .bsns
-            .iter()
-            .flat_map(|bsn| bsn_dependencies(bsn.as_ref()))
+            .into_iter()
+            .flat_map(|bsn| bsn_dependencies(bsn, asset_server))
             .collect::<Vec<_>>();
 
         self.regular
-            .iter()
+            .into_iter()
             .map(|(_, path)| path)
-            .chain(self.scenes.iter().map(|(path, _)| path))
-            .chain(self.dynamic_scenes.iter().map(|(path, _)| path))
-            .chain(bsns.iter())
-            .map(|path| PublishDependency::Load(RootAssetRef::without_label(path.clone())))
+            .chain(self.scenes.into_iter().map(|(path, _)| path))
+            .chain(self.dynamic_scenes.into_iter().map(|(path, _)| path))
+            .chain(bsns)
+            .map(|path| PublishDependency::Load(RootAssetRef::without_label(path)))
             .collect()
     }
 }
 
-fn bsn_dependencies(scene: &dyn SceneList) -> Vec<AssetRef<'static>> {
+fn bsn_dependencies(
+    scene: Box<dyn SceneList>,
+    asset_server: &AssetServer,
+) -> Vec<AssetRef<'static>> {
+    let mut dependencies = Vec::<AssetRef<'static>>::new();
+
     let mut scene_dependencies = SceneDependencies::default();
 
-    // XXX TODO: This doesn't do anything useful since `HandleTemplate`
-    // doesn't register dependencies. Seems to be planned for the future:
-    // https://discord.com/channels/691052431525675048/1264881140007702558/1483190850644082759
     scene.register_dependencies(&mut scene_dependencies);
 
-    scene_dependencies
-        .iter()
-        .map(|scene_dependency| scene_dependency.path.clone())
-        .collect()
+    dependencies.extend(
+        scene_dependencies
+            .iter()
+            .map(|scene_dependency| scene_dependency.path.clone()),
+    );
+
+    // XXX TODO: Review scene patch parameter.
+    let resolved_root =
+        ResolvedSceneListRoot::resolve(scene, asset_server, &Assets::<ScenePatch>::default())
+            .expect("XXX TODO");
+
+    let mut template_dependencies = TemplateAssetDependencies::new();
+
+    for resolved_scene in resolved_root.scenes.iter() {
+        // XXX TODO: We need to check more than `ResolvedScene::component_templates`.
+        // There's various other templates in `ResolvedScene`.
+        for component_template in resolved_scene.component_templates.iter() {
+            (&**component_template).asset_dependencies(&mut template_dependencies);
+        }
+    }
+
+    dependencies.extend(template_dependencies.into_iter().map(|d| {
+        if let Some(path) = d.downcast_ref::<AssetRef<'static>>() {
+            path.clone()
+        } else {
+            // XXX TODO: Proper error handling.
+            panic!("Unexpected dependency type");
+        }
+    }));
+
+    std::dbg!(&dependencies);
+
+    dependencies
 }
 
 #[allow(unused, reason = "XXX TODO")]
@@ -1829,22 +1863,24 @@ fn main() {
             //     Transform::from_xyz(2.0, 0.0, 0.0)
             //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             // ),
-            (
-                "Duck.glb#Scene0".into(),
-                Transform::from_xyz(-2.0, 0.0, 0.0)
-                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            ),
+            // (
+            //     "Duck.glb#Scene0".into(),
+            //     Transform::from_xyz(-2.0, 0.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
         ],
-        dynamic_scenes: vec![(
-            action::OptimizeScene {
-                scene: "Duck.glb#Scene0".into(),
-                convert_meshes_to_meshlets: true,
-                compress_textures: true,
-                ..Default::default()
-            }
-            .into(),
-            Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-        )],
+        dynamic_scenes: vec![
+        // (
+        //     action::OptimizeScene {
+        //         scene: "Duck.glb#Scene0".into(),
+        //         convert_meshes_to_meshlets: true,
+        //         compress_textures: true,
+        //         ..Default::default()
+        //     }
+        //     .into(),
+        //     Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+        // )
+        ],
         bsns: vec![
             Box::new(bsn! {
                 MeshletMesh3d(action::MeshletFromMesh::new(
@@ -1994,7 +2030,7 @@ fn main() {
             let asset_server = app.world().resource::<AssetServer>();
 
             let input = PublishInput {
-                paths: asset_paths.publish(),
+                paths: asset_paths.publish(asset_server),
             };
 
             block_on(
