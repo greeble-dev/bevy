@@ -512,7 +512,7 @@ pub enum AssetDependency {
 }
 
 impl AssetDependency {
-    fn id(&self) -> Option<UntypedAssetId> {
+    pub fn id(&self) -> Option<UntypedAssetId> {
         match self {
             AssetDependency::Handle(handle) => Some(handle.id()),
             AssetDependency::Id(id) => Some(*id),
@@ -520,8 +520,7 @@ impl AssetDependency {
         }
     }
 
-    #[expect(unused, reason = "XXX TODO?")]
-    fn path(&self) -> Option<&AssetRef<'static>> {
+    pub fn path(&self) -> Option<&AssetRef<'static>> {
         match self {
             AssetDependency::Handle(handle) => handle.path(),
             AssetDependency::Id(_) => None,
