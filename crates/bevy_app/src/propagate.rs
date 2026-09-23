@@ -16,7 +16,7 @@ use bevy_ecs::{
     relationship::{Relationship, RelationshipTarget},
     schedule::{IntoScheduleConfigs, ScheduleLabel, SystemSet},
     system::{Commands, Local, Query},
-    template::{FromTemplate, Template},
+    template::{FromTemplate, Template, TemplateAssetDependencies},
 };
 #[cfg(feature = "bevy_reflect")]
 use bevy_reflect::Reflect;
@@ -101,6 +101,10 @@ impl<C: Template<Output: Component + Clone + PartialEq>> Template for PropagateT
 
     fn clone_template(&self) -> Self {
         PropagateTemplate(self.0.clone_template())
+    }
+
+    fn asset_dependencies(&self, dependencies: &mut TemplateAssetDependencies) {
+        self.0.asset_dependencies(dependencies);
     }
 }
 

@@ -6,7 +6,10 @@ use bevy_ecs::{
     entity::Entity,
     error::{BevyError, Result},
     relationship::{Relationship, RelationshipTarget},
-    template::{SceneEntityReference, SceneEntityReferences, Template, TemplateContext},
+    template::{
+        SceneEntityReference, SceneEntityReferences, Template, TemplateAssetDependencies,
+        TemplateContext,
+    },
     world::{EntityWorldMut, World},
 };
 use bevy_platform::collections::HashSet;
@@ -164,7 +167,8 @@ impl ResolvedSceneListRoot {
 #[derive(Default)]
 pub struct ResolvedScene {
     /// The collection of component [`Template`]s to apply to a spawned [`Entity`]. This can have multiple copies of the same [`Template`].
-    component_templates: Vec<Box<dyn ErasedTemplate>>,
+    // XXX TODO: Made public for `bsn_dependencies`. Consider alternatives.
+    pub component_templates: Vec<Box<dyn ErasedTemplate>>,
     /// The collection of Bundle templates to apply to a spawned [`Entity`].
     bundle_templates: Vec<Box<dyn ErasedBundleTemplate>>,
     /// The collection of [`RelatedResolvedScenes`], which will be spawned as "related" entities (ex: [`Children`] entities).
@@ -707,6 +711,9 @@ pub trait ErasedTemplate: Any + Send + Sync {
 
     /// Clones this template. See [`Clone`].
     fn clone_template(&self) -> Box<dyn ErasedTemplate>;
+
+    /// XXX TODO: Document.
+    fn asset_dependencies(&self, dependencies: &mut TemplateAssetDependencies);
 }
 
 impl<T: Template<Output: SceneEffect> + Send + Sync + 'static> ErasedTemplate for T {
@@ -722,6 +729,10 @@ impl<T: Template<Output: SceneEffect> + Send + Sync + 'static> ErasedTemplate fo
 
     fn clone_template(&self) -> Box<dyn ErasedTemplate> {
         Box::new(Template::clone_template(self))
+    }
+
+    fn asset_dependencies(&self, dependencies: &mut TemplateAssetDependencies) {
+        Template::asset_dependencies(self, dependencies);
     }
 }
 

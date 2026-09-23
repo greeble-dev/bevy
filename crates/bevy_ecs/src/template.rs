@@ -1,7 +1,7 @@
 //! Functionality that relates to the [`Template`] trait.
 pub use bevy_ecs_macros::FromTemplate;
 
-use core::{hash::Hash, ops::Deref};
+use core::{any::Any, hash::Hash, ops::Deref};
 
 use crate::{
     component::Mutable,
@@ -10,11 +10,14 @@ use crate::{
     resource::Resource,
     world::{EntityWorldMut, Mut, World},
 };
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use bevy_platform::{collections::hash_map::RawEntryMut, hash::Hashed};
 use bevy_utils::PreHashMap;
 use indexmap::Equivalent;
 use variadics_please::all_tuples;
+
+/// XXX TODO: Document. See `Template::asset_dependencies`.
+pub type TemplateAssetDependencies = Vec<Box<dyn Any>>;
 
 /// A [`Template`] is something that, given a spawn context (target [`Entity`], [`World`], etc), can produce a [`Template::Output`].
 ///
@@ -38,6 +41,10 @@ pub trait Template {
 
     /// Clones this template. See [`Clone`].
     fn clone_template(&self) -> Self;
+
+    /// XXX TODO: This is a temporary hack for extracting asset dependencies from
+    /// `HandleTemplate`.
+    fn asset_dependencies(&self, _dependencies: &mut TemplateAssetDependencies) {}
 }
 
 /// The context used to apply the current [`Template`]. This contains a reference to the entity that the template is being
@@ -374,6 +381,11 @@ macro_rules! template_impl {
                 )]
                 let ($($template,)*) = &self.0;
                 TemplateTuple(($($template.clone_template(),)*))
+            }
+
+            fn asset_dependencies(&self, _dependencies: &mut TemplateAssetDependencies) {
+                let ($($template,)*) = &self.0;
+                $($template.asset_dependencies(_dependencies);)*
             }
         }
     }

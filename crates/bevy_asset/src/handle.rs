@@ -2,8 +2,10 @@ use crate::{
     Asset, AssetId, AssetIndex, AssetIndexAllocator, AssetRef, AssetServer, Assets,
     ErasedAssetIndex, ReflectHandle, UntypedAssetId,
 };
-use alloc::sync::Arc;
-use bevy_ecs::template::{FromTemplate, SpecializeFromTemplate, Template, TemplateContext};
+use alloc::{boxed::Box, sync::Arc};
+use bevy_ecs::template::{
+    FromTemplate, SpecializeFromTemplate, Template, TemplateAssetDependencies, TemplateContext,
+};
 use bevy_platform::{collections::Equivalent, sync::Mutex};
 use bevy_reflect::{enums::Enum, FromReflect, PartialReflect, Reflect, ReflectRef, TypePath};
 use core::{
@@ -349,6 +351,22 @@ impl<T: Asset> Template for HandleTemplate<T> {
             HandleTemplate::Path(asset_path) => HandleTemplate::Path(asset_path.clone()),
             HandleTemplate::Handle(handle) => HandleTemplate::Handle(handle.clone()),
             HandleTemplate::Value(value) => HandleTemplate::Value(value.clone()),
+        }
+    }
+
+    fn asset_dependencies(&self, dependencies: &mut TemplateAssetDependencies) {
+        match self {
+            HandleTemplate::Path(path) => {
+                dependencies.push(Box::new(path.clone()));
+            }
+            HandleTemplate::Handle(handle) => {
+                if let Some(path) = handle.path() {
+                    dependencies.push(Box::new(path.clone()));
+                }
+            }
+            // XXX TODO: Should we try and walk the asset value dependencies with
+            // `VisitAssetDependencies`?
+            HandleTemplate::Value(_) => {}
         }
     }
 }
