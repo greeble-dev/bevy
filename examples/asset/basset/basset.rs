@@ -27,7 +27,7 @@ use bevy::{
     log::LogPlugin,
     math::FloatOrd,
     mesh::SerializedMesh,
-    pbr::experimental::meshlet::*,
+    pbr::{experimental::meshlet::*, StandardMaterialTemplate},
     prelude::*,
     reflect::{
         serde::{ReflectDeserializer, ReflectSerializer},
@@ -39,6 +39,7 @@ use bevy::{
     time::common_conditions::on_timer,
     world_serialization::WorldAssetLoader,
 };
+use bevy_asset::asset_template;
 use bevy_ecs::template::TemplateAssetDependencies;
 use bevy_scene::{ResolvedSceneListRoot, ScenePatch};
 use core::{
@@ -1491,8 +1492,6 @@ fn bsn_dependencies(
         }
     }));
 
-    std::dbg!(&dependencies);
-
     dependencies
 }
 
@@ -1863,24 +1862,22 @@ fn main() {
             //     Transform::from_xyz(2.0, 0.0, 0.0)
             //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             // ),
-            // (
-            //     "Duck.glb#Scene0".into(),
-            //     Transform::from_xyz(-2.0, 0.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
+            (
+                "Duck.glb#Scene0".into(),
+                Transform::from_xyz(-2.0, 0.0, 0.0)
+                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            ),
         ],
-        dynamic_scenes: vec![
-        // (
-        //     action::OptimizeScene {
-        //         scene: "Duck.glb#Scene0".into(),
-        //         convert_meshes_to_meshlets: true,
-        //         compress_textures: true,
-        //         ..Default::default()
-        //     }
-        //     .into(),
-        //     Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-        // )
-        ],
+        dynamic_scenes: vec![(
+            action::OptimizeScene {
+                scene: "Duck.glb#Scene0".into(),
+                convert_meshes_to_meshlets: true,
+                compress_textures: true,
+                ..Default::default()
+            }
+            .into(),
+            Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+        )],
         bsns: vec![
             Box::new(bsn! {
                 MeshletMesh3d(action::MeshletFromMesh::new(
@@ -1888,22 +1885,19 @@ fn main() {
                         action::ResizeImage::new("heightmaps/Heightmap_08_Island_512.png", 0.5)
                     )
                 ))
-                template(|context| {
-                    let s = context.resource::<AssetServer>();
-                    Ok(MeshMaterial3d::<StandardMaterial>(s.add(StandardMaterial {
-                        base_color_texture: Some(s.load(action::CompressImage::new(
-                            action::ColorizeHeightmap::new("heightmaps/Heightmap_08_Island_512.png")
-                        ))),
-                        perceptual_roughness: 0.9,
-                        ..Default::default()
-                    })))
-                })
+                MeshMaterial3d<StandardMaterial>(asset_template(StandardMaterialTemplate {
+                    base_color_texture: Some(action::CompressImage::new(
+                        action::ColorizeHeightmap::new("heightmaps/Heightmap_08_Island_512.png")
+                    ).into()).into(),
+                    perceptual_roughness: 0.9,
+                    ..Default::default()
+                }))
                 Transform::from_xyz(-2.0, 0.1, 1.5).with_scale(vec3(0.75, 1.0, 0.75))
             }),
             Box::new(bsn! {
                 MeshletMesh3d(action::MeshletFromMesh::new("Duck.glb#Mesh0/Primitive0"))
                 MeshMaterial3d<StandardMaterial>("Duck.glb#Material0/std")
-                Transform::from_xyz(2.0, 0.0, 1.5).looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01))
+                Transform::from_xyz(2.0, 0.0, 0.0).looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y).with_scale(Vec3::splat(0.01))
             }),
         ],
     };
