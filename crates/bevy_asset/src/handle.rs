@@ -5,6 +5,7 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc};
 use bevy_ecs::template::{
     FromTemplate, SpecializeFromTemplate, Template, TemplateAssetDependencies, TemplateContext,
+    ToTemplate,
 };
 use bevy_platform::{collections::Equivalent, sync::Mutex};
 use bevy_reflect::{enums::Enum, FromReflect, PartialReflect, Reflect, ReflectRef, TypePath};
@@ -277,6 +278,19 @@ impl<T: Asset> HandleTemplate<T> {
     }
 }
 
+impl<T: Asset + FromTemplate> HandleTemplate<T>
+// XXX TODO: Check if this `where` can be avoided.
+where
+    <T as FromTemplate>::Template: Sync + Send + 'static,
+{
+    /// XXX TODO: Document.
+    pub fn template(template: <T as FromTemplate>::Template) -> Self {
+        HandleTemplate::Value(ArcMutexValue(Arc::new(Mutex::new(
+            AssetOrHandle::Template(Box::new(template)),
+        ))))
+    }
+}
+
 /// Stores an [`Arc<Mutex<AssetOrHandle<T>>>`].
 ///
 /// This intermediary type exists largely to enable reflect(opaque).
@@ -290,10 +304,54 @@ impl<T: Asset> Clone for ArcMutexValue<T> {
     }
 }
 
+/// XXX TODO: Review documentation.
+///
+/// Trait for assets that have a template.
+///
+/// This trait allows `HandleTemplate` to support asset templates without
+/// requiring all assets to support `FromTemplate`. The bounds on
+/// `HandleTemplate` and `TemplateAsset` are just `T: Asset`, but there's a
+/// blanket implementation of `TemplateAsset` for `T: Asset + FromTemplate`.
+/// This means `HandleTemplate` can hide the `FromTemplate` behind a
+/// `Box<dyn AssetTemplate>`.
+///
+/// XXX TODO: Should this trait be sealed and/or private? Not sure if there's
+/// a reason to allow anything other than the blanket implementation.
+pub trait TemplateAsset<T: Asset>: Send + Sync + 'static {
+    /// XXX TODO: Document.
+    fn build_template_asset(
+        &self,
+        context: &mut TemplateContext,
+    ) -> bevy_ecs::error::Result<Handle<T>>;
+
+    /// XXX TODO: Document.
+    fn template_asset_dependencies(&self, dependencies: &mut TemplateAssetDependencies);
+}
+
+// XXX TODO: Document.
+impl<T: Asset + FromTemplate> TemplateAsset<T> for <T as FromTemplate>::Template
+// XXX TODO: Check if this `where` can be avoided.
+where
+    <T as FromTemplate>::Template: Sync + Send + 'static,
+{
+    fn build_template_asset(
+        &self,
+        context: &mut TemplateContext,
+    ) -> bevy_ecs::error::Result<Handle<T>> {
+        let asset = self.build_template(context)?;
+        Ok(context.resource_mut::<Assets<T>>().add(asset))
+    }
+
+    fn template_asset_dependencies(&self, dependencies: &mut TemplateAssetDependencies) {
+        self.asset_dependencies(dependencies);
+    }
+}
+
 #[derive(Reflect)]
 enum AssetOrHandle<T: Asset> {
     Value(Option<T>),
     Handle(Handle<T>),
+    Template(Box<dyn TemplateAsset<T>>),
 }
 
 impl<T: Asset> Default for AssetOrHandle<T> {
@@ -320,6 +378,12 @@ impl<T: Asset> From<Handle<T>> for HandleTemplate<T> {
     }
 }
 
+impl<T: Asset + FromTemplate> ToTemplate<HandleTemplate<T>> for Handle<T> {
+    fn to_template(self) -> HandleTemplate<T> {
+        self.into()
+    }
+}
+
 impl<T: Asset> Template for HandleTemplate<T> {
     type Output = Handle<T>;
     fn build_template(&self, context: &mut TemplateContext) -> bevy_ecs::error::Result<Handle<T>> {
@@ -341,6 +405,11 @@ impl<T: Asset> Template for HandleTemplate<T> {
                         handle
                     }
                     AssetOrHandle::Handle(handle) => handle.clone(),
+                    AssetOrHandle::Template(template) => {
+                        let handle = (**template).build_template_asset(context)?;
+                        *value_or_handle = AssetOrHandle::Handle(handle.clone());
+                        handle
+                    }
                 }
             }
         })
@@ -364,9 +433,21 @@ impl<T: Asset> Template for HandleTemplate<T> {
                     dependencies.push(Box::new(path.clone()));
                 }
             }
-            // XXX TODO: Should we try and walk the asset value dependencies with
-            // `VisitAssetDependencies`?
-            HandleTemplate::Value(_) => {}
+            HandleTemplate::Value(value) => {
+                let value_or_handle = value.0.lock().unwrap();
+
+                match &*value_or_handle {
+                    AssetOrHandle::Value(_) => todo!("XXX TODO: Should we handle this?"),
+                    AssetOrHandle::Handle(handle) => {
+                        if let Some(path) = handle.path() {
+                            dependencies.push(Box::new(path.clone()));
+                        }
+                    }
+                    AssetOrHandle::Template(template) => {
+                        (**template).template_asset_dependencies(dependencies);
+                    }
+                }
+            }
         }
     }
 }
@@ -378,6 +459,17 @@ impl<T: Asset> Template for HandleTemplate<T> {
 /// to automatically convert values that can become `A`.
 pub fn asset_value<I: Into<A>, A: Asset>(asset: I) -> HandleTemplate<A> {
     HandleTemplate::value(asset)
+}
+
+/// XXX TODO: Document.
+pub fn asset_template<T: Asset + FromTemplate>(
+    template: <T as FromTemplate>::Template,
+) -> HandleTemplate<T>
+// XXX TODO: Check if this `where` can be avoided.
+where
+    <T as FromTemplate>::Template: Sync + Send + 'static,
+{
+    HandleTemplate::template(template)
 }
 
 impl<A: Asset> core::fmt::Debug for Handle<A> {

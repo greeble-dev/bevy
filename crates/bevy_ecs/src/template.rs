@@ -570,6 +570,12 @@ impl<T: Template> Template for OptionTemplate<T> {
             OptionTemplate::None => OptionTemplate::None,
         }
     }
+
+    fn asset_dependencies(&self, dependencies: &mut TemplateAssetDependencies) {
+        if let OptionTemplate::Some(value) = self {
+            value.asset_dependencies(dependencies);
+        }
+    }
 }
 
 /// A [`Template`] for [`Vec`].
@@ -597,6 +603,28 @@ impl<T: Template> Template for VecTemplate<T> {
     }
 }
 
+/// XXX TODO: Document
+pub trait ToTemplate<T: Template> {
+    /// XXX TODO: Document
+    fn to_template(self) -> T;
+}
+
+// Blanket implementation for types that are their own template.
+impl<T: Template + FromTemplate> ToTemplate<T> for T {
+    fn to_template(self) -> T {
+        self
+    }
+}
+
+impl<T: Template, I: ToTemplate<T>> ToTemplate<OptionTemplate<T>> for Option<I> {
+    fn to_template(self) -> OptionTemplate<T> {
+        match self {
+            Some(value) => OptionTemplate::Some(ToTemplate::to_template(value)),
+            None => OptionTemplate::None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::prelude::*;
@@ -619,5 +647,39 @@ mod tests {
         };
         let foo = world.spawn_empty().build_template(&foo_template).unwrap();
         assert_eq!(foo.handle.unwrap().0, "handle_path".to_string());
+    }
+
+    #[test]
+    fn copy_default() {
+        #[derive(FromTemplate)]
+        #[template(copy_default)]
+        struct CopyDefault(u32);
+
+        impl Default for CopyDefault {
+            fn default() -> Self {
+                Self(42)
+            }
+        }
+
+        #[derive(FromTemplate)]
+        struct NoCopyDefault(u32);
+
+        impl Default for NoCopyDefault {
+            fn default() -> Self {
+                Self(42)
+            }
+        }
+
+        let mut world = World::new();
+
+        let template = CopyDefaultTemplate::default();
+        assert_eq!(template.0, 42);
+        let component = world.spawn_empty().build_template(&template).unwrap();
+        assert_eq!(component.0, 42);
+
+        let template = NoCopyDefaultTemplate::default();
+        assert_eq!(template.0, u32::default());
+        let component = world.spawn_empty().build_template(&template).unwrap();
+        assert_eq!(component.0, u32::default());
     }
 }

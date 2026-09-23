@@ -3,12 +3,14 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
     parse::ParseStream, parse_macro_input, parse_quote, punctuated::Punctuated, spanned::Spanned,
-    Data, DeriveInput, Fields, FieldsUnnamed, Ident, Index, Path, Result, Token, WhereClause,
+    Data, DeriveInput, Fields, FieldsUnnamed, Ident, Index, MacroDelimiter, Meta, Path, Result,
+    Token, WhereClause,
 };
 
 const TEMPLATE_DEFAULT_ATTRIBUTE: &str = "default";
 const TEMPLATE_ATTRIBUTE: &str = "template";
 const BUILT_IN_ATTRIBUTE: &str = "built_in";
+const COPY_DEFAULT_ATTRIBUTE: &str = "copy_default";
 
 pub(crate) fn derive_from_template(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
@@ -21,9 +23,46 @@ pub(crate) fn derive_from_template(input: TokenStream) -> TokenStream {
 
     let type_visibility = &ast.vis;
 
+    let mut copy_default = None;
+
+    // XXX TODO: Review this mess - cut and pasted from `bevy_reflect` just to
+    // get a basic `copy_default` working.
+    //
+    // XXX TODO: `copy_default` should be documented in `FromTemplate`.
+    for attribute in &ast.attrs {
+        match &attribute.meta {
+            Meta::List(meta_list) if meta_list.path.is_ident(TEMPLATE_ATTRIBUTE) => {
+                if let MacroDelimiter::Paren(_) = meta_list.delimiter {
+                    attribute
+                        .parse_args_with(|stream: ParseStream| {
+                            let forked = stream.fork();
+                            let ident = forked.parse::<Ident>()?;
+                            if ident == COPY_DEFAULT_ATTRIBUTE {
+                                stream.parse::<Ident>()?;
+                                copy_default = Some(type_ident);
+                            } else {
+                                return Err(syn::Error::new(attribute.span(), "XXX TODO"));
+                            }
+                            Ok(())
+                        })
+                        .expect("XXX TODO");
+                } else {
+                    todo!("XXX TODO")
+                    // return Err(syn::Error::new(
+                    //         meta_list.delimiter.span().join(),
+                    //         format_args!(
+                    //             "`#[{TEMPLATE_ATTRIBUTE}(\"...\")]` must use parentheses `(` and `)`"
+                    //         ),
+                    //     ));
+                }
+            }
+            _ => {}
+        }
+    }
+
     let template = match &ast.data {
         Data::Struct(data_struct) => {
-            let result = match struct_impl(&data_struct.fields, &bevy_ecs, false) {
+            let result = match struct_impl(&data_struct.fields, &bevy_ecs, false, copy_default) {
                 Ok(result) => result,
                 Err(err) => return err.into_compile_error().into(),
             };
@@ -140,7 +179,7 @@ pub(crate) fn derive_from_template(input: TokenStream) -> TokenStream {
             let mut variant_asset_dependencies = Vec::new();
             let mut variant_default_ident = None;
             for variant in &data_enum.variants {
-                let result = match struct_impl(&variant.fields, &bevy_ecs, true) {
+                let result = match struct_impl(&variant.fields, &bevy_ecs, true, copy_default) {
                     Ok(result) => result,
                     Err(err) => return err.into_compile_error().into(),
                 };
@@ -347,7 +386,12 @@ enum TemplateType {
     Manual(Path),
 }
 
-fn struct_impl(fields: &Fields, bevy_ecs: &Path, is_enum: bool) -> Result<StructImpl> {
+fn struct_impl(
+    fields: &Fields,
+    bevy_ecs: &Path,
+    is_enum: bool,
+    copy_default: Option<&Ident>,
+) -> Result<StructImpl> {
     let mut template_fields = Vec::with_capacity(fields.len());
     let mut template_field_builds = Vec::with_capacity(fields.len());
     let mut template_field_defaults = Vec::with_capacity(fields.len());
@@ -420,9 +464,21 @@ fn struct_impl(fields: &Fields, bevy_ecs: &Path, is_enum: bool) -> Result<Struct
                 });
             }
 
-            template_field_defaults.push(quote! {
-                #ident: #FQDefault::default()
-            });
+            if let Some(copy_default) = copy_default {
+                if is_enum {
+                    // XXX TODO: Enums are tricky because we can't simply do `default().#ident`. We need
+                    // to do a single call to `default()` then a match and handle each variant.
+                    todo!("XXX TODO");
+                } else {
+                    template_field_defaults.push(quote! {
+                        #ident: #bevy_ecs::template::ToTemplate::to_template(#copy_default::default().#ident)
+                    });
+                }
+            } else {
+                template_field_defaults.push(quote! {
+                    #ident: #FQDefault::default()
+                });
+            }
         } else {
             template_fields.push(quote! {
                 #field_maybe_pub #template_type
@@ -449,9 +505,22 @@ fn struct_impl(fields: &Fields, bevy_ecs: &Path, is_enum: bool) -> Result<Struct
                     #bevy_ecs::template::Template::asset_dependencies(&self.#index, dependencies)
                 });
             }
-            template_field_defaults.push(quote! {
-                #FQDefault::default()
-            });
+
+            if let Some(copy_default) = copy_default {
+                if is_enum {
+                    // XXX TODO: Enums are tricky because we can't simply do `default().#ident`. We need
+                    // to do a single call to `default()` then a match and handle each variant.
+                    todo!("XXX TODO");
+                } else {
+                    template_field_defaults.push(quote! {
+                        #bevy_ecs::template::ToTemplate::to_template(#copy_default::default().#index)
+                    });
+                }
+            } else {
+                template_field_defaults.push(quote! {
+                    #FQDefault::default()
+                });
+            }
         }
     }
     Ok(StructImpl {
