@@ -6,8 +6,8 @@
 use argh::FromArgs;
 use bevy::{
     asset::{
+        asset_template,
         basset::{
-            action::LoadPath,
             publisher::{published_asset_source, read_pack_file, PublishDependency, PublishInput},
             *,
         },
@@ -20,7 +20,7 @@ use bevy::{
         PolyAssetLoader,
     },
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
-    ecs::{error::BevyError, system::RunSystemOnce},
+    ecs::{error::BevyError, system::RunSystemOnce, template::TemplateAssetDependencies},
     image::{ImageSaver, ImageSaverSettings},
     input::common_conditions::input_just_pressed,
     light::CascadeShadowConfigBuilder,
@@ -31,17 +31,14 @@ use bevy::{
     prelude::*,
     reflect::{
         serde::{ReflectDeserializer, ReflectSerializer},
-        TypePath, TypeRegistry, TypeRegistryArc,
+        TypePath, TypeRegistryArc,
     },
     render::render_resource::AsBindGroup,
-    scene::SceneDependencies,
+    scene::{ResolvedSceneListRoot, SceneDependencies, ScenePatch},
     tasks::block_on,
     time::common_conditions::on_timer,
     world_serialization::WorldAssetLoader,
 };
-use bevy_asset::asset_template;
-use bevy_ecs::template::TemplateAssetDependencies;
-use bevy_scene::{ResolvedSceneListRoot, ScenePatch};
 use core::{
     any::TypeId,
     hash::{Hash, Hasher},
@@ -790,7 +787,8 @@ mod action {
 
             // XXX TODO: This misses some textures because I didn't want to
             // faff around with feature flags. In future this should be done
-            // more generically - see comment on `CompressStandardMaterialTextures`.
+            // in a generic way through `VisitAssetDependencies` or reflection.
+            // See comment on `OptimizeStandardMaterial`.
             optimize_texture(&mut context, action, &mut material.base_color_texture);
             optimize_texture(&mut context, action, &mut material.emissive_texture);
             optimize_texture(
@@ -1720,43 +1718,43 @@ struct Args {
 }
 
 fn test_serialization() {
-    let mut registry = TypeRegistry::default();
-    registry.register::<AssetRef<'static>>();
-    registry.register::<LoadPath>();
+    // let mut registry = TypeRegistry::default();
+    // registry.register::<AssetRef<'static>>();
+    // registry.register::<LoadPath>();
 
-    {
-        use ron::{de, ser};
+    // {
+    //     use ron::{de, ser};
 
-        let a = dbg!(ser::to_string(&ReflectSerializer::new(
-            &AssetRef::from(AssetPath::parse("asdf.txt")),
-            &registry
-        ))
-        .expect("TODO"));
+    //     let a = dbg!(ser::to_string(&ReflectSerializer::new(
+    //         &AssetRef::from(AssetPath::parse("asdf.txt")),
+    //         &registry
+    //     ))
+    //     .expect("TODO"));
 
-        dbg!(ReflectDeserializer::new(&registry)
-            .deserialize(&mut de::Deserializer::from_str(&a).expect("XXX TODO"))
-            .expect("XXX TODO")
-            .try_take::<AssetRef>()
-            .expect("XXX TODO"));
+    //     dbg!(ReflectDeserializer::new(&registry)
+    //         .deserialize(&mut de::Deserializer::from_str(&a).expect("XXX TODO"))
+    //         .expect("XXX TODO")
+    //         .try_take::<AssetRef>()
+    //         .expect("XXX TODO"));
 
-        let b = dbg!(ser::to_string(&ReflectSerializer::new(
-            &AssetRef::new_with_label(
-                LoadPath {
-                    path: "asdf.txt".try_into().expect("XXX TODO"),
-                    ..Default::default()
-                },
-                Some("subasset".into()),
-            ),
-            &registry
-        ))
-        .expect("TODO"));
+    //     let b = dbg!(ser::to_string(&ReflectSerializer::new(
+    //         &AssetRef::new_with_label(
+    //             LoadPath {
+    //                 path: "asdf.txt".try_into().expect("XXX TODO"),
+    //                 ..Default::default()
+    //             },
+    //             Some("subasset".into()),
+    //         ),
+    //         &registry
+    //     ))
+    //     .expect("TODO"));
 
-        dbg!(ReflectDeserializer::new(&registry)
-            .deserialize(&mut de::Deserializer::from_str(&b).expect("XXX TODO"))
-            .expect("XXX TODO")
-            .try_take::<AssetRef>()
-            .expect("XXX TODO"));
-    }
+    //     dbg!(ReflectDeserializer::new(&registry)
+    //         .deserialize(&mut de::Deserializer::from_str(&b).expect("XXX TODO"))
+    //         .expect("XXX TODO")
+    //         .try_take::<AssetRef>()
+    //         .expect("XXX TODO"));
+    // }
 
     // #[derive(Serialize, Deserialize)]
     // struct Foo {
