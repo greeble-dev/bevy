@@ -1700,9 +1700,9 @@ impl ActionSource for DevelopmentActionSource {
 
             info!("Writing pack file {pack_path:?}");
 
-            write_pack_file(pack, pack_path).await;
+            let file_size = write_pack_file(pack, pack_path).await;
 
-            info!("Finished pack file {pack_path:?}");
+            info!("Finished pack file {pack_path:?} ({file_size})",);
 
             info!(
                 "Publishing finished in {:.2}s",

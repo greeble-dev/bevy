@@ -18,6 +18,7 @@ use async_fs::File;
 use atomicow::CowArc;
 use bevy_ecs::error::BevyError;
 use bevy_platform::collections::{HashMap, HashSet};
+use bevy_utils::memory_size::MemorySize;
 use core::{
     fmt::Debug,
     pin::Pin,
@@ -297,7 +298,7 @@ impl StorageBuilder {
         }
     }
 
-    fn add(&mut self, asset: StagedAsset) -> AssetPackLocation {
+    fn add(&mut self, asset: StagedAsset) -> (AssetPackLocation, MemorySize) {
         let meta_location = if let Some(meta_bytes) = &asset.meta_bytes {
             let meta_offset = self.length;
             self.length += meta_bytes.len();
@@ -313,9 +314,8 @@ impl StorageBuilder {
 
         let asset_offset = self.length;
 
-        // XXX TODO: Maybe add a heuristic for small assets. Unlikely to be
-        // worth compressing something if it's small, although I'm not sure what
-        // the threshold would be.
+        // XXX TODO: Maybe add a heuristic for whether to compress small assets.
+        // Although I'm not sure what the threshold would be.
         //
         // XXX TODO: Also consider a heuristic if the compressed size is only
         // slightly smaller?
@@ -329,14 +329,15 @@ impl StorageBuilder {
 
         let compressed_asset_bytes = lz4_flex::compress(&asset.asset_bytes);
 
-        // XXX TODO: Refactor to avoid duplication?
+        // XXX TODO: Refactor to avoid duplication between the if and else clauses?
         if compressed_asset_bytes.len() < asset.asset_bytes.len() {
-            self.length += compressed_asset_bytes.len();
+            let asset_size = compressed_asset_bytes.len();
+            self.length += asset_size;
 
             let asset_location = PackLocation {
                 offset: asset_offset,
                 uncompressed_length: asset.asset_bytes.len(),
-                compressed_length: Some(compressed_asset_bytes.len()),
+                compressed_length: Some(asset_size),
             };
 
             self.files.push(StagedAsset {
@@ -344,25 +345,36 @@ impl StorageBuilder {
                 asset_bytes: compressed_asset_bytes.into_boxed_slice(),
             });
 
-            AssetPackLocation {
-                meta: meta_location,
-                asset: asset_location,
-            }
+            (
+                AssetPackLocation {
+                    meta: meta_location,
+                    asset: asset_location,
+                },
+                // XXX TODO: Is this misleading? Doesn't include meta and
+                // headers.
+                MemorySize(asset_size as u64),
+            )
         } else {
-            self.length += asset.asset_bytes.len();
+            let asset_size = asset.asset_bytes.len();
+            self.length += asset_size;
 
             let asset_location = PackLocation {
                 offset: asset_offset,
                 compressed_length: None,
-                uncompressed_length: asset.asset_bytes.len(),
+                uncompressed_length: asset_size,
             };
 
             self.files.push(asset);
 
-            AssetPackLocation {
-                meta: meta_location,
-                asset: asset_location,
-            }
+            (
+                AssetPackLocation {
+                    meta: meta_location,
+                    asset: asset_location,
+                },
+                // XXX TODO: Is this misleading? Doesn't include meta and
+                // headers.
+                MemorySize(asset_size as u64),
+            )
         }
     }
 
@@ -385,7 +397,7 @@ impl StorageBuilder {
     }
 }
 
-pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) {
+pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) -> MemorySize {
     // XXX TODO: Consider sorting the paths? Reasoning is that assets in the
     // same folder will likely be accessed together. Not sure if there's anything
     // sensible we can do for actions though.
@@ -394,13 +406,15 @@ pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) {
     let mut manifest = ReadableManifest::default();
 
     for (path, file) in pack.paths {
-        debug!("Writing path \"{path}\"");
-        manifest.paths.insert(path, storage_builder.add(file));
+        let (location, size) = storage_builder.add(file);
+        debug!("Packing path \"{path}\" ({size})");
+        manifest.paths.insert(path, location);
     }
 
     for (action, file) in pack.actions {
-        debug!("Writing action \"{action}\"");
-        manifest.actions.insert(action, storage_builder.add(file));
+        let (location, size) = storage_builder.add(file);
+        debug!("Packing action \"{action}\" ({size})");
+        manifest.actions.insert(action, location);
     }
 
     let storage = storage_builder.finish();
@@ -445,6 +459,8 @@ pub(crate) async fn write_pack_file(pack: WritablePackFile, path: &Path) {
     drop(temp_file);
 
     async_fs::rename(temp_path, path).await.expect("XXX TODO");
+
+    MemorySize(file_bytes.len() as u64)
 }
 
 pub fn published_asset_source(
