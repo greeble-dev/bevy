@@ -1025,6 +1025,11 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
                                 .data::<ReflectFromReflect>()
                                 .expect("XXX TODO?")
                                 .from_reflect(&*action_dyn)
+                                // XXX TODO: Needs review. Triggers if a serialized action has a missing
+                                // member and has not done `#[reflect(Default)]`. This is a big footgun
+                                // for version upgrades, and we also don't get a meaningful error with the
+                                // missing member's name. Need to consider whether actions should be
+                                // done with a macro that can force `Default` to be reflected?
                                 .expect("XXX TODO? This has happened due to missing members, but not sure how we can print a meaningful error?");
 
                             action = Some(
