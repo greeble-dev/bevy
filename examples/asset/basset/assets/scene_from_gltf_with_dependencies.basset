@@ -1,9 +1,0 @@
-(
-	root: (
-		action: {
-			"basset::action::AcmeSceneFromGltf": (
-				gltf: "BoxTextured/BoxTextured.gltf"
-			)
-		}
-	)
-)

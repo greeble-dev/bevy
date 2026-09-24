@@ -2,8 +2,7 @@
 	root: (
 		action: {
 			"basset::action::OptimizeScene": (
-				scene: "Duck.glb#Scene0",
-				convert_meshes_to_meshlets: true,
+				scene: "BoxTextured/BoxTextured.gltf#Scene0",
 				compress_textures: true,
 			)
 		}

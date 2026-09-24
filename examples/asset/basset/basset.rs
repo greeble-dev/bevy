@@ -475,11 +475,11 @@ mod action {
                 .take::<Image>()
                 .ok_or_else(|| BevyError::from("XXX TODO"))?;
 
-            let target_size = original_image
+            let target_size = std::dbg!(original_image
                 .size()
                 .as_vec2()
                 .mul(action.scale.0)
-                .as_uvec2();
+                .as_uvec2());
 
             let resized_image = resize_image(original_image, target_size);
 
@@ -805,7 +805,7 @@ mod action {
     }
 
     #[derive(Default, Clone, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetAction, PartialEq, Hash)]
+    #[reflect(BassetAction, Default, PartialEq, Hash)]
     pub struct OptimizeScene {
         // XXX TODO: Maybe want typed `AssetRef` here? But gets weird because
         // in theory we could support both `WorldAsset` and `DynamicWorld`.
@@ -1847,18 +1847,8 @@ fn main() {
         ],
         scenes: vec![
             // (
-            //     "scene_from_gltf_with_dependencies.basset".into(),
-            //     Transform::from_xyz(-2.0, 1.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
-            // (
             //     "scene_from_gltf.basset".into(),
             //     Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
-            // (
-            //     "meshlet_scene.basset".into(),
-            //     Transform::from_xyz(2.0, 0.0, 0.0)
-            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             // ),
             (
                 "Duck.glb#Scene0".into(),
@@ -1866,16 +1856,29 @@ fn main() {
                     .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             ),
         ],
-        dynamic_scenes: vec![(
-            action::OptimizeScene {
-                scene: "Duck.glb#Scene0".into(),
-                convert_meshes_to_meshlets: true,
-                compress_textures: true,
-                ..Default::default()
-            }
-            .into(),
-            Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-        )],
+        dynamic_scenes: vec![
+            (
+                action::OptimizeScene {
+                    scene: "Duck.glb#Scene0".into(),
+                    convert_meshes_to_meshlets: true,
+                    compress_textures: true,
+                    ..Default::default()
+                }
+                .into(),
+                Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            ),
+            // (
+            //     "meshlet_scene.basset".into(),
+            //     Transform::from_xyz(2.0, 0.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
+            (
+                "gltf_scene_with_external_textures.basset".into(),
+                Transform::from_xyz(1.8, 0.75 * 0.5, 1.5)
+                    //                    .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y)
+                    .with_scale(vec3(0.75, 0.75, 0.75)),
+            ),
+        ],
         bsns: vec![
             Box::new(bsn! {
                 MeshletMesh3d(action::MeshletFromMesh::new(
