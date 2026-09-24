@@ -137,45 +137,6 @@ mod action {
         }
     }
 
-    /// Creates an `AcmeScene` from a `Gltf`. This does not respect the glTF's
-    /// scenes list - it just takes every node.
-    #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetAction, PartialEq, Hash)]
-    pub struct AcmeSceneFromGltf {
-        gltf: AssetRef<'static>,
-        // XXX TODO: Would be nice to support selecting a scene. but that's
-        // awkward to do - we'd have to dig around `Gltf::scenes` and extract
-        // everything from components.
-        //#[serde(default)]
-        //scene: Option<String>,
-    }
-
-    impl BassetAction for AcmeSceneFromGltf {
-        basset_action_version!(crate);
-    }
-
-    #[derive(TypePath)]
-    pub struct AcmeSceneFromGltfFunction;
-
-    impl BassetActionFunction for AcmeSceneFromGltfFunction {
-        type Action = AcmeSceneFromGltf;
-        type Error = BevyError;
-
-        async fn apply(
-            &self,
-            mut context: ApplyContext<'_>,
-            action: &Self::Action,
-        ) -> Result<BassetActionOutput, Self::Error> {
-            let gltf = context.erased_load_value(&action.gltf).await?;
-
-            let scene = acme::from_gltf(&gltf)?;
-
-            // XXX TODO: What about dependencies?
-
-            Ok(context.finish(scene))
-        }
-    }
-
     #[derive(Default, Debug, PartialEq, Hash, Reflect)]
     #[reflect(BassetAction, PartialEq, Hash)]
     pub struct MeshletFromMesh {
@@ -228,49 +189,6 @@ mod action {
                 MeshletMesh::from_mesh(&mesh, action.vertex_position_quantization_factor())?;
 
             Ok(context.finish(meshlet))
-        }
-    }
-
-    #[derive(Default, Debug, PartialEq, Hash, Reflect)]
-    #[reflect(BassetAction, PartialEq, Hash)]
-    pub struct ConvertAcmeSceneMeshesToMeshlets {
-        scene: AssetRef<'static>,
-        #[reflect(default)]
-        vertex_position_quantization_factor: Option<u8>,
-    }
-
-    impl BassetAction for ConvertAcmeSceneMeshesToMeshlets {
-        basset_action_version!(crate);
-    }
-
-    #[derive(TypePath)]
-    pub struct ConvertAcmeSceneMeshesToMeshletsFunction;
-
-    impl BassetActionFunction for ConvertAcmeSceneMeshesToMeshletsFunction {
-        type Action = ConvertAcmeSceneMeshesToMeshlets;
-        type Error = BevyError;
-
-        async fn apply(
-            &self,
-            mut context: ApplyContext<'_>,
-            action: &Self::Action,
-        ) -> Result<BassetActionOutput, Self::Error> {
-            // TODO: Should we check if `MeshletPlugin` is registered so we can
-            // return a sensible error?
-
-            let mut scene = context.load_value::<acme::AcmeScene>(&action.scene).await?;
-
-            for entity in &mut scene.entities {
-                if let Some(mesh) = entity.mesh.take() {
-                    entity.meshlet_mesh = Some(context.make_handle(MeshletFromMesh {
-                        mesh: mesh.path().expect("XXX TODO").clone(),
-                        vertex_position_quantization_factor:
-                            action.vertex_position_quantization_factor,
-                    }));
-                }
-            }
-
-            Ok(context.finish(scene))
         }
     }
 
@@ -1208,172 +1126,6 @@ impl AssetSaver for DynamicWorldAssetSaver {
     }
 }
 
-mod acme {
-    use super::*;
-    use bevy::{asset::VisitAssetDependencies, pbr::experimental::meshlet::MeshletMesh3d};
-
-    #[derive(Default, Debug, VisitAssetDependencies, Reflect)]
-    pub struct AcmeEntity {
-        pub transform: Transform,
-
-        #[dependency]
-        pub mesh: Option<Handle<Mesh>>,
-
-        #[dependency]
-        pub meshlet_mesh: Option<Handle<MeshletMesh>>,
-
-        // XXX TODO: Think through what it would take to make this `Handle<StandardMaterial>`.
-        // Problematic because we're currently converting from `GltfMaterial` to `StandardMaterial`
-        // in the action, so we need to make the material a sub-asset. Or maybe that's the wrong
-        // approach and we should leave it as `GltfMaterial` until later. Or maybe this is all
-        // a red herring - real question is what we do for BSN.
-        #[dependency]
-        pub material: Option<StandardMaterial>,
-    }
-
-    #[derive(Asset, Default, Debug, Reflect)]
-    pub struct AcmeScene {
-        #[dependency]
-        pub entities: Vec<AcmeEntity>,
-    }
-
-    fn get_sub_asset<'a, T: Asset>(
-        asset: &'a ErasedLoadedAsset,
-        sub_asset_handle: &Handle<T>,
-    ) -> Result<&'a T, BevyError> {
-        asset
-            .get_labeled_by_id(sub_asset_handle.id().untyped())
-            // XXX TODO: Don't use handle debug?
-            .ok_or_else(|| {
-                BevyError::from(format!("Couldn't find sub-asset {sub_asset_handle:?}"))
-            })?
-            .get::<T>()
-            // XXX TODO: Better error.
-            .ok_or_else(|| {
-                BevyError::from(format!("Sub-asset was wrong type {sub_asset_handle:?}"))
-            })
-    }
-
-    pub fn from_gltf(asset: &ErasedLoadedAsset) -> Result<AcmeScene, BevyError> {
-        let mut entities = Vec::<AcmeEntity>::new();
-
-        let gltf = asset.get::<Gltf>().expect("XXX TODO");
-
-        // Add all the root nodes to the stack.
-        let mut stack = gltf
-            .nodes
-            .iter()
-            .filter_map(|node_handle| {
-                let node = get_sub_asset(asset, node_handle).expect("XXX TODO");
-
-                if node.children.is_empty() {
-                    None
-                } else {
-                    Some((node, node.transform))
-                }
-            })
-            .collect::<Vec<_>>();
-
-        while let Some((node, transform)) = stack.pop() {
-            if let Some(mesh_handle) = &node.mesh {
-                let mesh = get_sub_asset(asset, mesh_handle)?;
-
-                for primitive in mesh.primitives.iter() {
-                    let primitive_mesh = Some(primitive.mesh.clone());
-                    let material = if let Some(gltf_material) = &primitive.material {
-                        Some(
-                            get_sub_asset(asset, gltf_material)
-                                .map(bevy::pbr::gltf::standard_material_from_gltf_material)?,
-                        )
-                    } else {
-                        None
-                    };
-
-                    entities.push(AcmeEntity {
-                        transform,
-                        mesh: primitive_mesh,
-                        material,
-                        ..Default::default()
-                    });
-                }
-            }
-
-            // Push children onto the stack.
-            for child_handle in node.children.iter() {
-                let child = get_sub_asset(asset, child_handle)?;
-
-                stack.push((child, transform * child.transform));
-            }
-        }
-
-        Ok(AcmeScene { entities })
-    }
-
-    pub fn spawn(
-        commands: &mut Commands,
-        scene: &AcmeScene,
-        parent_entity: Option<Entity>,
-        standard_material_assets: &mut Assets<StandardMaterial>,
-    ) {
-        for scene_entity in &scene.entities {
-            let mut world_entity = commands.spawn(scene_entity.transform);
-
-            if let Some(material) = &scene_entity.material {
-                world_entity.insert(MeshMaterial3d(
-                    standard_material_assets.add(material.clone()),
-                ));
-            }
-
-            if let Some(mesh) = &scene_entity.mesh {
-                world_entity.insert(Mesh3d(mesh.clone()));
-            } else if let Some(meshlet_mesh) = &scene_entity.meshlet_mesh {
-                world_entity.insert(MeshletMesh3d(meshlet_mesh.clone()));
-            } else {
-                panic!("Expected mesh or meshlet");
-            }
-
-            if let Some(parent_entity) = parent_entity {
-                world_entity.insert(ChildOf(parent_entity));
-            }
-        }
-    }
-
-    #[derive(Component)]
-    pub struct AcmeSceneSpawner(pub Handle<AcmeScene>);
-
-    // XXX TODO: This is currently used to keep the handle alive long enough that
-    // the asset loaded events can be printed. Rethink?
-    #[derive(Component)]
-    #[expect(dead_code, reason = "TODO")]
-    pub struct AcmeSceneInstance(pub Handle<AcmeScene>);
-
-    pub fn tick_scene_spawners(
-        mut commands: Commands,
-        spawners: Query<(Entity, &AcmeSceneSpawner)>,
-        scene_assets: Res<Assets<AcmeScene>>,
-        mut standard_material_assets: ResMut<Assets<StandardMaterial>>,
-    ) {
-        for (entity, spawner) in spawners {
-            let Some(scene_asset) = scene_assets.get(&spawner.0) else {
-                continue;
-            };
-
-            commands
-                .entity(entity)
-                .insert(AcmeSceneInstance(spawner.0.clone()));
-
-            commands.entity(entity).remove::<AcmeSceneSpawner>();
-
-            spawn(
-                &mut commands,
-                scene_asset,
-                Some(entity),
-                &mut standard_material_assets,
-            );
-        }
-    }
-}
-
 #[derive(Asset, TypePath, AsBindGroup, Clone, Default)]
 struct MeshletDebugMaterial {
     _dummy: (),
@@ -1622,18 +1374,15 @@ fn print(
     asset_server: Res<AssetServer>,
     string_assets: Res<Assets<demo::StringAsset>>,
     int_assets: Res<Assets<demo::IntAsset>>,
-    scene_assets: Res<Assets<acme::AcmeScene>>,
     image_assets: Res<Assets<Image>>,
     gltf_assets: Res<Assets<Gltf>>,
     mut string_events: MessageReader<AssetEvent<demo::StringAsset>>,
     mut int_events: MessageReader<AssetEvent<demo::IntAsset>>,
-    mut scene_events: MessageReader<AssetEvent<acme::AcmeScene>>,
     mut image_events: MessageReader<AssetEvent<Image>>,
     mut gltf_events: MessageReader<AssetEvent<Gltf>>,
 ) {
     print_events(&asset_server, &string_assets, &mut string_events, true);
     print_events(&asset_server, &int_assets, &mut int_events, true);
-    print_events(&asset_server, &scene_assets, &mut scene_events, true);
     print_events(&asset_server, &image_assets, &mut image_events, false);
     print_events(&asset_server, &gltf_assets, &mut gltf_events, false);
 }
@@ -1944,9 +1693,7 @@ fn main() {
                     .with_validate_action_cache(args.validate_action_cache)
                     .with_action(action::JoinStringsFunction)
                     .with_action(action::UppercaseStringFunction)
-                    .with_action(action::AcmeSceneFromGltfFunction)
                     .with_action(action::MeshletFromMeshFunction)
-                    .with_action(action::ConvertAcmeSceneMeshesToMeshletsFunction)
                     .with_action(action::CompressImageFunction)
                     .with_action(action::ResizeImageFunction)
                     .with_action(action::MeshFromHeightmapFunction)
@@ -1988,8 +1735,6 @@ fn main() {
     ))
     .init_asset::<demo::StringAsset>()
     .init_asset::<demo::IntAsset>()
-    .init_asset::<acme::AcmeScene>()
-    .register_asset_reflect::<acme::AcmeScene>()
     .register_asset_loader(demo::StringAssetLoader)
     .register_asset_loader(demo::IntAssetLoader)
     .register_asset_loader(MeshAssetLoader)
@@ -2006,7 +1751,6 @@ fn main() {
                 .add_systems(Startup, setup)
                 .add_systems(Update, print)
                 .add_systems(Update, reload.run_if(on_timer(Duration::from_secs(2))))
-                .add_systems(Update, acme::tick_scene_spawners)
                 .add_systems(
                     Update,
                     toggle_meshlet_debug.run_if(input_just_pressed(KeyCode::KeyM)),
