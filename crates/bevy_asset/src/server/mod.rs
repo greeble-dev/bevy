@@ -82,6 +82,9 @@ pub(crate) struct AssetServerData {
     meta_check: AssetMetaCheck,
     unapproved_path_mode: UnapprovedPathMode,
     basset_action_source: Arc<dyn ActionSource>,
+    // XXX TODO: Review. Was added so that it can be passed to `VisitAssetDependencies`
+    // in various places. Don't like making this semi-global, but if we don't then it
+    // has to be plumbed in all over the place.
     registry: TypeRegistryArc,
 }
 
