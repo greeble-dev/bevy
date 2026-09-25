@@ -604,22 +604,25 @@ impl<T: Template> Template for VecTemplate<T> {
 }
 
 /// XXX TODO: Document
-pub trait ToTemplate<T: Template> {
+pub trait IntoTemplate<T: Template> {
     /// XXX TODO: Document
-    fn to_template(self) -> T;
+    fn into_template(self) -> T;
 }
 
 // Blanket implementation for types that are their own template.
-impl<T: Template + FromTemplate> ToTemplate<T> for T {
-    fn to_template(self) -> T {
+//
+// XXX TODO: Double check correctness. Both `Template` and `FromTemplate` have
+// blanket implementations, so could this be applied inappropriately?
+impl<T: Template + FromTemplate> IntoTemplate<T> for T {
+    fn into_template(self) -> T {
         self
     }
 }
 
-impl<T: Template, I: ToTemplate<T>> ToTemplate<OptionTemplate<T>> for Option<I> {
-    fn to_template(self) -> OptionTemplate<T> {
+impl<T: Template, I: IntoTemplate<T>> IntoTemplate<OptionTemplate<T>> for Option<I> {
+    fn into_template(self) -> OptionTemplate<T> {
         match self {
-            Some(value) => OptionTemplate::Some(ToTemplate::to_template(value)),
+            Some(value) => OptionTemplate::Some(IntoTemplate::into_template(value)),
             None => OptionTemplate::None,
         }
     }

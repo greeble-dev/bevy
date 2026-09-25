@@ -4,8 +4,8 @@ use crate::{
 };
 use alloc::{boxed::Box, sync::Arc};
 use bevy_ecs::template::{
-    FromTemplate, SpecializeFromTemplate, Template, TemplateAssetDependencies, TemplateContext,
-    ToTemplate,
+    FromTemplate, IntoTemplate, SpecializeFromTemplate, Template, TemplateAssetDependencies,
+    TemplateContext,
 };
 use bevy_platform::{collections::Equivalent, sync::Mutex};
 use bevy_reflect::{enums::Enum, FromReflect, PartialReflect, Reflect, ReflectRef, TypePath};
@@ -378,8 +378,8 @@ impl<T: Asset> From<Handle<T>> for HandleTemplate<T> {
     }
 }
 
-impl<T: Asset + FromTemplate> ToTemplate<HandleTemplate<T>> for Handle<T> {
-    fn to_template(self) -> HandleTemplate<T> {
+impl<T: Asset + FromTemplate> IntoTemplate<HandleTemplate<T>> for Handle<T> {
+    fn into_template(self) -> HandleTemplate<T> {
         self.into()
     }
 }

@@ -471,7 +471,7 @@ fn struct_impl(
                     todo!("XXX TODO");
                 } else {
                     template_field_defaults.push(quote! {
-                        #ident: #bevy_ecs::template::ToTemplate::to_template(#copy_default::default().#ident)
+                        #ident: #bevy_ecs::template::IntoTemplate::into_template(#copy_default::default().#ident)
                     });
                 }
             } else {
@@ -513,7 +513,7 @@ fn struct_impl(
                     todo!("XXX TODO");
                 } else {
                     template_field_defaults.push(quote! {
-                        #bevy_ecs::template::ToTemplate::to_template(#copy_default::default().#index)
+                        #bevy_ecs::template::IntoTemplate::into_template(#copy_default::default().#index)
                     });
                 }
             } else {
