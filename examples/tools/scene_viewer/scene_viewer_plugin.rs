@@ -11,6 +11,8 @@ use bevy::{
 
 use std::{f32::consts::*, fmt};
 
+use super::OptimizeScene;
+
 #[derive(Resource)]
 pub struct SceneHandle {
     pub gltf_handle: Handle<Gltf>,
@@ -18,16 +20,22 @@ pub struct SceneHandle {
     instance_id: Option<InstanceId>,
     pub is_loaded: bool,
     pub has_light: bool,
+    pub optimize: Option<OptimizeScene>,
 }
 
 impl SceneHandle {
-    pub fn new(gltf_handle: Handle<Gltf>, scene_index: usize) -> Self {
+    pub fn new(
+        gltf_handle: Handle<Gltf>,
+        scene_index: usize,
+        optimize: Option<OptimizeScene>,
+    ) -> Self {
         Self {
             gltf_handle,
             scene_index,
             instance_id: None,
             is_loaded: false,
             has_light: false,
+            optimize,
         }
     }
 }
@@ -144,7 +152,16 @@ fn scene_load_check(
                             maybe_directional_light.is_some() || maybe_point_light.is_some()
                         });
 
-                scene_handle.instance_id = Some(scene_spawner.spawn(gltf_scene_handle.clone()));
+                scene_handle.instance_id =
+                    Some(if let Some(optimize) = scene_handle.optimize.clone() {
+                        scene_spawner.spawn_dynamic(
+                            asset_server.load(
+                                optimize.with_scene(gltf_scene_handle.path().unwrap().clone()),
+                            ),
+                        )
+                    } else {
+                        scene_spawner.spawn(gltf_scene_handle.clone())
+                    });
 
                 info!("Spawning scene...");
             }

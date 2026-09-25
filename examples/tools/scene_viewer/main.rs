@@ -10,18 +10,22 @@
 
 use argh::FromArgs;
 use bevy::{
-    asset::UnapprovedPathMode,
+    asset::{basset::DevelopmentActionSourceBuilder, UnapprovedPathMode},
     camera::primitives::{Aabb, Sphere},
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     core_pipeline::prepass::{DeferredPrepass, DepthPrepass},
     dev_tools::infinite_grid::{InfiniteGrid, InfiniteGridPlugin},
     gltf::{convert_coordinates::GltfConvertCoordinates, GltfPlugin},
     mesh::MeshCompressionArgs,
-    pbr::DefaultOpaqueRendererMethod,
+    pbr::{
+        experimental::meshlet::{MeshletMesh3d, MeshletPlugin},
+        DefaultOpaqueRendererMethod,
+    },
     post_process::motion_blur::MotionBlur,
     prelude::*,
     render::occlusion_culling::OcclusionCulling,
 };
+use std::sync::Arc;
 
 #[cfg(feature = "gltf_animation")]
 mod animation_plugin;
@@ -30,6 +34,17 @@ mod scene_viewer_plugin;
 
 use morph_viewer_plugin::MorphViewerPlugin;
 use scene_viewer_plugin::{SceneHandle, SceneViewerPlugin};
+
+#[path = "../../asset/basset/action.rs"]
+mod action;
+use self::action::*;
+
+#[path = "../../asset/basset/asset.rs"]
+mod asset;
+
+#[path = "../../asset/basset/util.rs"]
+mod util;
+use self::util::*;
 
 /// A simple glTF scene viewer made with Bevy
 #[derive(FromArgs, Resource)]
@@ -70,6 +85,12 @@ struct Args {
     /// set the motion blur shutter angle
     #[argh(option)]
     motion_blur_shutter_angle: Option<f32>,
+    /// enable texture compression. XXX TODO: Review if we can honestly support this. Only handles `StandardMaterial` right now..
+    #[argh(switch)]
+    texture_compression: bool,
+    /// enable meshlets
+    #[argh(switch)]
+    meshlets: bool,
 }
 
 impl Args {
@@ -107,6 +128,9 @@ fn main() {
                 file_path: std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string()),
                 // Allow scenes to be loaded from anywhere on disk
                 unapproved_path_mode: UnapprovedPathMode::Allow,
+                basset_action_source_builder: Some(Arc::new(DevelopmentActionSourceBuilder::new(
+                    development_action_source_settings(&app),
+                ))),
                 ..default()
             })
             .set(GltfPlugin {
@@ -126,9 +150,17 @@ fn main() {
         MorphViewerPlugin,
         InfiniteGridPlugin,
     ))
-    .insert_resource(args)
     .add_systems(Startup, setup)
     .add_systems(PreUpdate, setup_scene_after_load);
+
+    if args.meshlets {
+        app.add_plugins(MeshletPlugin::default());
+        // XXX TODO: This is currently adding a text overlay for the keyboard shortcut,
+        // but the scene viewer should print it instead (see `scene_viewer_plugin::INSTRUCTIONS`).
+        app.add_plugins(MeshletDebugPlugin);
+    }
+
+    app.insert_resource(args);
 
     // If deferred shading was requested, turn it on.
     if deferred == Some(true) {
@@ -164,7 +196,21 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>, args: Res<Args>
         commands.spawn(InfiniteGrid);
     }
 
-    commands.insert_resource(SceneHandle::new(asset_server.load(file_path), scene_index));
+    let optimize = if args.texture_compression || args.meshlets {
+        Some(OptimizeScene {
+            compress_textures: args.texture_compression,
+            convert_meshes_to_meshlets: args.meshlets,
+            ..Default::default()
+        })
+    } else {
+        None
+    };
+
+    commands.insert_resource(SceneHandle::new(
+        asset_server.load(file_path),
+        scene_index,
+        optimize,
+    ));
 }
 
 fn setup_scene_after_load(
@@ -173,7 +219,7 @@ fn setup_scene_after_load(
     mut scene_handle: ResMut<SceneHandle>,
     asset_server: Res<AssetServer>,
     args: Res<Args>,
-    meshes: Query<(&GlobalTransform, Option<&Aabb>), With<Mesh3d>>,
+    meshes: Query<(&GlobalTransform, Option<&Aabb>), Or<(With<Mesh3d>, With<MeshletMesh3d>)>>,
 ) {
     if scene_handle.is_loaded && !*setup {
         *setup = true;
@@ -237,6 +283,11 @@ fn setup_scene_after_load(
             },
             camera_controller,
         ));
+
+        if args.meshlets {
+            // Meshlets are incompatible with MSAA.
+            camera.insert(Msaa::Off);
+        }
 
         // If occlusion culling was requested, include the relevant components.
         // The Z-prepass is currently required.
