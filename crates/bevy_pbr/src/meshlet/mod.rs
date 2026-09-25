@@ -127,6 +127,16 @@ impl MeshletPlugin {
     }
 }
 
+// XXX TODO: Added this for convenience. Maybe file a PR? No idea if this is a
+// good default.
+impl Default for MeshletPlugin {
+    fn default() -> Self {
+        Self {
+            cluster_buffer_slots: 1 << 14,
+        }
+    }
+}
+
 impl Plugin for MeshletPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(target_endian = "big")]
