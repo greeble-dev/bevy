@@ -1665,7 +1665,8 @@ fn main() {
     let pack_file_path = PathBuf::from("target/basset/published.pack");
 
     let asset_plugin = if args.mode == ArgMode::Published {
-        // XXX TODO: Avoid `block_on`.
+        // XXX TODO: We shouldn't be blocking or doing direct FS access. Long-term
+        // goal is to read the pack file through regular asset sources.
         let pack_file = Arc::new(block_on(read_pack_file(&pack_file_path)));
 
         app.register_asset_source(
@@ -1680,9 +1681,7 @@ fn main() {
             ..Default::default()
         }
     } else {
-        let mut env = FullEnvironment::default();
-        env.set("compressed_texture_format", "bcn")
-            .expect("XXX TODO");
+        let env = FullEnvironment::new([("compressed_texture_format", "bcn")]).expect("XXX TODO?");
 
         AssetPlugin {
             file_path: "examples/asset/basset/assets".to_string(),
@@ -1760,7 +1759,8 @@ fn main() {
                 app.add_systems(Update, dump.run_if(on_timer(Duration::from_secs(4))));
             }
 
-            app.insert_resource(args).run();
+            app.insert_resource(args);
+            app.run();
         }
 
         ArgMode::Publish => {

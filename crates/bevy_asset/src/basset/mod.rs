@@ -902,33 +902,35 @@ pub enum EnvironmentFilterError {
 }
 
 // XXX TODO: Reconsider name?
-#[derive(Default)]
+#[derive(Default, PartialEq, Eq, Debug)]
 pub struct FullEnvironment(HashMap<String, String>);
 
 impl FullEnvironment {
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new(
+        iter: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Result<Self, EnvironmentSetError> {
+        // XXX TODO: Process all items and accumulate multiple errors rather than
+        // bailing at the first.
 
-    pub fn set(
-        &mut self,
-        key: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Result<(), EnvironmentSetError> {
-        let key = key.into();
-        let value = value.into();
+        let mut env = Self::default();
 
-        if key.is_empty() {
-            return Err(EnvironmentSetError::EmptyKey);
-        }
+        for (key, value) in iter
+            .into_iter()
+            .map(|(key, value)| (key.into(), value.into()))
+        {
+            if key.is_empty() {
+                return Err(EnvironmentSetError::EmptyKey);
+            }
 
-        match self.0.entry(key) {
-            Entry::Occupied(_) => Err(EnvironmentSetError::DuplicateKey),
-            Entry::Vacant(entry) => {
-                entry.insert(value);
-                Ok(())
+            match env.0.entry(key) {
+                Entry::Occupied(_) => return Err(EnvironmentSetError::DuplicateKey),
+                Entry::Vacant(entry) => {
+                    entry.insert(value);
+                }
             }
         }
+
+        Ok(env)
     }
 
     pub fn get(&self, key: &str) -> Option<&str> {
@@ -2251,16 +2253,23 @@ mod tests {
 
     #[test]
     fn environment() {
-        let mut e = FullEnvironment::new();
+        assert_eq!(
+            FullEnvironment::new([("", "empty")]),
+            Err(EnvironmentSetError::EmptyKey)
+        );
 
-        assert_eq!(e.set("", "empty"), Err(EnvironmentSetError::EmptyKey));
+        assert_eq!(
+            FullEnvironment::new([("k1", "v1")]).unwrap().get("k1"),
+            Some("v1")
+        );
 
-        assert_eq!(e.set("k1", "v1"), Ok(()));
-        assert_eq!(e.get("k1"), Some("v1"));
+        assert_eq!(
+            FullEnvironment::new([("k1", "v1"), ("k1", "dupe")]),
+            Err(EnvironmentSetError::DuplicateKey)
+        );
 
-        assert_eq!(e.set("k1", "dupe"), Err(EnvironmentSetError::DuplicateKey));
+        let e = FullEnvironment::new([("k1", "v1"), ("k2", "v2")]).unwrap();
 
-        assert_eq!(e.set("k2", "v2"), Ok(()));
         assert_eq!(e.get("k1"), Some("v1"));
         assert_eq!(e.get("k2"), Some("v2"));
     }
