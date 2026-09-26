@@ -22,7 +22,7 @@ use bevy_platform::collections::{hash_map::Entry, HashMap, HashSet};
 use bevy_reflect::{PartialReflect, Reflect, TypePath, TypeRegistry, TypeRegistryArc};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
-    any::{Any, TypeId},
+    any::{type_name, Any, TypeId},
     convert::Infallible,
 };
 use downcast_rs::{impl_downcast, Downcast};
@@ -151,7 +151,7 @@ impl<L: AssetLoader> ErasedAssetLoader for ErasedUniAssetLoader<L> {
     }
 
     fn asset_type_name(&self) -> Option<&'static str> {
-        Some(core::any::type_name::<L::Asset>())
+        Some(type_name::<L::Asset>())
     }
 
     fn asset_type_id(&self) -> Option<TypeId> {
@@ -546,7 +546,7 @@ impl<A: Asset> AssetContainer for A {
     }
 
     fn asset_type_name(&self) -> &'static str {
-        core::any::type_name::<A>()
+        type_name::<A>()
     }
 
     fn visit_dependencies(
@@ -738,15 +738,45 @@ impl<'a> LoadContext<'a> {
         label: impl Into<CowArc<'static, str>>,
         loaded_asset: LoadedAsset<A>,
     ) -> Handle<A> {
-        let label = label.into();
-        let loaded_asset: ErasedLoadedAsset = loaded_asset.into();
+        self.add_erased_loaded_labeled_asset_internal(
+            label.into(),
+            loaded_asset.into(),
+            Some(type_name::<A>()),
+        )
+        .typed_debug_checked()
+    }
+
+    /// Adds an [`ErasedLoadedAsset`] that is a "labeled sub asset" of the root path of this load
+    /// context. This can be used in combination with [`LoadContext::begin_labeled_asset`] to
+    /// parallelize sub asset loading.
+    ///
+    /// See [`AssetPath`] for more on labeled assets.
+    pub fn add_erased_loaded_labeled_asset(
+        &mut self,
+        label: impl Into<CowArc<'static, str>>,
+        loaded_asset: ErasedLoadedAsset,
+    ) -> UntypedHandle {
+        self.add_erased_loaded_labeled_asset_internal(label.into(), loaded_asset, None)
+    }
+
+    /// Internal versions of the above that are type erased, but still may include `type_name` for
+    /// debug information.
+    fn add_erased_loaded_labeled_asset_internal(
+        &mut self,
+        label: CowArc<'static, str>,
+        loaded_asset: ErasedLoadedAsset,
+        type_name: Option<&str>,
+    ) -> UntypedHandle {
         let labeled_path = self.asset_path.clone().with_label(label.clone());
-        let handle = self
-            .asset_server
-            .get_or_create_path_handle(labeled_path, None);
+        let handle = self.asset_server.get_or_create_path_handle_erased(
+            labeled_path,
+            loaded_asset.asset_type_id(),
+            type_name,
+            None,
+        );
         let asset = LabeledAsset {
             asset: loaded_asset,
-            handle: handle.clone().untyped(),
+            handle: handle.clone(),
         };
         match self.label_to_asset_index.entry(label) {
             Entry::Occupied(entry) => {
@@ -761,7 +791,7 @@ impl<'a> LoadContext<'a> {
             Entry::Vacant(entry) => {
                 entry.insert(self.labeled_assets.len());
                 self.asset_id_to_asset_index
-                    .insert(handle.id().untyped(), self.labeled_assets.len());
+                    .insert(handle.id(), self.labeled_assets.len());
                 self.labeled_assets.push(asset);
             }
         }

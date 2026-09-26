@@ -206,6 +206,8 @@ pub mod basset;
 
 pub use uuid;
 
+pub mod common_loaders;
+
 use crate::{
     basset::{ActionSourceBuilder, RootAssetPath, RootAssetRef},
     io::{embedded::EmbeddedAssetRegistry, AssetSourceBuilder, AssetSourceBuilders, AssetSourceId},

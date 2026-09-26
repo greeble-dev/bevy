@@ -7,8 +7,8 @@ use bevy_ecs::{
     error::{BevyError, Result},
     relationship::{Relationship, RelationshipTarget},
     template::{
-        SceneEntityReference, SceneEntityReferences, Template, TemplateAssetDependencies,
-        TemplateContext,
+        FromTemplate, SceneEntityReference, SceneEntityReferences, Template,
+        TemplateAssetDependencies, TemplateContext,
     },
     world::{EntityWorldMut, World},
 };
@@ -344,13 +344,9 @@ impl ResolvedScene {
         }
 
         for template in &self.bundle_templates {
-            // SAFETY: bundle_writer is used with the same World across all template.apply calls,
-            // and the next bundle_writer.write call
-            unsafe {
-                template
-                    .apply(context)
-                    .map_err(ApplySceneError::TemplateBuildError)?;
-            }
+            template
+                .apply(context)
+                .map_err(ApplySceneError::TemplateBuildError)?;
         }
         Ok(())
     }
@@ -428,6 +424,18 @@ impl ResolvedScene {
             // The method isn't stable yet, and it would require making get_or_insert_erased_template unsafe
             .downcast_mut()
             .unwrap()
+    }
+
+    /// Like [`Self::get_or_insert_template`], but it takes a [`FromTemplate`] type, which is used to look
+    /// up the [`Template`] to add.
+    pub fn get_or_insert_from_template<
+        'a,
+        T: FromTemplate<Template: Template<Output: SceneEffect> + Default + Send + Sync + 'static>,
+    >(
+        &'a mut self,
+        context: &mut ResolveContext,
+    ) -> &'a mut T::Template {
+        self.get_or_insert_template::<T::Template>(context)
     }
 
     /// Inserts the given [`Template`]. This will overwrite the existing [`Template`] of that type if it already exists.
@@ -763,20 +771,14 @@ impl<C: Component> SceneEffect for C {
 /// immediately to a given `entity`.
 pub trait ErasedBundleTemplate: Any + Send + Sync {
     /// Applies this template to the given `entity`.
-    ///
-    /// # Safety
-    ///
-    /// `bundle_writer` must always be used with the same World that is stored in `context`. This
-    /// is intended to be used by a scene system in a scoped / controlled / easily verifiable context.
-    /// If you are calling it outside of that context, you are almost certainly doing something wrong!
-    unsafe fn apply(&self, context: &mut TemplateContext) -> Result<(), BevyError>;
+    fn apply(&self, context: &mut TemplateContext) -> Result<(), BevyError>;
 
     /// Clones this template. See [`Clone`].
     fn clone_template(&self) -> Box<dyn ErasedBundleTemplate>;
 }
 
 impl<T: Template<Output: Bundle> + Send + Sync + 'static> ErasedBundleTemplate for T {
-    unsafe fn apply(&self, context: &mut TemplateContext) -> Result<(), BevyError> {
+    fn apply(&self, context: &mut TemplateContext) -> Result<(), BevyError> {
         let bundle = self.build_template(context)?;
         context.entity.insert(bundle);
         Ok(())

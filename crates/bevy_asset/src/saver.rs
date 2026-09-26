@@ -17,7 +17,11 @@ use bevy_ecs::error::BevyError;
 use bevy_platform::collections::{hash_map::Entry, HashMap};
 use bevy_reflect::{PartialReflect, TypePath, TypeRegistry};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
-use core::{any::TypeId, borrow::Borrow, ops::Deref};
+use core::{
+    any::{Any, TypeId},
+    borrow::Borrow,
+    ops::Deref,
+};
 use futures_lite::AsyncWriteExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -381,6 +385,13 @@ impl<'a> ErasedSavedAsset<'a, '_> {
             &self.label_to_asset_index,
             &self.asset_id_to_asset_index,
         ))
+    }
+
+    /// Returns the inner value as an [`Any`].
+    ///
+    /// For a statically-known type, use [`Self::downcast`] instead.
+    pub fn get(&self) -> &'a dyn Any {
+        self.value
     }
 
     pub fn as_partial_reflect<'b>(

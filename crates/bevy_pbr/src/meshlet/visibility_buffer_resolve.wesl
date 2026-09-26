@@ -125,7 +125,6 @@ fn resolve_vertex_output(frag_coord: vec4<f32>) -> VertexOutput {
     let partial_derivatives = compute_partial_derivatives(
         array(world_position_0, world_position_1, world_position_2),
         frag_coord_ndc,
-        // XXX TODO: Filed separately as https://github.com/bevyengine/bevy/pull/25796.
         2.0 / view.viewport.zw,
     );
 

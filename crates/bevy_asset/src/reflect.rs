@@ -19,8 +19,8 @@ use bevy_reflect::{
 };
 
 use crate::{
-    Asset, AssetContainer, AssetId, AssetRef, AssetServer, Assets, Handle, InvalidGenerationError,
-    LoadContext, UntypedAssetId, UntypedHandle,
+    Asset, AssetContainer, AssetId, AssetRef, AssetServer, Assets, ErasedLoadedAsset, Handle,
+    InvalidGenerationError, LoadContext, UntypedAssetId, UntypedHandle,
 };
 
 /// Type data for the [`TypeRegistry`] used to operate on reflected [`Asset`]s.
@@ -46,6 +46,12 @@ pub struct ReflectAsset {
     len: fn(&World) -> usize,
     ids: for<'w> fn(&'w World) -> Box<dyn Iterator<Item = UntypedAssetId> + 'w>,
     remove: fn(&mut World, UntypedAssetId) -> Option<Box<dyn Reflect>>,
+    /// Function thunk to downcast the provided value, call [`LoadContext::finish`], and then
+    /// type-erase the asset.
+    finish_load_context: for<'a> fn(
+        LoadContext<'a>,
+        Box<dyn Reflect>,
+    ) -> Result<ErasedLoadedAsset, Box<dyn Reflect>>,
     to_container: fn(Box<dyn PartialReflect>) -> Box<dyn AssetContainer>,
     container_as_partial_reflect: fn(&dyn AssetContainer) -> Option<&dyn PartialReflect>,
 }
@@ -149,6 +155,21 @@ impl ReflectAsset {
         (self.remove)(world, asset_id.into())
     }
 
+    /// Finishes a [`LoadContext`], just as [`LoadContext::finish`], but returning a type-erased
+    /// container.
+    ///
+    /// This can be used with [`LoadContext::add_erased_loaded_labeled_asset`] to add a reflected
+    /// subasset.
+    ///
+    /// Returns the provided asset if it is of the wrong type.
+    pub fn finish_load_context(
+        &self,
+        load_context: LoadContext<'_>,
+        asset: Box<dyn Reflect>,
+    ) -> Result<ErasedLoadedAsset, Box<dyn Reflect>> {
+        (self.finish_load_context)(load_context, asset)
+    }
+
     /// Equivalent of [`Assets::len`]
     pub fn len(&self, world: &World) -> usize {
         (self.len)(world)
@@ -223,6 +244,11 @@ impl<A: Asset + FromReflect> CreateTypeData<A> for ReflectAsset {
                 let mut assets = world.resource_mut::<Assets<A>>();
                 let value = assets.remove(asset_id.typed_debug_checked());
                 value.map(|value| Box::new(value) as Box<dyn Reflect>)
+            },
+            finish_load_context: |load_context, asset| {
+                let asset = asset.downcast()?;
+                let loaded_asset = load_context.finish::<A>(*asset);
+                Ok(ErasedLoadedAsset::from(loaded_asset))
             },
             to_container: |value| {
                 // XXX TODO: Avoid unboxing and then boxing again?
