@@ -148,6 +148,9 @@ impl BassetActionFunction for MeshletFromMeshFunction {
 
         let mut mesh = context.load_value::<Mesh>(&action.mesh).await?;
 
+        // Meshlets require certain attributes. Removed unwanted attributes and
+        // generate missing attributes.
+
         // XXX TODO: Cut and pasted from `meshlet::from_mesh::validate_input_mesh`.
         // Should be exposed in the meshlet module?
         let required_attributes = [
@@ -164,6 +167,17 @@ impl BassetActionFunction for MeshletFromMeshFunction {
 
         for unwanted_attribute in unwanted_attributes {
             mesh.remove_attribute(unwanted_attribute.id);
+        }
+
+        if !mesh.contains_attribute(Mesh::ATTRIBUTE_NORMAL) {
+            mesh.compute_normals();
+        }
+
+        if !mesh.contains_attribute(Mesh::ATTRIBUTE_UV_0) {
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_UV_0,
+                vec![[0.0f32, 0.0f32]; mesh.count_vertices()],
+            );
         }
 
         let meshlet = MeshletMesh::from_mesh(&mesh, action.vertex_position_quantization_factor())?;
