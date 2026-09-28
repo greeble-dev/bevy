@@ -7,7 +7,7 @@
 use crate::{
     basset::{
         blob::{BlobReader, BlobWriter},
-        internal_load_with_settings_loader_and_reader, DependencyLoading, RootAssetPath,
+        internal_load_with_settings_loader_and_reader, DependencyLoading, RootAssetRef,
     },
     io::SliceReader,
     meta::Settings,
@@ -79,6 +79,7 @@ pub(crate) fn read_standalone_asset(blob: &[u8]) -> Result<StandaloneAssetData, 
 pub(crate) async fn load_standalone_asset(
     data: &StandaloneAssetData,
     asset_server: &AssetServer,
+    path: &RootAssetRef,
     dependency_loading: DependencyLoading,
 ) -> Result<ErasedLoadedAsset, AssetLoadError> {
     let header = ron::de::from_bytes::<StandaloneAssetHeader>(&data.header).expect("XXX TODO");
@@ -96,14 +97,9 @@ pub(crate) async fn load_standalone_asset(
 
     let populate_hashes = false;
 
-    // XXX TODO: Ew? Need to decide if we try to support the original path.
-    let fake_path = RootAssetPath::without_label(AssetPath::parse(
-        "ERROR - Standalone assets shouldn't use their path",
-    ));
-
     internal_load_with_settings_loader_and_reader(
         asset_server,
-        fake_path,
+        path.clone(),
         &*loader_settings,
         &*loader,
         &mut reader,

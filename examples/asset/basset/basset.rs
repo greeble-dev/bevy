@@ -16,6 +16,8 @@ mod util;
 use self::util::*;
 
 use argh::FromArgs;
+use bevy::gltf::convert_coordinates::GltfConvertCoordinates;
+use bevy::gltf::GltfLoaderSettings;
 use bevy::{
     asset::{
         asset_template,
@@ -37,6 +39,7 @@ use bevy::{
     tasks::block_on,
     time::common_conditions::on_timer,
 };
+use bevy_asset::basset::action::LoadPath;
 use core::{any::TypeId, ops::Deref, result::Result};
 use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
@@ -231,15 +234,18 @@ fn print(
     int_assets: Res<Assets<IntAsset>>,
     image_assets: Res<Assets<Image>>,
     gltf_assets: Res<Assets<Gltf>>,
+    world_assets: Res<Assets<WorldAsset>>,
     mut string_events: MessageReader<AssetEvent<StringAsset>>,
     mut int_events: MessageReader<AssetEvent<IntAsset>>,
     mut image_events: MessageReader<AssetEvent<Image>>,
     mut gltf_events: MessageReader<AssetEvent<Gltf>>,
+    mut world_events: MessageReader<AssetEvent<WorldAsset>>,
 ) {
     print_events(&asset_server, &string_assets, &mut string_events, true);
     print_events(&asset_server, &int_assets, &mut int_events, true);
     print_events(&asset_server, &image_assets, &mut image_events, false);
     print_events(&asset_server, &gltf_assets, &mut gltf_events, false);
+    print_events(&asset_server, &world_assets, &mut world_events, false);
 }
 
 // XXX TODO: The `done` is annoying. Better way to run once?
@@ -450,15 +456,23 @@ fn main() {
             // ),
         ],
         scenes: vec![
-            // (
-            //     "scene_from_gltf.basset".into(),
-            //     Transform::IDENTITY.looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
-            // ),
             (
-                "Duck.glb#Scene0".into(),
+                AssetRef::new(LoadPath::new("Duck.glb").with_settings(GltfLoaderSettings {
+                    convert_coordinates: Some(GltfConvertCoordinates {
+                        rotate_scene_entity: true,
+                        rotate_meshes: true,
+                    }),
+                    ..Default::default()
+                }))
+                .with_label("Scene0"),
                 Transform::from_xyz(-2.0, 0.0, 0.0)
                     .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
             ),
+            // (
+            //     "Duck.glb#Scene0".into(),
+            //     Transform::from_xyz(-2.0, 0.0, 0.0)
+            //         .looking_to(Dir3::new(vec3(1.0, 0.0, 2.0)).unwrap(), Vec3::Y),
+            // ),
         ],
         dynamic_scenes: vec![
             (

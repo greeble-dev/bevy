@@ -1,4 +1,5 @@
 use crate::{
+    basset::RootAssetPath,
     io::{
         AssetReaderError, AssetWriterError, MissingAssetWriterError,
         MissingProcessedAssetReaderError, MissingProcessedAssetWriterError, Reader, Writer,
@@ -362,7 +363,9 @@ impl<'a> ProcessContext<'a> {
         let loader = server.get_asset_loader_with_type_name(loader_name).await?;
         let loaded_asset = server
             .load_with_settings_loader_and_reader(
-                self.path,
+                // XXX TODO: Review. Can we guarantee `self.path` doesn't have
+                // a label? If so considering changing to `RootAssetPath`.
+                &RootAssetPath::without_label(self.path.clone_owned()),
                 settings,
                 &*loader,
                 &mut self.reader,

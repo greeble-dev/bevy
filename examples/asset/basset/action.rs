@@ -386,11 +386,11 @@ impl BassetActionFunction for ResizeImageFunction {
             .take::<Image>()
             .ok_or_else(|| BevyError::from("XXX TODO"))?;
 
-        let target_size = std::dbg!(original_image
+        let target_size = original_image
             .size()
             .as_vec2()
             .mul(action.scale.0)
-            .as_uvec2());
+            .as_uvec2();
 
         let resized_image = resize_image(original_image, target_size);
 

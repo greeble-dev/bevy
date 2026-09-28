@@ -4,7 +4,7 @@ mod loaders;
 use crate::{
     basset::{
         ActionApplyError, ActionSource, ActionSourceBuilder, DependencyLoading,
-        MinimalActionSource, MissingActionFunctionError, RootAssetRef,
+        MinimalActionSource, MissingActionFunctionError, RootAssetPath, RootAssetRef,
     },
     folder::LoadedFolder,
     io::{
@@ -488,18 +488,23 @@ impl AssetServer {
     // XXX TODO: Support `AssetRef`?
     pub(crate) fn load_unknown_type_with_meta_transform<'a, G: Send + Sync + 'static>(
         &self,
-        path: impl Into<AssetPath<'a>>,
+        path: impl Into<AssetRef<'a>>,
         meta_transform: Option<MetaTransform>,
         guard: G,
-        override_unapproved: bool,
+        // XXX TODO: Check if this needs to be hooked up again. I'm kinda hoping it
+        // moves to the `AssetSource` and so this becomes moot.
+        _override_unapproved: bool,
     ) -> Handle<LoadedUntypedAsset> {
         let path = path.into().into_owned();
-        if let Err(err) = validate_path(&path, override_unapproved, self.data.unapproved_path_mode)
-        {
+        if let Err(err) = path.action().validate() {
             // Log whatever we get, and then return a default handle.
             error!("{err}");
             return Handle::default();
         }
+
+        // XXX TODO: Avoid. Hopefully assets as entities removes the need for
+        // the awkward source hacking below.
+        let path = path.temporary_path_workaround();
 
         let untyped_source = AssetSourceId::Name(match path.source() {
             AssetSourceId::Default => CowArc::Static(UNTYPED_SOURCE_SUFFIX),
@@ -663,6 +668,17 @@ impl AssetServer {
                                     None,
                                 )
                                 .expect("XXX TODO");
+
+                            // XXX TODO: Review and see if we should promote this
+                            // to a proper error. It catches subtle cases where
+                            // the sub-asset handle is incorrect, e.g. the input
+                            // handle has `LoadPath` with settings and the output
+                            // handle does not.
+                            assert_eq!(
+                                asset_id,
+                                ErasedAssetIndex::try_from(labeled_asset.handle.id())
+                                    .expect("XXX TODO")
+                            );
 
                             (
                                 Some(labeled_asset.handle.clone()),
@@ -1312,11 +1328,12 @@ impl AssetServer {
     /// Retrieve a handle for the given path. This will create a handle (and [`AssetInfo`]) if it does not exist
     pub(crate) fn get_or_create_path_handle<'a, A: Asset>(
         &self,
-        path: impl Into<AssetRef<'a>>,
+        // XXX TODO: See comment on same parameter of `get_or_create_path_handle_erased`.
+        path: AssetRef<'a>,
         meta_transform: Option<MetaTransform>,
     ) -> Handle<A> {
         self.get_or_create_path_handle_erased(
-            path.into().into_owned(),
+            path,
             TypeId::of::<A>(),
             Some(type_name::<A>()),
             meta_transform,
@@ -1330,14 +1347,18 @@ impl AssetServer {
     /// This will create a handle (and [`AssetInfo`]) if it does not exist.
     pub(crate) fn get_or_create_path_handle_erased<'a>(
         &self,
-        path: impl Into<AssetRef<'a>>,
+        // XXX TODO: This was changed from `impl Into<AssetPath>` to `AssetRef`.
+        // Removing the `Into` is a defense against accidentally converting
+        // `AssetRef` -> `AssetPath` -> `AssetRef` and losing `LoadPath::loader_settings`.
+        // Review and confirm there's no major downsides.
+        path: AssetRef<'a>,
         type_id: TypeId,
         type_name: Option<&str>,
         meta_transform: Option<MetaTransform>,
     ) -> UntypedHandle {
         self.write_infos()
             .get_or_create_path_handle_erased(
-                path.into().into_owned(),
+                path.into_owned(),
                 type_id,
                 type_name,
                 HandleLoadingMode::NotLoading,
@@ -1450,7 +1471,7 @@ impl AssetServer {
 
     pub(crate) async fn load_with_settings_loader_and_reader(
         &self,
-        asset_path: &AssetPath<'_>,
+        asset_path: &RootAssetPath<'static>,
         settings: &dyn Settings,
         loader: &dyn ErasedAssetLoader,
         reader: &mut dyn Reader,
@@ -1462,8 +1483,12 @@ impl AssetServer {
 
         // TODO: experiment with this
         let asset_path = asset_path.clone_owned();
-        let load_context =
-            LoadContext::new(self, asset_path.clone(), load_dependencies, populate_hashes);
+        let load_context = LoadContext::new(
+            self,
+            asset_path.clone().into(),
+            load_dependencies,
+            populate_hashes,
+        );
         let load = AssertUnwindSafe(loader.load(reader, settings, load_context)).catch_unwind();
         #[cfg(feature = "trace")]
         let load = {
@@ -1478,12 +1503,12 @@ impl AssetServer {
         };
         load.await
             .map_err(|_| AssetLoadError::AssetLoaderPanic {
-                path: AssetRef::from(asset_path.clone_owned()),
+                path: RootAssetRef::from(asset_path.clone_owned()).into(),
                 loader_name: loader.type_path(),
             })?
             .map_err(|e| {
                 AssetLoadError::AssetLoaderError(AssetLoaderError {
-                    path: AssetRef::from(asset_path.clone_owned()),
+                    path: RootAssetRef::from(asset_path.clone_owned()).into(),
                     loader_name: loader.type_path(),
                     error: e.into(),
                 })
@@ -1818,7 +1843,7 @@ impl<'a> LoadBuilder<'a> {
     #[must_use = "not using the returned strong handle may result in the unexpected release of the asset"]
     pub fn load_untyped<'b>(
         self,
-        asset_path: impl Into<AssetPath<'b>>,
+        asset_path: impl Into<AssetRef<'b>>,
     ) -> Handle<LoadedUntypedAsset> {
         // XXX TODO: Support settings? Needs `load_unknown_type` to support `AssetRef`.
         assert!(self.settings.is_none());

@@ -465,7 +465,7 @@ pub trait LoadFromPath {
     /// Initiates the load for the given expected type ID, and the path.
     ///
     /// See [`LoadBuilder::load_erased`](crate::LoadBuilder::load_erased) for more.
-    // XXX TODO: Review if this take AssetPath or AssetRef.
+    // XXX TODO: Review if this should take AssetPath or AssetRef.
     fn load_from_path_erased(&mut self, type_id: TypeId, path: AssetRef<'static>) -> UntypedHandle;
 }
 

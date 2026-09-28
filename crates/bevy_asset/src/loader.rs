@@ -614,7 +614,9 @@ pub struct LoadContext<'a> {
     /// need the dependency information, for example during asset processing.
     pub(crate) should_load_dependencies: bool,
     populate_hashes: bool,
-    asset_path: AssetPath<'static>,
+    asset_path: RootAssetRef,
+    // XXX TODO: Review. Used to maintain backwards compatibility with `LoadContext::path`.
+    simple_asset_path: Option<AssetPath<'static>>,
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
     /// Direct dependencies used by this loader.
     pub(crate) loader_dependencies:
@@ -635,12 +637,14 @@ impl<'a> LoadContext<'a> {
     // XXX TODO: Change back to `pub(crate)`. Only changed temporary for testing.
     pub fn new(
         asset_server: &'a AssetServer,
-        asset_path: AssetPath<'static>,
+        // XXX TODO: Maybe should be by ref?
+        asset_path: RootAssetRef,
         should_load_dependencies: bool,
         populate_hashes: bool,
     ) -> Self {
         Self {
             asset_server,
+            simple_asset_path: asset_path.try_temporary_path_workaround(),
             asset_path,
             populate_hashes,
             should_load_dependencies,
@@ -871,9 +875,11 @@ impl<'a> LoadContext<'a> {
     }
 
     /// Gets the source asset path for this load context.
-    // XXX TODO: Review, keeping `asset_path` as name for now even though it's a ref.
     pub fn path(&self) -> &AssetPath<'static> {
-        &self.asset_path
+        // XXX TODO: Decide what to do here instead of panicking. We don't want
+        // to expose the full `AssetRef` without good reason. Maybe better to
+        // return `Option<AssetPath>`.
+        self.simple_asset_path.as_ref().unwrap()
     }
 
     /// Reads the asset at the given path and returns its bytes
@@ -1007,7 +1013,7 @@ impl<'a> LoadContext<'a> {
 
     pub(crate) async fn load_direct_from_reader_internal(
         &mut self,
-        path: AssetPath<'static>,
+        path: RootAssetPath<'static>,
         settings: &dyn Settings,
         loader: &dyn ErasedAssetLoader,
         reader: &mut dyn Reader,
@@ -1025,7 +1031,7 @@ impl<'a> LoadContext<'a> {
             )
             .await
             .map_err(|error| LoadDirectError::LoadError {
-                dependency: path.clone().into(),
+                dependency: RootAssetRef::from(path.clone()).into(),
                 error: Box::new(error),
             })?;
         let _hash = processed_info.map(|i| i.full_hash).unwrap_or_default();

@@ -107,11 +107,31 @@ impl<'a> RootAssetPath<'a> {
         Self { source, path }
     }
 
+    // Remove the label from an `AssetPath`, returning a `RootAssetPath`.
+    //
+    // XXX TODO: Review. Could have been done as `impl From<AssetPath>`, but
+    // I'm erring on the side of explicitness for now.
+    //
+    // XXX TODO: Maybe should be named `new_without_label`? Could be confusing
+    // when the signature is quite different to `AssetPath::without_label`.
     pub fn without_label(value: AssetPath<'a>) -> RootAssetPath<'a> {
         Self {
             // XXX TODO: Avoid clones?
             source: value.source().clone_owned(),
             path: CowArc::from(PathBuf::from(value.path())),
+        }
+    }
+
+    // Add a label, returning an `AssetPath`.
+    pub fn with_label(self, label: impl Into<CowArc<'a, str>>) -> AssetPath<'a> {
+        AssetPath::from(self).with_label(label)
+    }
+
+    pub fn with_optional_label(self, label: Option<impl Into<CowArc<'a, str>>>) -> AssetPath<'a> {
+        if let Some(label) = label {
+            AssetPath::from(self).with_label(label.into())
+        } else {
+            AssetPath::from(self)
         }
     }
 
@@ -212,14 +232,16 @@ impl TryFrom<String> for RootAssetPath<'static> {
     }
 }
 
-// XXX TODO: Support other lifetimes?
-impl TryFrom<&'static str> for RootAssetPath<'static> {
-    type Error = TryRootAssetPathError;
-
-    fn try_from(value: &'static str) -> Result<Self, Self::Error> {
-        // XXX TODO: Avoid going via `AssetPath`. Although that might mean
-        // reimplementing `AssetPath::parse`, which is annoying.
-        AssetPath::try_parse(value)?.try_into()
+// XXX TODO: Consider making this `TryFrom` instead of panicking. There's an
+// argument that panicking is a reasonable trade-off for convenience - the
+// string is static so it's most likely to come from a string literal rather
+// than data.
+impl From<&'static str> for RootAssetPath<'static> {
+    fn from(value: &'static str) -> Self {
+        AssetPath::parse(value)
+            .clone_owned()
+            .try_into()
+            .expect("Malformed path")
     }
 }
 
@@ -238,26 +260,36 @@ impl RootAssetRef {
         }
     }
 
+    // Remove the label from an `AssetRef`, returning a `RootAssetRef`.
+    //
+    // XXX TODO: Review. Could have been done as `impl From<AssetRef>`, but
+    // I'm erring on the side of explicitness for now.
     pub fn without_label(value: AssetRef<'_>) -> Self {
         Self {
             action: value.action().clone(),
         }
     }
 
+    pub fn with_label<'a>(self, label: impl Into<CowArc<'a, str>>) -> AssetRef<'a> {
+        AssetRef::from(self).with_label(label)
+    }
+
     pub fn action(&self) -> &ErasedBassetAction {
         &self.action
     }
 
+    // XXX TODO: See notes on `AssetRef::temporary_path_workaround`.
+    pub fn temporary_path_workaround(&self) -> AssetPath<'static> {
+        self.try_temporary_path_workaround()
+            .unwrap_or_else(|| panic!("XXX TODO {self}"))
+    }
+
     // XXX TODO: See notes on `AssetRef::try_temporary_path_workaround`.
     pub fn try_temporary_path_workaround(&self) -> Option<AssetPath<'static>> {
-        if let Some(action) = self.action.0.downcast_ref::<LoadPath>()
-            && action.loader_settings.is_none()
-        {
-            // XXX TODO: Should use `try_parse`?
-            Some(AssetPath::from(action.path.clone()))
-        } else {
-            None
-        }
+        self.action
+            .0
+            .downcast_ref::<LoadPath>()
+            .map(|load_path| AssetPath::from(load_path.path.clone()))
     }
 }
 
@@ -267,16 +299,22 @@ impl Display for RootAssetRef {
     }
 }
 
+// XXX TODO: This is very similar to the `AssetRef` implementation. Refactor?
 impl SerializeWithRegistry for RootAssetRef {
     fn serialize<S>(&self, serializer: S, registry: &TypeRegistry) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // XXX TODO: Review. This makes the serialized data nicer, but relies
-        // on `deserialize_any` - see notes on `deserialize_any` call in
-        // `RootAssetRef` deserializer below.
-        if let Some(path) = self.try_temporary_path_workaround() {
-            path.serialize(serializer)
+        // If the action is a `LoadPath` that's just a path, serialize the path
+        // as a string instead of serializing the full struct.
+        //
+        // XXX TODO: Review. It does make the serialized data nicer, but means
+        // we require serialization formats to support `deserialize_any`.
+        // See https://serde.rs/impl-deserialize.html.
+        if let Some(action) = self.action.0.downcast_ref::<LoadPath>()
+            && let Some(minimal) = action.minimal()
+        {
+            minimal.serialize(serializer)
         } else {
             let mut s = serializer.serialize_struct("AssetRef", 1)?;
 
@@ -290,7 +328,7 @@ impl SerializeWithRegistry for RootAssetRef {
     }
 }
 
-// XXX TODO: Duplicates a lot of the `AssetRef` equivalent. Awkward to refactor though?
+// XXX TODO: This is very similar to the `AssetRef` implementation. Refactor?
 impl<'de> DeserializeWithRegistry<'de> for RootAssetRef {
     fn deserialize<D>(deserializer: D, registry: &TypeRegistry) -> Result<Self, D::Error>
     where
@@ -462,24 +500,30 @@ impl From<RootAssetPath<'_>> for RootAssetRef {
 /// XXX TODO: Document. Review where this overlaps with `LoadContext` and check
 /// if they can be combined.
 pub struct ApplyContext<'a> {
-    asset_server: &'a AssetServer,
+    // XXX TODO: Review where this is used and consider alternatives. Currently
+    // only used by `finish_saved` as the loader needs it.
+    path: RootAssetRef,
 
-    // Equivalent to `ErasedLoadedAsset::loader_dependencies`.
-    // XXX TODO: Dependency cache key shouldn't be optional for us?
-    loader_dependencies: HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
+    asset_server: &'a AssetServer,
 
     dependency_loading: DependencyLoading,
 
     env: Environment<'a>,
+
+    // Equivalent to `ErasedLoadedAsset::loader_dependencies`.
+    // XXX TODO: Dependency cache key shouldn't be optional for us?
+    loader_dependencies: HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
 }
 
 impl<'a> ApplyContext<'a> {
     pub fn new(
+        path: RootAssetRef,
         asset_server: &'a AssetServer,
         dependency_loading: DependencyLoading,
         env: Environment<'a>,
     ) -> Self {
         Self {
+            path,
             asset_server,
             loader_dependencies: Default::default(),
             dependency_loading,
@@ -506,8 +550,10 @@ impl ApplyContext<'_> {
 
     pub async fn erased_load_value(
         &mut self,
-        path: &AssetRef<'static>,
+        path: impl Into<AssetRef<'static>>,
     ) -> Result<ErasedLoadedAsset, BevyError> {
+        let path = path.into();
+
         // XXX TODO: Avoid clone?
         let (asset, dependency_key) = self
             .asset_server
@@ -537,8 +583,19 @@ impl ApplyContext<'_> {
         }
     }
 
-    pub async fn load_value<T: Asset>(&mut self, path: &AssetRef<'static>) -> Result<T, BevyError> {
-        match self.erased_load_value(path).await?.value.downcast::<T>() {
+    pub async fn load_value<T: Asset>(
+        &mut self,
+        path: impl Into<AssetRef<'static>>,
+    ) -> Result<T, BevyError> {
+        let path = path.into();
+
+        // XXX TODO: Avoid clone? Is only needed for the error case.
+        match self
+            .erased_load_value(path.clone())
+            .await?
+            .value
+            .downcast::<T>()
+        {
             Ok(result) => Ok(*result),
             // XXX TODO: Don't panic.
             Err(original) => panic!(
@@ -552,7 +609,9 @@ impl ApplyContext<'_> {
     pub fn load_handle<T: Asset>(&self, path: impl Into<AssetRef<'static>>) -> Handle<T> {
         match self.dependency_loading {
             DependencyLoading::Yes => self.asset_server.load(path),
-            DependencyLoading::No => self.asset_server.get_or_create_path_handle(path, None),
+            DependencyLoading::No => self
+                .asset_server
+                .get_or_create_path_handle(path.into(), None),
         }
     }
 
@@ -608,8 +667,7 @@ impl ApplyContext<'_> {
 
         let load_context = LoadContext::new(
             self.asset_server,
-            // XXX TODO: Does this matter?
-            AssetPath::parse("XXX TODO"),
+            self.path.clone(),
             // XXX TODO: Review `load_dependencies` value?
             true,
             false,
@@ -1250,7 +1308,8 @@ pub enum MissingActionFunctionError {
     NotFound(&'static str),
 }
 
-// XXX TODO: Temporary name. Review.
+// XXX TODO: Temporary name. Review. Kinda misleading - it's distinguishing
+// between actions that *might* be cached versus *never* cached.
 pub(crate) enum CachedOrUncached {
     Cached(StandaloneAssetData),
     Uncached(ErasedLoadedAsset),
@@ -1431,7 +1490,12 @@ impl DevelopmentActionSource {
                 .filter(action.action())
                 .map_err(|err| AssetLoadError::TodoError(Arc::new(format!("{err:?}").into())))?;
 
-            let apply_context = ApplyContext::new(asset_server, dependency_loading, filtered_env);
+            let apply_context = ApplyContext::new(
+                action.clone(),
+                asset_server,
+                dependency_loading,
+                filtered_env,
+            );
 
             let output = action_function.apply(apply_context, action).await?;
 
@@ -1519,7 +1583,7 @@ impl ActionSource for DevelopmentActionSource {
 
             match asset {
                 CachedOrUncached::Cached(asset) => Ok((
-                    load_standalone_asset(&asset, asset_server, dependency_loading).await?,
+                    load_standalone_asset(&asset, asset_server, action, dependency_loading).await?,
                     Some(dependency_key),
                 )),
                 CachedOrUncached::Uncached(asset) => Ok((asset, Some(dependency_key))),
@@ -1911,7 +1975,7 @@ async fn try_load_path_action(
         Ok(Some(
             ErasedBassetActionFunction::apply(
                 &LoadPathFunction,
-                ApplyContext::new(asset_server, dependency_loading, action_env),
+                ApplyContext::new(action.clone(), asset_server, dependency_loading, action_env),
                 action,
             )
             .await?
@@ -2058,15 +2122,10 @@ impl ActionSource for PublishedActionSource {
 
             let populate_hashes = false;
 
-            // XXX TODO: Ew? Need to decide if we try to support the original path.
-            let fake_path = RootAssetPath::without_label(AssetPath::parse(
-                "ERROR - published assets shouldn't use their path",
-            ));
-
             Ok((
                 internal_load_with_settings_loader_and_reader(
                     asset_server,
-                    fake_path,
+                    action.clone(),
                     meta.loader_settings().expect("XXX TODO"),
                     &*loader,
                     &mut readers.asset,
@@ -2082,16 +2141,14 @@ impl ActionSource for PublishedActionSource {
 
 pub(crate) async fn internal_load_with_settings_loader_and_reader(
     asset_server: &AssetServer,
-    asset_path: RootAssetPath<'static>,
+    // XXX TODO: Maybe should be by ref?
+    asset_path: RootAssetRef,
     settings: &dyn Settings,
     loader: &dyn ErasedAssetLoader,
     reader: &mut dyn Reader,
     dependency_loading: DependencyLoading,
     populate_hashes: bool,
 ) -> Result<ErasedLoadedAsset, AssetLoadError> {
-    // XXX TODO: Just take by value?
-    let asset_path = AssetPath::from(asset_path);
-
     let load_context = LoadContext::new(
         asset_server,
         asset_path.clone(),
@@ -2128,7 +2185,7 @@ pub mod action {
     use super::*;
     use alloc::string::String;
 
-    #[derive(Reflect, Default, Hash, PartialEq, Debug)]
+    #[derive(Reflect, Default, Clone, Hash, PartialEq, Debug)]
     #[reflect(BassetAction, Hash, PartialEq)]
     pub struct LoadPath {
         pub path: RootAssetPath<'static>,
@@ -2158,6 +2215,37 @@ pub mod action {
 
         // XXX TODO: Should this version incorporate `AssetLoader` versions?
         basset_action_version!(crate);
+    }
+
+    impl LoadPath {
+        pub fn new(path: impl Into<RootAssetPath<'static>>) -> Self {
+            Self {
+                path: path.into(),
+                loader_settings: None,
+            }
+        }
+
+        pub fn with_settings<S: Settings + Serialize + Default>(self, settings: S) -> Self {
+            Self {
+                loader_settings: Some(ron::ser::to_string(&settings).expect("XXX TODO")),
+                ..self
+            }
+        }
+
+        // Returns the path if the action can be represented by that path alone.
+        //
+        // XXX TODO: Expand on this a bit. Add round-trip test.
+        pub fn minimal(&self) -> Option<RootAssetPath<'static>> {
+            if self.loader_settings.is_none() {
+                // XXX TODO: Review. Not sure if this level of paranoia is worth
+                // it assuming we have test coverage.
+                debug_assert!(*self == LoadPath::new(self.path.clone()));
+
+                Some(self.path.clone())
+            } else {
+                None
+            }
+        }
     }
 
     #[derive(TypePath)]
@@ -2221,7 +2309,12 @@ pub mod action {
 
             let mut asset = internal_load_with_settings_loader_and_reader(
                 asset_server,
-                action.path.clone(),
+                // XXX TODO: Review. Makes an ugly assumption that we're reconstructing
+                // the same value as `ApplyContext::path`. But I also don't want to
+                // expose `ApplyContext::path` to all actions. Maybe this code should
+                // move into `ApplyContext`? It's already doing similar loader related
+                // stuff in `finish_saved`.
+                RootAssetRef::new((*action).clone()),
                 settings,
                 &*loader,
                 chosen_reader,

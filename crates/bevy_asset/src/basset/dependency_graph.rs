@@ -142,6 +142,10 @@ impl InternalGraph {
             // At least one dependency was not in the graph, so we remain unknown.
             // Our state should have been set to unknown by the call to invalidate
             // near the top.
+            //
+            // XXX TODO: This assertion can fail if we hit the "failed to find
+            // state" warning above. Review and see if we have a logic bug, or
+            // maybe that warning should be an error and we never reach here.
             assert_eq!(self.action_to_state.get(&path), Some(&AssetState::Unknown));
 
             None

@@ -1,6 +1,7 @@
 use crate::{
     basset::{
         action::LoadPath, BassetAction, ErasedBassetAction, ReflectBassetAction, RootAssetPath,
+        RootAssetRef,
     },
     io::AssetSourceId,
 };
@@ -762,10 +763,13 @@ impl<'a> AssetRef<'a> {
         }
     }
 
-    pub fn new_with_label<P: BassetAction>(action: P, label: Option<CowArc<'a, str>>) -> Self {
+    pub fn new_with_label<P: BassetAction>(
+        action: P,
+        label: Option<impl Into<CowArc<'a, str>>>,
+    ) -> Self {
         AssetRef {
             action: ErasedBassetAction::new(Arc::new(action)),
-            label,
+            label: label.map(Into::into),
         }
     }
 
@@ -824,7 +828,8 @@ impl<'a> AssetRef<'a> {
     // panicking if not. This is for temporary backwards compatibility. Need to
     // work through where it's used and consider alternatives.
     pub fn temporary_path_workaround(&self) -> AssetPath<'static> {
-        self.try_temporary_path_workaround().expect("XXX TODO")
+        self.try_temporary_path_workaround()
+            .unwrap_or_else(|| panic!("XXX TODO {self}"))
     }
 
     // XXX TODO: Converts the action back to an `AssetPath` if possible,
@@ -833,19 +838,15 @@ impl<'a> AssetRef<'a> {
     // plain paths as a string. Work through where it's used and consider
     // alternatives.
     pub fn try_temporary_path_workaround(&self) -> Option<AssetPath<'static>> {
-        if let Some(action) = self.action.0.downcast_ref::<LoadPath>()
-            && action.loader_settings.is_none()
-        {
-            let path = AssetPath::from(action.path.clone());
-
-            if let Some(label) = &self.label {
-                Some(path.with_label(label.clone_owned()))
-            } else {
-                Some(path)
-            }
-        } else {
-            None
-        }
+        RootAssetRef::without_label(self.clone())
+            .try_temporary_path_workaround()
+            .map(|path| {
+                if let Some(label) = &self.label {
+                    path.with_label(label.clone_owned())
+                } else {
+                    path
+                }
+            })
     }
 
     // XXX TODO: This is a temporary hack for backwards compatibility. Previously,
@@ -855,9 +856,9 @@ impl<'a> AssetRef<'a> {
     // where they serialize the settings and then try to apply them to the `AssetRef`
     // later. This only works if the action is `LoadPath`.
     pub fn with_settings(self, settings: String) -> Self {
-        let without_settings = self
-            .try_temporary_path_workaround()
-            .expect("XXX TODO: Can't change settings on a non-LoadPath AssetRef");
+        let without_settings = self.try_temporary_path_workaround().unwrap_or_else(|| {
+            panic!("XXX TODO: Can't change settings on a non-LoadPath AssetRef {self:?}")
+        });
 
         without_settings.with_settings(settings)
     }
@@ -871,7 +872,7 @@ impl Debug for AssetRef<'_> {
 
 impl Display for AssetRef<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // XXX TODO: Specialize for `LoadPath` case?
+        // XXX TODO: Specialize for the simple `LoadPath` case?
 
         if let Some(label) = &self.label {
             // XXX TODO: The order is the reverse of what we accept when serializing
@@ -899,10 +900,17 @@ impl SerializeWithRegistry for AssetRef<'_> {
     where
         S: Serializer,
     {
-        // XXX TODO: Review. This makes the serialized data nicer, but relies
-        // on `deserialize_any` - see notes on `deserialize_any` call in
-        // `AssetRef` deserializer below.
-        if let Some(path) = self.try_temporary_path_workaround() {
+        // If the action is a `LoadPath` that's just a path, serialize the path
+        // as a string instead of serializing the full struct.
+        //
+        // XXX TODO: Review. It does make the serialized data nicer, but means
+        // we require serialization formats to support `deserialize_any`.
+        // See https://serde.rs/impl-deserialize.html.
+        if let Some(action) = self.action.0.downcast_ref::<LoadPath>()
+            && let Some(minimal) = action.minimal()
+        {
+            let path = minimal.with_optional_label(self.label.clone());
+
             path.serialize(serializer)
         } else {
             let mut s = serializer.serialize_struct("AssetRef", 2)?;
@@ -945,11 +953,17 @@ impl<'de> DeserializeWithRegistry<'de> for AssetRef<'_> {
                     .into())
             }
 
+            // XXX TODO: Do we need this? Default implementation should be
+            // sufficient since we can't take advantage of passing the string
+            // by value.
             fn visit_string<E>(self, v: String) -> Result<AssetRef<'static>, E>
             where
                 E: serde::de::Error,
             {
-                Ok(AssetPath::from(v).into())
+                Ok(AssetPath::try_parse(&v)
+                    .map_err(|err| E::custom(err.to_string()))?
+                    .into_owned()
+                    .into())
             }
 
             fn visit_seq<V>(self, mut seq: V) -> Result<AssetRef<'static>, V::Error>
