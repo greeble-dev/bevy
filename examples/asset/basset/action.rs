@@ -125,12 +125,6 @@ impl BassetAction for MeshletFromMesh {
     basset_action_version!(crate);
 }
 
-impl From<MeshletFromMesh> for AssetRef<'static> {
-    fn from(value: MeshletFromMesh) -> Self {
-        AssetRef::new(value)
-    }
-}
-
 #[derive(TypePath)]
 pub struct MeshletFromMeshFunction;
 
@@ -208,12 +202,6 @@ impl CompressImage {
         Self {
             image: image.into(),
         }
-    }
-}
-
-impl From<CompressImage> for AssetRef<'static> {
-    fn from(value: CompressImage) -> Self {
-        AssetRef::new(value)
     }
 }
 
@@ -336,12 +324,6 @@ impl ResizeImage {
     }
 }
 
-impl From<ResizeImage> for AssetRef<'static> {
-    fn from(value: ResizeImage) -> Self {
-        AssetRef::new(value)
-    }
-}
-
 #[derive(TypePath)]
 pub struct ResizeImageFunction;
 
@@ -418,17 +400,13 @@ impl BassetAction for MeshFromHeightmap {
     basset_action_version!(crate);
 }
 
-impl From<MeshFromHeightmap> for AssetRef<'static> {
-    fn from(value: MeshFromHeightmap) -> Self {
-        AssetRef::new(value)
-    }
-}
-
 impl MeshFromHeightmap {
+    #[allow(dead_code, reason = "XXX TODO")]
     pub fn new(heightmap: impl Into<AssetRef<'static>>) -> Self {
         Self::default().with_heightmap(heightmap)
     }
 
+    #[allow(dead_code, reason = "XXX TODO")]
     pub fn with_heightmap(self, heightmap: impl Into<AssetRef<'static>>) -> Self {
         Self {
             heightmap: heightmap.into(),
@@ -436,6 +414,7 @@ impl MeshFromHeightmap {
         }
     }
 
+    #[allow(dead_code, reason = "XXX TODO")]
     pub fn with_extents(self, extents: Aabb3d) -> Self {
         Self { extents, ..self }
     }
@@ -560,13 +539,8 @@ impl BassetAction for ColorizeHeightmap {
     basset_action_version!(crate);
 }
 
-impl From<ColorizeHeightmap> for AssetRef<'static> {
-    fn from(value: ColorizeHeightmap) -> Self {
-        AssetRef::new(value)
-    }
-}
-
 impl ColorizeHeightmap {
+    #[allow(dead_code, reason = "XXX TODO")]
     pub fn new(heightmap: impl Into<AssetRef<'static>>) -> Self {
         Self {
             heightmap: heightmap.into(),
@@ -655,12 +629,6 @@ impl Default for OptimizeStandardMaterial {
     }
 }
 
-impl From<OptimizeStandardMaterial> for AssetRef<'static> {
-    fn from(value: OptimizeStandardMaterial) -> Self {
-        AssetRef::new(value)
-    }
-}
-
 #[derive(TypePath)]
 pub struct OptimizeStandardMaterialFunction;
 
@@ -731,15 +699,10 @@ impl BassetAction for OptimizeScene {
 }
 
 impl OptimizeScene {
+    #[allow(dead_code, reason = "XXX TODO")]
     pub fn with_scene(mut self, scene: impl Into<AssetRef<'static>>) -> Self {
         self.scene = scene.into();
         self
-    }
-}
-
-impl From<OptimizeScene> for AssetRef<'static> {
-    fn from(value: OptimizeScene) -> Self {
-        AssetRef::new(value)
     }
 }
 

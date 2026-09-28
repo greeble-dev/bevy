@@ -818,6 +818,12 @@ impl TypePath for dyn BassetAction {
     }
 }
 
+impl<T: BassetAction> From<T> for AssetRef<'static> {
+    fn from(value: T) -> Self {
+        AssetRef::new(value)
+    }
+}
+
 // XXX TODO: Decide if member should be pub?
 #[derive(Clone)]
 pub struct ErasedBassetAction(pub Arc<dyn BassetAction>);

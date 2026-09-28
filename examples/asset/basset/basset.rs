@@ -507,7 +507,7 @@ fn main() {
                 MeshMaterial3d<StandardMaterial>(asset_template(StandardMaterialTemplate {
                     base_color_texture: Some(CompressImage::new(
                         ColorizeHeightmap::new("heightmaps/Heightmap_08_Island_512.png")
-                    ).into()).into(),
+                    ).into()).into(), // XXX TODO: Try to avoid awkward double into.
                     perceptual_roughness: 0.9,
                     ..Default::default()
                 }))
