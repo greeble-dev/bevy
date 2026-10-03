@@ -1110,36 +1110,40 @@ impl<'a> From<&AssetPath<'a>> for AssetRef<'a> {
 // Please read https://github.com/bevyengine/bevy/issues/19844 before changing this!
 impl From<&'static str> for AssetRef<'static> {
     #[inline]
-    fn from(asset_path: &'static str) -> Self {
-        Into::<AssetPath<'static>>::into(asset_path).into()
+    fn from(value: &'static str) -> Self {
+        AssetRef::from(AssetPath::from(value))
     }
 }
 
+// XXX TODO: Is there a way to avoid all these manual implementations that just
+// do `AssetRef::from(AssetPath::from(value))`? Tried a blanket implementation,
+// but couldn't work out how to avoid it conflicting with
+// `impl<T: BassetAction> From<T> for AssetRef<'static>`.
 impl<'a> From<&'a String> for AssetRef<'a> {
     #[inline]
-    fn from(asset_path: &'a String) -> Self {
-        Into::<AssetPath<'a>>::into(asset_path).into()
+    fn from(value: &'a String) -> Self {
+        AssetRef::from(AssetPath::from(value))
     }
 }
 
 impl From<String> for AssetRef<'static> {
     #[inline]
-    fn from(asset_path: String) -> Self {
-        Into::<AssetPath<'static>>::into(asset_path).into()
+    fn from(value: String) -> Self {
+        AssetRef::from(AssetPath::from(value))
     }
 }
 
 impl From<&'static Path> for AssetRef<'static> {
     #[inline]
-    fn from(path: &'static Path) -> Self {
-        Into::<AssetPath<'static>>::into(path).into()
+    fn from(value: &'static Path) -> Self {
+        AssetRef::from(AssetPath::from(value))
     }
 }
 
 impl From<PathBuf> for AssetRef<'static> {
     #[inline]
-    fn from(path: PathBuf) -> Self {
-        Into::<AssetPath<'static>>::into(path).into()
+    fn from(value: PathBuf) -> Self {
+        AssetRef::from(AssetPath::from(value))
     }
 }
 
