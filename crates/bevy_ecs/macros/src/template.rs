@@ -465,6 +465,7 @@ fn struct_impl(
             }
 
             if let Some(copy_default) = copy_default {
+                #[expect(clippy::redundant_else, reason = "XXX TODO")]
                 if is_enum {
                     // XXX TODO: Enums are tricky because we can't simply do `default().#ident`. We need
                     // to do a single call to `default()` then a match and handle each variant.
@@ -507,6 +508,7 @@ fn struct_impl(
             }
 
             if let Some(copy_default) = copy_default {
+                #[expect(clippy::redundant_else, reason = "XXX TODO")]
                 if is_enum {
                     // XXX TODO: Enums are tricky because we can't simply do `default().#ident`. We need
                     // to do a single call to `default()` then a match and handle each variant.
