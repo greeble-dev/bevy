@@ -57,8 +57,12 @@ impl AssetSaver for ImageSaver {
                 TextureFormat::Rgba8UnormSrgb => {
                     (image::ImageFormat::Png, ExtendedColorType::Rgba8, true)
                 }
-                // XXX TODO: Added this to enable caching of heightmaps. Should be separate PR.
+                // XXX TODO: Added `R16Unorm` and `Rgba16Unorm` support to enable
+                // to enable caching of heightmaps. Should be separate PR.
                 TextureFormat::R16Unorm => (image::ImageFormat::Png, ExtendedColorType::L16, false),
+                TextureFormat::Rgba16Unorm => {
+                    (image::ImageFormat::Png, ExtendedColorType::Rgba16, false)
+                }
                 _ => {
                     return Err(SaveImageError::UnsupportedSaveColorTypeForFormat(
                         ImageFormat::Png,
