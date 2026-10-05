@@ -77,8 +77,7 @@ impl AssetSaver for CompressedImageSaverUniversal {
             is_srgb,
             sampler: image.sampler.clone(),
             asset_usage: image.asset_usage,
-            texture_format: None,
-            array_layout: None,
+            ..Default::default()
         })
     }
 }

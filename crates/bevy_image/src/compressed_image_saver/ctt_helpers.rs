@@ -3,7 +3,7 @@ use ctt::{
         astcenc::{AstcencSettings, AstcencUsage, NormalSwizzle},
         Encoder,
     },
-    AlphaMode, TargetFormat,
+    AlphaMode, ColorSpace, FormatExt, TargetFormat,
 };
 use ktx2::Format;
 #[cfg(all(
@@ -114,6 +114,7 @@ pub fn astc_block(
 
 pub fn choose_ctt_compressed_format(
     input: TextureFormat,
+    color_space: ColorSpace,
     is_normal_map: bool,
     ctt_format: CompressedImageSaverCttFormat,
 ) -> Result<TargetFormat, CompressedImageSaverError> {
@@ -281,7 +282,7 @@ pub fn choose_ctt_compressed_format(
 
     Ok(TargetFormat::Compressed {
         encoder: Encoder::Auto,
-        format,
+        format: format.with_color_space(color_space),
     })
 }
 
