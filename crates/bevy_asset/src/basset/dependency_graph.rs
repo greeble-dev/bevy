@@ -207,40 +207,26 @@ impl InternalGraph {
         }
     }
 
-    fn invalidate_action(&mut self, path: &RootAssetRef) {
-        // XXX TODO: There's a couple of minor optimizations to make here although
-        // they might not be worth the complexity. Firstly, if the action has
-        // no dependencies then we could set it straight to `Unknown` and skip
-        // the graph searching. Secondly, We can avoid looking up the initial action
-        // twice - once to get the initial node index near the top, and one to set it#
-        // to `Unknown` near the bottom.
-        let Some(initial_node_index) =
-            self.action_to_state
-                .get(path)
-                .and_then(|state| match state {
-                    AssetState::Known(state) => Some(state.node_index),
-                    _ => None,
-                })
-        else {
-            return;
-        };
-
-        let mut stack = vec![initial_node_index];
+    fn invalidate_node(&mut self, initial_node: NodeIndex) {
+        // XXX TODO: Could optimize this by first checking if the node has no
+        // incoming dependencies, in which case it can be set straight to `Unknown`
+        // without constructing a stack.
+        let mut stack = vec![initial_node];
         let mut cursor = 0;
 
-        while let Some(node_index) = stack.get(cursor) {
+        while let Some(node) = stack.get(cursor) {
             cursor += 1;
 
             stack.extend(
                 self.graph
-                    .edges_directed(*node_index, Direction::Incoming)
+                    .edges_directed(*node, Direction::Incoming)
                     .map(|edge| edge.source()),
             );
         }
 
         // XXX TODO: Check if there's a more efficient way to bulk remove.
-        for node_index in stack.into_iter() {
-            let path = self.graph.remove_node(node_index).expect("XXX TODO");
+        for node in stack.into_iter() {
+            let path = self.graph.remove_node(node).expect("XXX TODO");
 
             match path {
                 LoaderDependency::Action(action) => {
@@ -253,15 +239,31 @@ impl InternalGraph {
         }
     }
 
-    fn invalidate_file(&mut self, path: &RootAssetPath<'static>) {
-        if let Some(state) = self.file_to_state.get_mut(path)
-            && let AssetState::Known(known_state) = state
+    fn invalidate_action(&mut self, path: &RootAssetRef) {
+        // XXX TODO: `invalidate_node` repeats this lookup when setting the
+        // state to `Unknown`. Could avoid the double lookup, but would that add
+        // too much complication?
+        if let Some(node) = self
+            .action_to_state
+            .get(path)
+            .and_then(|state| match state {
+                AssetState::Known(state) => Some(state.node_index),
+                _ => None,
+            })
         {
-            self.graph
-                .remove_node(known_state.node_index)
-                .expect("XXX TODO");
+            self.invalidate_node(node);
+        }
+    }
 
-            *state = AssetState::Unknown;
+    fn invalidate_file(&mut self, path: &RootAssetPath<'static>) {
+        // XXX TODO: `invalidate_node` repeats this lookup when setting the
+        // state to `Unknown`. Could avoid the double lookup, but would that add
+        // too much complication?
+        if let Some(node) = self.file_to_state.get(path).and_then(|state| match state {
+            AssetState::Known(state) => Some(state.node_index),
+            _ => None,
+        }) {
+            self.invalidate_node(node);
         }
     }
 }
