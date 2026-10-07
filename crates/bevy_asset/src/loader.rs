@@ -382,6 +382,33 @@ pub enum LoaderDependency {
     File(RootAssetPath<'static>),
 }
 
+impl From<RootAssetRef> for LoaderDependency {
+    fn from(value: RootAssetRef) -> Self {
+        Self::Action(value)
+    }
+}
+
+impl From<AssetRef<'static>> for LoaderDependency {
+    fn from(value: AssetRef<'static>) -> Self {
+        RootAssetRef::without_label(value).into()
+    }
+}
+
+// XXX TODO: Consider if we should allow these. Potential footgun if the path
+// is intended to be loaded, in which case it should be treated as `LoaderDependency::Action`
+// with a `LoadPath` action - not a `LoaderDependency::File`.
+// impl From<RootAssetPath> for LoaderDependency {
+//     fn from(value: RootAssetPath) -> Self {
+//         Self::File(value)
+//     }
+// }
+
+// impl From<AssetPath<'static>> for LoaderDependency {
+//     fn from(value: AssetPath<'static>) -> Self {
+//         RootAssetPath::without_label(value).into()
+//     }
+// }
+
 /// A "type erased / boxed" counterpart to [`LoadedAsset`]. This is used in places where the loaded type is not statically known.
 pub struct ErasedLoadedAsset {
     pub(crate) value: Box<dyn AssetContainer>,

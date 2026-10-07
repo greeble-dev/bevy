@@ -37,6 +37,10 @@ pub struct JoinStrings {
 
 impl BassetAction for JoinStrings {
     basset_action_version!(crate);
+
+    fn dependencies(&self) -> ActionDependencies {
+        ActionDependencies::from_iter(self.strings.clone())
+    }
 }
 
 #[derive(TypePath)]
@@ -74,6 +78,10 @@ pub struct UppercaseString {
 
 impl BassetAction for UppercaseString {
     basset_action_version!(crate);
+
+    fn dependencies(&self) -> ActionDependencies {
+        ActionDependencies::from(&self.string)
+    }
 }
 
 #[derive(TypePath)]
@@ -123,6 +131,10 @@ impl MeshletFromMesh {
 
 impl BassetAction for MeshletFromMesh {
     basset_action_version!(crate);
+
+    fn dependencies(&self) -> ActionDependencies {
+        ActionDependencies::from(&self.mesh)
+    }
 }
 
 #[derive(TypePath)]
@@ -194,6 +206,10 @@ impl BassetAction for CompressImage {
             name: "compressed_texture_format",
             required: EnvironmentRequiredKey::Yes,
         }])
+    }
+
+    fn dependencies(&self) -> ActionDependencies {
+        ActionDependencies::from(&self.image)
     }
 }
 
@@ -313,6 +329,10 @@ pub struct ResizeImage {
 
 impl BassetAction for ResizeImage {
     basset_action_version!(crate);
+
+    fn dependencies(&self) -> ActionDependencies {
+        ActionDependencies::from(&self.image)
+    }
 }
 
 impl ResizeImage {
@@ -398,6 +418,10 @@ impl Default for MeshFromHeightmap {
 
 impl BassetAction for MeshFromHeightmap {
     basset_action_version!(crate);
+
+    fn dependencies(&self) -> ActionDependencies {
+        ActionDependencies::from(&self.heightmap)
+    }
 }
 
 impl MeshFromHeightmap {
@@ -537,6 +561,10 @@ pub struct ColorizeHeightmap {
 
 impl BassetAction for ColorizeHeightmap {
     basset_action_version!(crate);
+
+    fn dependencies(&self) -> ActionDependencies {
+        ActionDependencies::from(&self.heightmap)
+    }
 }
 
 impl ColorizeHeightmap {
@@ -617,6 +645,10 @@ pub struct OptimizeStandardMaterial {
 
 impl BassetAction for OptimizeStandardMaterial {
     basset_action_version!(crate);
+
+    fn dependencies(&self) -> ActionDependencies {
+        ActionDependencies::from(&self.material)
+    }
 }
 
 impl Default for OptimizeStandardMaterial {
@@ -696,6 +728,10 @@ pub struct OptimizeScene {
 
 impl BassetAction for OptimizeScene {
     basset_action_version!(crate);
+
+    fn dependencies(&self) -> ActionDependencies {
+        ActionDependencies::from(&self.scene)
+    }
 }
 
 impl OptimizeScene {

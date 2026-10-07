@@ -28,6 +28,7 @@ use alloc::{
     boxed::Box,
     string::{String, ToString},
     sync::Arc,
+    vec,
     vec::Vec,
 };
 use atomicow::CowArc;
@@ -263,7 +264,8 @@ impl RootAssetRef {
     // Remove the label from an `AssetRef`, returning a `RootAssetRef`.
     //
     // XXX TODO: Review. Could have been done as `impl From<AssetRef>`, but
-    // I'm erring on the side of explicitness for now.
+    // I'm erring on the side of explicitness for now. Maybe `AssetRef::without_label`
+    // should return `RootAssetRef`, but that's a breaking change to the interface.
     pub fn without_label(value: AssetRef<'_>) -> Self {
         Self {
             action: value.action().clone(),
@@ -741,6 +743,34 @@ fn load_dependencies(
     }
 }
 
+pub enum ActionDependencies {
+    Known(Vec<LoaderDependency>),
+    Unknown,
+}
+
+impl From<AssetRef<'static>> for ActionDependencies {
+    fn from(value: AssetRef<'static>) -> Self {
+        Self::Known(vec![LoaderDependency::Action(RootAssetRef::without_label(
+            value,
+        ))])
+    }
+}
+
+// XXX TODO: Review. Added as a convenience - it means actions returning
+// dependencies don't have to explicitly clone a reference. But could be a
+// performance footgun if used when the by-value version is more appropriate.
+impl From<&AssetRef<'static>> for ActionDependencies {
+    fn from(value: &AssetRef<'static>) -> Self {
+        Self::from(value.clone())
+    }
+}
+
+impl<I: Into<LoaderDependency>> FromIterator<I> for ActionDependencies {
+    fn from_iter<T: IntoIterator<Item = I>>(iter: T) -> Self {
+        Self::Known(iter.into_iter().map(Into::into).collect())
+    }
+}
+
 // XXX TODO: Review `Debug` bound.
 #[reflect_trait]
 pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {
@@ -764,6 +794,8 @@ pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {
     fn env<'a>(&'a self) -> EnvironmentSchema<'a> {
         EnvironmentSchema(&[])
     }
+
+    fn dependencies(&self) -> ActionDependencies;
 }
 
 /// Convenience macro for implementing `BassetAction::version`.
@@ -2221,6 +2253,10 @@ pub mod action {
 
         // XXX TODO: Should this version incorporate `AssetLoader` versions?
         basset_action_version!(crate);
+
+        fn dependencies(&self) -> ActionDependencies {
+            ActionDependencies::Unknown
+        }
     }
 
     impl LoadPath {
