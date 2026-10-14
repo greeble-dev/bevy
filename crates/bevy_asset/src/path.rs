@@ -670,6 +670,16 @@ impl<'a, 'b> From<&'a AssetPath<'b>> for AssetPath<'b> {
     }
 }
 
+impl<'a> From<RootAssetPath<'a>> for AssetPath<'a> {
+    fn from(value: RootAssetPath<'a>) -> Self {
+        Self {
+            source: value.source,
+            path: value.path,
+            label: None,
+        }
+    }
+}
+
 impl<'a> From<AssetPath<'a>> for PathBuf {
     fn from(value: AssetPath<'a>) -> Self {
         value.path().to_path_buf()

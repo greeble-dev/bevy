@@ -1,40 +1,34 @@
 use crate::{
     basset::{
-        cache::{
-            ActionCacheKey, BassetHash, CacheLoaderDependency, ContentCache, DependencyCacheKey,
-            DependencyCacheValue, MemoryAndFileCache,
-        },
-        FullEnvironment, RootAssetPath, RootAssetRef,
+        cache::{ActionCacheKey, BassetHash, ContentCache, ContentHash},
+        ActionDependencies, ApplyContext, DependencyLoading, ErasedBassetAction,
+        ErasedBassetActionFunction, FullEnvironment, MissingActionFunctionError, RootAssetPath,
+        RootAssetRef,
     },
-    io::{AssetSources, Reader, VecReader},
-    LoaderDependency, ReadAssetBytesError,
+    io::AssetSources,
+    AssetLoadError, AssetServer, LoaderDependency,
 };
-use alloc::{boxed::Box, string::ToString, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, format, string::ToString, sync::Arc, vec, vec::Vec};
 use bevy_platform::collections::HashMap;
-use bevy_reflect::TypeRegistryArc;
 use core::{
     fmt::{Debug, Display, Write},
-    hash::{Hash, Hasher},
+    hash::Hasher,
 };
 use indexmap::IndexMap;
 use petgraph::{
     acyclic::Acyclic, data::Build, graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef,
     Direction,
 };
-use std::{
-    path::PathBuf,
-    sync::{Mutex, MutexGuard, PoisonError},
-};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use tracing::warn;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct KnownAssetState {
     node_index: NodeIndex,
     action_key: ActionCacheKey,
-    dependency_key: DependencyCacheKey,
-    // XXX TODO: This is often empty. Could optimize for that case and avoid the
-    // `Arc`?
-    dependency_value: Arc<DependencyCacheValue>,
+    // XXX TODO: This is not needed for file states. Consider separate state types
+    // for actions and files.
+    value_dependees: Vec<LoaderDependency>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -61,21 +55,15 @@ impl InternalGraph {
     fn set_action(
         &mut self,
         path: RootAssetRef,
-        dependency_key: DependencyCacheKey,
-        dependency_value: Arc<DependencyCacheValue>,
+        env: &FullEnvironment,
+        value_dependees: Vec<LoaderDependency>,
     ) -> Option<ActionCacheKey> {
         // XXX TODO: Review for correctness. We want an early out here because
         // uncached actions like `LoadPath` will be applied multiple times even
         // if they don't change.
-        if let Some(AssetState::Known(existing_state)) = self.action_to_state.get(&path)
-            && (existing_state.dependency_key == dependency_key)
-        {
+        if let Some(AssetState::Known(existing_state)) = self.action_to_state.get(&path) {
             return Some(existing_state.action_key);
         }
-
-        // XXX TODO: Optimize? This repeats the state lookup we just did. Or merge into
-        // one `invalidate_file_if_different` function.
-        self.invalidate_action(&path);
 
         // Gather the node id and action key of each dependee, returning `None`
         // if any are absent or unknown.
@@ -84,23 +72,22 @@ impl InternalGraph {
         // ordering affects the action key.
         //
         // XXX TODO: More efficient if we could do `into_iter?`
-        let resolved = dependency_value
-            .loader_dependees()
+        let resolved = value_dependees
             .iter()
-            .map(|CacheLoaderDependency(dependee, dependee_dependency_key)| {
+            .map(|dependee| {
                 if let Some(dependee_state) = self.get_asset_state(dependee) {
                     match dependee_state {
                         AssetState::Known(dependee_state) => {
-                            // XXX TODO: Should go behind validation flag?
-                            assert_eq!(*dependee_dependency_key, dependee_state.dependency_key);
                             Some((dependee_state.node_index, dependee_state.action_key))
                         }
                         AssetState::Unknown => None,
                     }
-                }
-                else {
+                } else {
                     // XXX TODO: Change to error? Or make logging opt-in.
-                    warn!(?dependee, %dependee_dependency_key, "Failed to find state - were dependencies not registered for this asset?");
+                    warn!(
+                        ?dependee,
+                        "Failed to find state - were dependencies not registered for this asset?"
+                    );
                     None
                 }
             })
@@ -110,8 +97,9 @@ impl InternalGraph {
             // We found nodes for all dependees. Create our node and link it to
             // the dependees.
 
-            let action_key = ActionCacheKey::new(
-                dependency_key,
+            let action_key = ActionCacheKey::from_action(
+                &path,
+                env,
                 resolved
                     .iter()
                     .map(|(_, k)| *k)
@@ -119,6 +107,7 @@ impl InternalGraph {
                     .as_slice(),
             );
 
+            // XXX TODO: Verify node doesn't already exist?
             let node_id = self.graph.add_node(LoaderDependency::Action(path.clone()));
 
             for (dependee_node_id, _) in resolved.iter() {
@@ -132,8 +121,7 @@ impl InternalGraph {
                 AssetState::Known(KnownAssetState {
                     node_index: node_id,
                     action_key,
-                    dependency_key,
-                    dependency_value,
+                    value_dependees,
                 }),
             );
 
@@ -152,24 +140,17 @@ impl InternalGraph {
         }
     }
 
-    // XXX TODO: Document and reconsider name. Corresponds to `LoaderDependency::File`.
-    // XXX TODO: Duplicates a lot of `set_load`. Try refactor?
     fn set_file(
         &mut self,
         path: RootAssetPath<'static>,
-        dependency_key: DependencyCacheKey,
+        content_hash: ContentHash,
     ) -> Option<ActionCacheKey> {
-        if let Some(AssetState::Known(existing_state)) = self.file_to_state.get(&path)
-            && (existing_state.dependency_key == dependency_key)
-        {
+        // XXX TODO: Review for correctness. Possible race condition?
+        if let Some(AssetState::Known(existing_state)) = self.file_to_state.get(&path) {
             return Some(existing_state.action_key);
         }
 
-        // XXX TODO: Optimize? This repeats the state lookup we just did. Or merge into
-        // one `invalidate_file_if_different` function.
-        self.invalidate_file(&path);
-
-        let action_key = ActionCacheKey::new(dependency_key, &[]);
+        let action_key = ActionCacheKey::from_file(&path, content_hash);
 
         let node_id = self.graph.add_node(LoaderDependency::File(path.clone()));
 
@@ -178,24 +159,18 @@ impl InternalGraph {
             AssetState::Known(KnownAssetState {
                 node_index: node_id,
                 action_key,
-                dependency_key,
-                dependency_value: Arc::new(DependencyCacheValue::default()),
+                value_dependees: Vec::new(),
             }),
         );
 
         Some(action_key)
     }
 
-    fn get_action(
-        &self,
-        path: &RootAssetRef,
-    ) -> Option<(ActionCacheKey, Arc<DependencyCacheValue>)> {
+    fn get_action(&self, path: &RootAssetRef) -> Option<(ActionCacheKey, Vec<LoaderDependency>)> {
         self.action_to_state
             .get(path)
             .and_then(|state| match state {
-                AssetState::Known(known) => {
-                    Some((known.action_key, known.dependency_value.clone()))
-                }
+                AssetState::Known(known) => Some((known.action_key, known.value_dependees.clone())),
                 AssetState::Unknown => None,
             })
     }
@@ -207,6 +182,7 @@ impl InternalGraph {
         }
     }
 
+    #[expect(dead_code, reason = "XXX TODO")]
     fn invalidate_node(&mut self, initial_node: NodeIndex) {
         // XXX TODO: Could optimize this by first checking if the node has no
         // incoming dependencies, in which case it can be set straight to `Unknown`
@@ -239,6 +215,7 @@ impl InternalGraph {
         }
     }
 
+    #[expect(dead_code, reason = "XXX TODO")]
     fn invalidate_action(&mut self, path: &RootAssetRef) {
         // XXX TODO: `invalidate_node` repeats this lookup when setting the
         // state to `Unknown`. Could avoid the double lookup, but would that add
@@ -255,6 +232,7 @@ impl InternalGraph {
         }
     }
 
+    #[expect(dead_code, reason = "XXX TODO")]
     fn invalidate_file(&mut self, path: &RootAssetPath<'static>) {
         // XXX TODO: `invalidate_node` repeats this lookup when setting the
         // state to `Unknown`. Could avoid the double lookup, but would that add
@@ -308,8 +286,6 @@ impl Debug for InternalGraph {
 
             f.write_str("+-- ")?;
             Display::fmt(&state.action_key, f)?;
-            f.write_char('/')?;
-            Display::fmt(&state.dependency_key, f)?;
             f.write_char(' ')?;
             Debug::fmt(&self.graph.node_weight(node_id).expect("XXX TODO"), f)?;
 
@@ -329,7 +305,6 @@ pub(crate) struct DependencyGraph {
     // XXX TODO: Would have preferred `RwLock`, but we can't because `petgraph::Acyclic`
     // is not `Sync` due to using `RefCell`.
     graph: Mutex<InternalGraph>,
-    dependency_cache: MemoryAndFileCache<DependencyCacheKey, Arc<DependencyCacheValue>>,
     content_cache: ContentCache,
     // XXX TODO: We should have loader versions here for calculating dependency keys?
 }
@@ -339,13 +314,14 @@ pub(crate) struct DependencyGraph {
 // a `u64` when we want the full 32-byte hash. Instead, call `Blake3Wrapper::finish`.
 //
 // XXX TODO: Reconsider name? Maybe should be just `BassetHasher`?
-struct Blake3Wrapper(blake3::Hasher);
+pub(crate) struct Blake3Wrapper(pub(crate) blake3::Hasher);
 
 impl Blake3Wrapper {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(blake3::Hasher::new())
     }
-    fn finish(self) -> BassetHash {
+
+    pub(crate) fn finish(self) -> BassetHash {
         BassetHash::new(*self.0.finalize().as_bytes())
     }
 }
@@ -361,20 +337,9 @@ impl Hasher for Blake3Wrapper {
 }
 
 impl DependencyGraph {
-    pub(crate) fn new(
-        dependency_cache_path: Option<PathBuf>,
-        validate: bool,
-        sources: Arc<AssetSources>,
-        registry: TypeRegistryArc,
-    ) -> Self {
+    pub(crate) fn new(sources: Arc<AssetSources>) -> Self {
         Self {
             graph: Default::default(),
-            dependency_cache: MemoryAndFileCache::new(
-                "dependency_cache",
-                dependency_cache_path,
-                validate,
-                registry,
-            ),
             content_cache: ContentCache::new(sources),
         }
     }
@@ -383,125 +348,107 @@ impl DependencyGraph {
         self.graph.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    pub(crate) async fn dependency_key(
-        &self,
-        path: &LoaderDependency,
-        env: &FullEnvironment,
-    ) -> DependencyCacheKey {
-        match path {
-            LoaderDependency::Action(action) => self.action_dependency_key(action, env),
-            LoaderDependency::File(path) => self.file_dependency_key(path).await,
-        }
+    // XXX TODO: Avoid duplication. This was cut and pasted from `DevelopmentActionSource`.
+    fn action_function<'a>(
+        action: &ErasedBassetAction,
+        action_type_path_to_action_function: &'a HashMap<
+            &'static str,
+            Box<dyn ErasedBassetActionFunction>,
+        >,
+    ) -> Result<&'a dyn ErasedBassetActionFunction, MissingActionFunctionError> {
+        let type_path = action.type_path();
+
+        action_type_path_to_action_function
+            .get(type_path)
+            .map(AsRef::as_ref)
+            .ok_or(MissingActionFunctionError::NotFound(type_path))
     }
 
-    pub(crate) fn action_dependency_key(
-        &self,
+    fn equivalent(l: &[LoaderDependency], r: &[LoaderDependency]) -> bool {
+        l.iter().all(|li| r.contains(li)) && r.iter().all(|ri| l.contains(ri))
+    }
+
+    async fn action_value_dependees(
         action: &RootAssetRef,
         env: &FullEnvironment,
-    ) -> DependencyCacheKey {
-        // XXX TODO: Can we can optimize this by combining environment filtering
-        // with hashing?
-        let filtered_env = env.filter(action.action()).expect("XXX TODO");
+        asset_server: &AssetServer,
+        action_type_path_to_action_function: &HashMap<
+            &'static str,
+            Box<dyn ErasedBassetActionFunction>,
+        >,
+    ) -> Vec<LoaderDependency> {
+        // XXX TODO: Expose this as a global setting.
+        let verify = false;
 
-        // XXX TODO: Seed hash? Also consider using separate seeds for actions
-        // and files just in case.
-        // XXX TODO: Review choice of `blake3`.
-        let mut hasher = Blake3Wrapper::new();
+        if !verify && let ActionDependencies::Known(known) = action.action().dependencies() {
+            return known;
+        }
 
-        Hash::hash(&action, &mut hasher);
-        Hash::hash(action.action().version(), &mut hasher);
-        Hash::hash(&filtered_env, &mut hasher);
+        let filtered_env = env
+            .filter(action.action())
+            .map_err(|err| AssetLoadError::TodoError(Arc::new(format!("{err:?}").into())))
+            .expect("XXX TODO");
 
-        DependencyCacheKey(hasher.finish())
-    }
+        let apply_context = ApplyContext::new(
+            action.clone(),
+            asset_server,
+            DependencyLoading::No,
+            filtered_env,
+            None,
+        );
 
-    // XXX TODO: Review where this is used and make sure we're not introducing
-    // any file read race conditions.
-    pub(crate) async fn file_dependency_key(
-        &self,
-        path: &RootAssetPath<'static>,
-    ) -> DependencyCacheKey {
-        // XXX TODO: Seed hash? Also consider using separate seeds for actions
-        // and files just in case.
-        let mut hasher = blake3::Hasher::new();
+        let action_function =
+            Self::action_function(action.action(), action_type_path_to_action_function)
+                .expect("XXX TODO");
 
-        hasher.update(path.to_string().as_bytes());
+        let output = action_function
+            .apply(apply_context, action)
+            .await
+            .expect("XXX TODO");
 
-        let content_hash = self.content_cache.get(path).await.expect("XXX TODO");
-        hasher.update(&content_hash.as_bytes());
+        let value_dependees = output.value_dependees();
 
-        DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
-    }
+        if verify
+            && let ActionDependencies::Known(known) = action.action().dependencies()
+            && !Self::equivalent(&known, &value_dependees)
+        {
+            // XXX TODO: Proper error handling.
+            panic!("Found dependencies differed from declared dependencies.\nAction: {action:?}\nFound: {:?}\nDeclared: {known:?}", value_dependees);
+        }
 
-    pub(crate) async fn read_asset_bytes(
-        &self,
-        path: &RootAssetPath<'static>,
-        reader: &mut dyn Reader,
-    ) -> Result<(Box<dyn Reader>, DependencyCacheKey), ReadAssetBytesError> {
-        let (bytes, content_hash) = self.content_cache.read_asset_bytes(path, reader).await?;
-
-        // XXX TODO: Review this function and check that we're matching the other
-        // `dependency_key` function. Maybe factor out shared logic?
-        let dependency_key = {
-            let mut hasher = blake3::Hasher::new();
-
-            hasher.update(path.to_string().as_bytes());
-            hasher.update(&content_hash.as_bytes());
-
-            DependencyCacheKey(BassetHash::new(*hasher.finalize().as_bytes()))
-        };
-
-        self.graph
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .set_file(path.clone(), dependency_key);
-
-        Ok((Box::new(VecReader::new(bytes)), dependency_key))
+        value_dependees
     }
 
     pub(crate) async fn action_key(
         &self,
         root_action: &RootAssetRef,
-        root_dependency_key: DependencyCacheKey,
         env: &FullEnvironment,
-    ) -> Option<(ActionCacheKey, Arc<DependencyCacheValue>)> {
+        asset_server: &AssetServer,
+        // XXX TODO: Try and avoid passing this in, or wrap in it something
+        // friendlier.
+        action_type_path_to_action_function: &HashMap<
+            &'static str,
+            Box<dyn ErasedBassetActionFunction>,
+        >,
+    ) -> Option<(ActionCacheKey, Vec<LoaderDependency>)> {
         // Early out if possible.
         if let Some(existing) = self.graph().get_action(root_action) {
             return Some(existing);
         };
 
-        let mut stack = Vec::<(LoaderDependency, DependencyCacheKey)>::new();
+        let mut stack = Vec::<LoaderDependency>::new();
 
         // XXX TODO: Document that `IndexMap` is for consistent ordering.
-        let mut pending_actions =
-            IndexMap::<RootAssetRef, Option<(DependencyCacheKey, Arc<DependencyCacheValue>)>>::new(
-            );
+        let mut pending_actions = IndexMap::<RootAssetRef, Vec<LoaderDependency>>::new();
 
-        let mut pending_files =
-            IndexMap::<RootAssetPath<'static>, Option<DependencyCacheKey>>::new();
+        // XXX TODO: Document that `IndexSet` is for consistent ordering.
+        let mut pending_files = IndexMap::<RootAssetPath<'static>, ContentHash>::new();
 
-        // XXX TODO: This duplicates a similar block within the loop below. Refactor?
-        let root_pending_action = if let Some(root_dependency_value) = self
-            .dependency_cache
-            .get(&root_dependency_key, root_action)
-            .await
-        {
-            for CacheLoaderDependency(dependee_path, dependee_key) in
-                root_dependency_value.loader_dependees()
-            {
-                stack.push((dependee_path.clone(), *dependee_key));
-            }
+        stack.push(LoaderDependency::Action(root_action.clone()));
 
-            Some((root_dependency_key, root_dependency_value))
-        } else {
-            None
-        };
-
-        pending_actions.insert(root_action.clone(), root_pending_action);
-
-        while let Some((dependency, predicted_dependency_key)) = stack.pop() {
+        while let Some(action) = stack.pop() {
             // Skip if we've already hit this dependency.
-            if match &dependency {
+            if match &action {
                 LoaderDependency::Action(action) => pending_actions.contains_key(action),
                 LoaderDependency::File(file) => pending_files.contains_key(file),
             } {
@@ -509,55 +456,42 @@ impl DependencyGraph {
             }
 
             // Skip if we already have a node for this dependency.
-            if self.graph().contains(&dependency) {
+            if self.graph().contains(&action) {
                 continue;
             };
 
-            let current_dependency_key = self.dependency_key(&dependency, env).await;
-
-            // If the predicted key doesn't match the current file state then
-            // invalidate the node.
-            if predicted_dependency_key != current_dependency_key {
-                match dependency {
-                    LoaderDependency::Action(path) => {
-                        pending_actions.insert(path.clone(), None);
-                    }
-                    LoaderDependency::File(path) => {
-                        pending_files.insert(path.clone(), None);
-                    }
-                }
-
-                continue;
-            }
-
-            match dependency {
+            match action {
                 LoaderDependency::Action(action) => {
-                    // XXX TODO: Keep?
+                    let value_dependees = Self::action_value_dependees(
+                        &action,
+                        env,
+                        asset_server,
+                        action_type_path_to_action_function,
+                    )
+                    .await;
+
+                    stack.extend(value_dependees.clone());
+
+                    // XXX TODO: Review. This invariant is held by a check earlier
+                    // in the loop, but maybe it would be better to do it here?
                     assert!(!pending_actions.contains_key(&action));
 
-                    let pending_action = if let Some(dependency_value) = self
-                        .dependency_cache
-                        .get(&current_dependency_key, &action)
-                        .await
-                    {
-                        for CacheLoaderDependency(dependee_path, dependee_key) in
-                            dependency_value.loader_dependees()
-                        {
-                            stack.push((dependee_path.clone(), *dependee_key));
-                        }
-
-                        Some((current_dependency_key, dependency_value))
-                    } else {
-                        None
-                    };
-
-                    pending_actions.insert(action.clone(), pending_action);
+                    pending_actions.insert(action, value_dependees);
                 }
                 LoaderDependency::File(file) => {
-                    // XX TODO: Keep?
+                    // XXX TODO: Review. This invariant is held by a check earlier
+                    // in the loop, but maybe it would be better to do it here?
                     assert!(!pending_files.contains_key(&file));
 
-                    pending_files.insert(file.clone(), Some(current_dependency_key));
+                    // XXX TODO: Race condition. We don't know if the file read
+                    // by the content cache matches the file read by the loader
+                    // that registered this dependency. Probably needs the loader
+                    // to give us the hash. Note that `LoadContext::read_asset_bytes`
+                    // already does something similar for regular publishing - see
+                    // also `LoadedAsset::loader_dependencies`.
+                    let content_hash = self.content_cache.get(&file).await.expect("XXX TODO");
+
+                    pending_files.insert(file, content_hash);
                 }
             }
         }
@@ -566,48 +500,20 @@ impl DependencyGraph {
             let mut graph = self.graph();
 
             // XXX TODO: Document reverse order reasoning.
-            for (path, potential) in pending_files.into_iter().rev() {
-                match potential {
-                    Some(dependency_key) => {
-                        graph.set_file(path, dependency_key);
-                    }
-                    None => {
-                        graph.invalidate_file(&path);
-                    }
-                };
+            for (file, content_hash) in pending_files.into_iter().rev() {
+                graph.set_file(file, content_hash);
             }
 
             // XXX TODO: Document reverse order reasoning.
-            for (path, potential) in pending_actions.into_iter().rev() {
-                match potential {
-                    Some((dependency_key, dependency_value)) => {
-                        graph.set_action(path, dependency_key, dependency_value.clone());
-                    }
-                    None => {
-                        graph.invalidate_action(&path);
-                    }
-                };
+            for (action, value_dependees) in pending_actions.into_iter().rev() {
+                graph.set_action(action, env, value_dependees);
             }
         }
 
-        // XXX TODO: Avoid clone?
+        // XXX TODO: This lookup could be optimized away since we know we did
+        // the `set_action` for this action somewhere above. But is that worth
+        // the complication?
         self.graph().get_action(root_action)
-    }
-
-    pub(crate) fn register_dependencies_load(
-        &self,
-        path: &RootAssetRef,
-        dependency_key: DependencyCacheKey,
-        dependency_value: Arc<DependencyCacheValue>,
-    ) -> Option<ActionCacheKey> {
-        let action_key =
-            self.graph()
-                .set_action(path.clone(), dependency_key, dependency_value.clone());
-
-        self.dependency_cache
-            .put(dependency_key, dependency_value, path);
-
-        action_key
     }
 }
 

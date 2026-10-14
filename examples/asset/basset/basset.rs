@@ -308,10 +308,6 @@ impl FromStr for ArgMode {
 struct Args {
     /// XXX TODO
     #[argh(switch)]
-    validate_dependency_cache: bool,
-
-    /// XXX TODO
-    #[argh(switch)]
     validate_action_cache: bool,
 
     /// XXX TODO
@@ -555,7 +551,6 @@ fn main() {
             basset_action_source_builder: Some(Arc::new(DevelopmentActionSourceBuilder::new(
                 development_action_source_settings(&app)
                     .with_default_poly_saver(RonAssetSaver::new(registry.clone()))
-                    .with_validate_dependency_cache(args.validate_dependency_cache)
                     .with_validate_action_cache(args.validate_action_cache),
             ))),
             ..Default::default()

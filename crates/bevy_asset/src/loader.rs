@@ -1,5 +1,5 @@
 use crate::{
-    basset::{cache::DependencyCacheKey, DependencyLoading, RootAssetPath, RootAssetRef},
+    basset::{DependencyLoading, RootAssetPath, RootAssetRef},
     io::{AssetReaderError, MissingAssetSourceError, MissingProcessedAssetReaderError, Reader},
     loader_builders::NestedLoadBuilder,
     meta::{
@@ -293,8 +293,7 @@ pub(crate) struct LabeledAsset {
 pub struct LoadedAsset<A: Asset> {
     pub(crate) value: A,
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
-    pub(crate) loader_dependencies:
-        HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
+    pub(crate) loader_dependencies: HashMap<LoaderDependency, AssetHash>,
     /// The subassets of this asset.
     pub(crate) labeled_assets: Vec<LabeledAsset>,
     /// The mapping from subasset labels to their index in [`Self::labeled_assets`].
@@ -413,8 +412,7 @@ impl From<AssetRef<'static>> for LoaderDependency {
 pub struct ErasedLoadedAsset {
     pub(crate) value: Box<dyn AssetContainer>,
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
-    pub(crate) loader_dependencies:
-        HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
+    pub(crate) loader_dependencies: HashMap<LoaderDependency, AssetHash>,
     /// The subassets of this asset.
     pub(crate) labeled_assets: Vec<LabeledAsset>,
     /// The mapping from subasset labels to their index in [`Self::labeled_assets`].
@@ -646,8 +644,7 @@ pub struct LoadContext<'a> {
     simple_asset_path: Option<AssetPath<'static>>,
     pub(crate) dependencies: HashSet<ErasedAssetIndex>,
     /// Direct dependencies used by this loader.
-    pub(crate) loader_dependencies:
-        HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
+    pub(crate) loader_dependencies: HashMap<LoaderDependency, AssetHash>,
     /// Stores the subassets added to this context.
     pub(crate) labeled_assets: Vec<LabeledAsset>,
     /// Maps the label of a subasset to the index into [`Self::labeled_assets`].
@@ -925,7 +922,6 @@ impl<'a> LoadContext<'a> {
             AssetServerMode::Unprocessed => source.reader(),
             AssetServerMode::Processed => source.processed_reader()?,
         };
-        // XXX TODO: See comment below about breaking processing.
         let mut reader = asset_reader.read(path.path()).await?;
         let hash = if self.populate_hashes {
             // NOTE: ensure meta is read while the asset bytes reader is still active to ensure transactionality
@@ -941,28 +937,8 @@ impl<'a> LoadContext<'a> {
             Default::default()
         };
 
-        let (mut replacement_reader, dependency_key) = match self
-            .asset_server
-            .basset_action_source()
-            .read_asset_bytes(
-                // XXX TODO: Review `clone_owned`. Are we really losing much by
-                // not doing fine grained lifetimes?
-                RootAssetPath::without_label(path.clone_owned()),
-                &mut reader,
-            )
-            .await?
-        {
-            // XXX TODO: Ugly destructuring. Review.
-            Some((replacement_reader, dependency_key)) => {
-                (Some(replacement_reader), Some(dependency_key))
-            }
-            None => (None, None),
-        };
-
-        let chosen_reader = replacement_reader.as_mut().unwrap_or(&mut reader);
-
         let mut bytes = Vec::new();
-        chosen_reader
+        reader
             .read_to_end(&mut bytes)
             .await
             .map_err(|source| ReadAssetBytesError::Io {
@@ -972,7 +948,7 @@ impl<'a> LoadContext<'a> {
 
         self.loader_dependencies.insert(
             LoaderDependency::File(RootAssetPath::without_label(path.clone_owned())),
-            (hash, dependency_key),
+            hash,
         );
 
         Ok(bytes)
@@ -1015,7 +991,7 @@ impl<'a> LoadContext<'a> {
         path: RootAssetRef,
         processed_info: Option<&ProcessedInfo>,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
-        let (loaded_asset, dependency_key) = self
+        let loaded_asset = self
             .asset_server
             .basset_action_source()
             // XXX TODO: Review if `DependencyLoading::Yes` is correct? Seems
@@ -1034,7 +1010,7 @@ impl<'a> LoadContext<'a> {
         let hash = processed_info.map(|i| i.full_hash).unwrap_or_default();
 
         self.loader_dependencies
-            .insert(LoaderDependency::Action(path), (hash, dependency_key));
+            .insert(LoaderDependency::Action(path), hash);
         Ok(loaded_asset)
     }
 

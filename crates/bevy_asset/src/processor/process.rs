@@ -373,7 +373,7 @@ impl<'a> ProcessContext<'a> {
                 true,
             )
             .await?;
-        for (_path, (full_hash, _)) in &loaded_asset.loader_dependencies {
+        for (_path, full_hash) in &loaded_asset.loader_dependencies {
             self.new_processed_info
                 .process_dependencies
                 .push(ProcessDependencyInfo {

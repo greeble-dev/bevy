@@ -1,9 +1,9 @@
 //! XXX TODO
 
 use crate::{
-    basset::{RootAssetPath, RootAssetRef},
+    basset::{dependency_graph::Blake3Wrapper, FullEnvironment, RootAssetPath, RootAssetRef},
     io::{AssetSources, Reader},
-    AsyncWriteExt, LoaderDependency, ReadAssetBytesError,
+    AsyncWriteExt,
 };
 use alloc::{boxed::Box, string::String, string::ToString, sync::Arc, vec::Vec};
 // XXX TODO: Try and replace `async_fs` with `AssetSource`.
@@ -13,20 +13,14 @@ use bevy_platform::{
     collections::HashMap,
     sync::{PoisonError, RwLock},
 };
-use bevy_reflect::{
-    serde::{ReflectDeserializer, ReflectSerializer},
-    Reflect, ReflectDeserialize, ReflectSerialize, TypeRegistryArc,
-};
+use bevy_reflect::{Reflect, ReflectDeserialize, ReflectSerialize, TypeRegistryArc};
 use bevy_tasks::{ConditionalSendFuture, IoTaskPool};
 use core::{
     fmt::{Debug, Display},
     result::Result,
 };
 use core::{hash::Hash, marker::PhantomData};
-use serde::{
-    de::{DeserializeSeed, Visitor},
-    Deserialize, Serialize,
-};
+use serde::{de::Visitor, Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::debug;
 
@@ -458,27 +452,6 @@ impl ContentCache {
         Ok(hash)
     }
 
-    pub(crate) async fn read_asset_bytes(
-        &self,
-        path: &RootAssetPath<'static>,
-        reader: &mut dyn Reader,
-    ) -> Result<(Vec<u8>, ContentHash), ReadAssetBytesError> {
-        let mut bytes = Vec::<u8>::new();
-        reader
-            .read_to_end(&mut bytes)
-            .await
-            .map_err(|source| ReadAssetBytesError::Io {
-                path: path.path().to_path_buf(),
-                source,
-            })?;
-
-        let hash = ContentHash::from_bytes(&bytes);
-
-        self.put(path, hash);
-
-        Ok((bytes, hash))
-    }
-
     fn put(&self, path: &RootAssetPath<'static>, hash: ContentHash) {
         self.path_to_hash
             .write()
@@ -487,152 +460,64 @@ impl ContentCache {
     }
 }
 
-// XXX TODO: Can we avoid reflect? Currently needed by `CacheLoaderDependency`
-// since it indirectly uses an `AssetRef` that requires reflection and also
-// a `DependencyCacheKey`.
-#[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Reflect)]
-pub struct DependencyCacheKey(pub BassetHash);
-
-impl DependencyCacheKey {
-    pub fn as_bytes(&self) -> [u8; 32] {
-        self.0.as_bytes()
-    }
-}
-
-impl Display for DependencyCacheKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl CacheKey for DependencyCacheKey {
-    fn as_hash(&self) -> BassetHash {
-        self.0
-    }
-}
-
-#[derive(Default, Debug, Eq, PartialEq, Reflect)]
-pub(crate) struct DependencyCacheValue {
-    loader_dependees: Vec<CacheLoaderDependency>,
-    // XXX TODO: Reconsider name? These are any `Handle` or `AssetRef` dependencies
-    // stored in the asset value.
-    external_dependees: Vec<RootAssetRef>,
-    // XXX TODO: Consider storing more info for debugging. Loader name for one.
-}
-
-// XXX TODO: Review. This is the same as `LoaderDependency` but with a dependency
-// key. Check if we can avoid duplication or restructure to be nicer. Note that
-// we shouldn't - in theory - ever have a mix of None and Some dependency keys.
-// We should be consistently keying everything or nothing. Check if that's ever true
-// and maybe the dependency key yes/no decision can be moved higher up.
-#[derive(Clone, PartialEq, Eq, Debug, Reflect)]
-pub struct CacheLoaderDependency(pub LoaderDependency, pub DependencyCacheKey);
-
-impl CacheLoaderDependency {
-    pub(crate) fn new(
-        loader_dependency: LoaderDependency,
-        dependency_key: DependencyCacheKey,
-    ) -> Self {
-        Self(loader_dependency, dependency_key)
-    }
-}
-
-impl DependencyCacheValue {
-    pub(crate) fn new(
-        loader_dependees: impl Iterator<Item = CacheLoaderDependency>,
-        external_dependees: impl Iterator<Item = RootAssetRef>,
-    ) -> Self {
-        Self {
-            loader_dependees: loader_dependees.collect(),
-            external_dependees: external_dependees.collect(),
-        }
-    }
-
-    #[expect(unused, reason = "XXX TODO?")]
-    pub(crate) fn empty() -> Self {
-        Self {
-            loader_dependees: Default::default(),
-            external_dependees: Default::default(),
-        }
-    }
-
-    pub(crate) fn loader_dependees<'a>(&'a self) -> &'a [CacheLoaderDependency] {
-        &self.loader_dependees
-    }
-
-    pub(crate) fn external_dependees<'a>(&'a self) -> &'a [RootAssetRef] {
-        &self.external_dependees
-    }
-}
-
-impl FileCacheValue for Arc<DependencyCacheValue> {
-    async fn write(&self, file: &mut File, registry: &TypeRegistryArc) -> Result<(), BevyError> {
-        // XXX TODO: Consider adding more information to the file for debugging and validation. E.g. storing the
-        // original action text.
-        // XXX TODO: Does this file need a version number? Arguably implicit in the hash, but maybe add one for safety.
-        // XXX TODO: Consider non-pretty serialization. Will be annoying for debugging,
-        // but files will be a bit smaller and might be faster to save?
-
-        let string = ron::ser::to_string_pretty(
-            &ReflectSerializer::new(self.as_ref(), &registry.read()),
-            Default::default(),
-        )
-        .map_err(BevyError::from)?;
-
-        file.write_all(string.as_bytes())
-            .await
-            .map_err(BevyError::from)
-    }
-
-    fn read(bytes: Box<[u8]>, registry: &TypeRegistryArc) -> Self {
-        Arc::new(
-            ReflectDeserializer::new(&registry.read())
-                .deserialize(&mut ron::de::Deserializer::from_bytes(&bytes).expect("XXX TODO"))
-                .expect("XXX TODO")
-                .try_take::<DependencyCacheValue>()
-                .expect("XXX TODO"),
-        )
-    }
-}
-
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Reflect)]
 pub struct ActionCacheKey(pub BassetHash);
 
 impl ActionCacheKey {
-    fn as_bytes(&self) -> [u8; 32] {
+    pub fn as_bytes(&self) -> [u8; 32] {
         self.0.as_bytes()
     }
 
-    pub(crate) fn new(
-        dependency_key: DependencyCacheKey,
-        dependee_action_keys: &[ActionCacheKey],
-    ) -> Self {
+    pub(crate) fn from_action(
+        action: &RootAssetRef,
+        env: &FullEnvironment,
+        value_dependee_keys: &[ActionCacheKey],
+    ) -> ActionCacheKey {
+        // XXX TODO: Can we can optimize this by combining environment filtering
+        // with hashing?
+        let filtered_env = env.filter(action.action()).expect("XXX TODO");
+
+        // XXX TODO: Seed hash? Also consider using separate seeds for actions
+        // and files just in case.
+        // XXX TODO: Review choice of `blake3`.
+        let mut hasher = Blake3Wrapper::new();
+
+        Hash::hash(&action, &mut hasher);
+        Hash::hash(action.action().version(), &mut hasher);
+        Hash::hash(&filtered_env, &mut hasher);
+
         // Sort and de-dupe the dependee keys for consistency.
-        let mut sorted_dependee_action_keys = dependee_action_keys.to_vec();
-        sorted_dependee_action_keys.sort_unstable();
-        sorted_dependee_action_keys.dedup();
+        // XXX TODO: Performance review.
+        let mut sorted_value_dependee_keys = value_dependee_keys.to_vec();
+        sorted_value_dependee_keys.sort_unstable();
+        sorted_value_dependee_keys.dedup();
 
-        // XXX TODO: In theory we could make the action key the same as the
-        // dependency key if there's zero dependees.
-        //
-        // Pros:
-        //   - Saves a hash.
-        //   - Can quickly check for leaf from keys alone.
-        // Cons:
-        //   - Probably gonna cause a bug where the wrong key type is used and
-        //     it kinda seems to work.
-
-        // XXX TODO: Should hasher be seeded?
-
-        let mut hasher = blake3::Hasher::new();
-
-        hasher.update(&dependency_key.as_bytes());
-
-        for dependee in sorted_dependee_action_keys {
-            hasher.update(&dependee.as_bytes());
+        for key in sorted_value_dependee_keys {
+            hasher.0.update(&key.as_bytes());
         }
 
-        Self(BassetHash::new(*hasher.finalize().as_bytes()))
+        ActionCacheKey(hasher.finish())
+    }
+
+    // XXX TODO: Review if we should be calling this an action cache key. Files
+    // don't go directly into the cache, so we only use this to get the key for
+    // actual actions (`ActionCacheKey::from_action`).
+    pub(crate) fn from_file(
+        path: &RootAssetPath<'static>,
+        content_hash: ContentHash,
+    ) -> ActionCacheKey {
+        // XXX TODO: Seed hash? Also consider using separate seeds for actions
+        // and files just in case.
+        let mut hasher = Blake3Wrapper::new();
+
+        // XXX TODO: Review if we actually need the path. In which case this
+        // doesn't need to be an `ActionCacheKey` at all and we can just use
+        // the `ContentHash`? See also comment on this function's signature.
+        hasher.0.update(path.to_string().as_bytes());
+
+        hasher.0.update(&content_hash.as_bytes());
+
+        ActionCacheKey(hasher.finish())
     }
 }
 
@@ -782,9 +667,24 @@ mod hex {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::basset::{ActionDependencies, BassetAction, FullEnvironment, ReflectBassetAction};
 
     #[test]
     fn action_cache_key() {
+        #[derive(Default, Debug, PartialEq, Hash, Reflect)]
+        #[reflect(BassetAction, PartialEq, Hash)]
+        struct FakeAction(u32);
+
+        impl BassetAction for FakeAction {
+            fn version(&self) -> &str {
+                ""
+            }
+
+            fn dependencies(&self) -> ActionDependencies {
+                ActionDependencies::Known(Vec::new())
+            }
+        }
+
         fn fake_hash(value: u8) -> BassetHash {
             let mut result = [0u8; 32];
             result[0] = value;
@@ -792,58 +692,66 @@ mod test {
             BassetHash(result)
         }
 
-        let d0 = DependencyCacheKey(fake_hash(1));
-        let d1 = DependencyCacheKey(fake_hash(2));
-        let a0 = ActionCacheKey(fake_hash(3));
-        let a1 = ActionCacheKey(fake_hash(4));
-        let a2 = ActionCacheKey(fake_hash(5));
+        let env = FullEnvironment::default();
+
+        let a0 = RootAssetRef::new(FakeAction(0));
+        let a1 = RootAssetRef::new(FakeAction(1));
+
+        let d0 = ActionCacheKey(fake_hash(0));
+        let d1 = ActionCacheKey(fake_hash(1));
+        let d2 = ActionCacheKey(fake_hash(2));
 
         // Identical.
         assert_eq!(
-            ActionCacheKey::new(d0, &[a0, a1]),
-            ActionCacheKey::new(d0, &[a0, a1])
+            ActionCacheKey::from_action(&a0, &env, &[d0, d1]),
+            ActionCacheKey::from_action(&a0, &env, &[d0, d1])
         );
 
-        // Different dependency key.
+        // Different action, same dependees.
         assert_ne!(
-            ActionCacheKey::new(d0, &[a0, a1]),
-            ActionCacheKey::new(d1, &[a0, a1])
+            ActionCacheKey::from_action(&a0, &env, &[d0, d1]),
+            ActionCacheKey::from_action(&a1, &env, &[d0, d1]),
         );
 
-        // Different dependees.
+        // Same action, different dependees.
         {
             assert_ne!(
-                ActionCacheKey::new(d0, &[a0, a1]),
-                ActionCacheKey::new(d0, &[])
+                ActionCacheKey::from_action(&a0, &env, &[d0, d1]),
+                ActionCacheKey::from_action(&a0, &env, &[d0, d2]),
             );
 
             assert_ne!(
-                ActionCacheKey::new(d0, &[a0, a1]),
-                ActionCacheKey::new(d0, &[a0])
+                ActionCacheKey::from_action(&a0, &env, &[d0, d1]),
+                ActionCacheKey::from_action(&a0, &env, &[]),
             );
 
             assert_ne!(
-                ActionCacheKey::new(d0, &[a0, a1]),
-                ActionCacheKey::new(d0, &[a0, a1, a2])
+                ActionCacheKey::from_action(&a0, &env, &[d0, d1]),
+                ActionCacheKey::from_action(&a0, &env, &[d0]),
+            );
+
+            assert_ne!(
+                ActionCacheKey::from_action(&a0, &env, &[d0, d1]),
+                ActionCacheKey::from_action(&a0, &env, &[d0, d1, d2]),
             );
         }
 
-        // Ordering shouldn't matter.
+        // Dependee ordering shouldn't matter.
         assert_eq!(
-            ActionCacheKey::new(d0, &[a0, a1]),
-            ActionCacheKey::new(d0, &[a1, a0])
+            ActionCacheKey::from_action(&a0, &env, &[d0, d1]),
+            ActionCacheKey::from_action(&a0, &env, &[d1, d0]),
         );
 
-        // Duplication shouldn't matter.
+        // Dependee duplication shouldn't matter.
         {
             assert_eq!(
-                ActionCacheKey::new(d0, &[a0, a1]),
-                ActionCacheKey::new(d0, &[a0, a0, a1])
+                ActionCacheKey::from_action(&a0, &env, &[d0, d1]),
+                ActionCacheKey::from_action(&a0, &env, &[d0, d0, d1]),
             );
 
             assert_eq!(
-                ActionCacheKey::new(d0, &[a0, a1]),
-                ActionCacheKey::new(d0, &[a0, a1, a0, a1])
+                ActionCacheKey::from_action(&a0, &env, &[d0, d1]),
+                ActionCacheKey::from_action(&a0, &env, &[d0, d1, d0, d1]),
             );
         }
     }

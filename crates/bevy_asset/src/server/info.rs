@@ -1,5 +1,4 @@
 use crate::{
-    basset::cache::DependencyCacheKey,
     meta::{AssetHash, MetaTransform},
     Asset, AssetHandleProvider, AssetIndex, AssetLoadError, AssetRef, DependencyLoadState,
     ErasedAssetIndex, ErasedLoadedAsset, Handle, InternalAssetEvent, LoadState, LoaderDependency,
@@ -47,7 +46,7 @@ pub(crate) struct AssetInfo {
     /// [`LoadedAsset`]: crate::loader::LoadedAsset
     // XXX TODO: Do we need the dependency key? Added it to match `ErasedLoadedAsset::loader_dependencies`,
     // but could be dropped?
-    loader_dependencies: HashMap<LoaderDependency, (AssetHash, Option<DependencyCacheKey>)>,
+    loader_dependencies: HashMap<LoaderDependency, AssetHash>,
     /// The number of handle drops to skip for this asset.
     /// See usage (and comments) in `get_or_create_path_handle` for context.
     handle_drops_to_skip: usize,

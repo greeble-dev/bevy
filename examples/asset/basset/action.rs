@@ -66,7 +66,7 @@ impl BassetActionFunction for JoinStringsFunction {
             .reduce(|l, r| l + &action.separator + &r)
             .unwrap_or_else(|| "".to_owned());
 
-        Ok(context.finish(StringAsset(joined)))
+        Ok(context.finish(StringAsset(joined)).await)
     }
 }
 
@@ -104,7 +104,7 @@ impl BassetActionFunction for UppercaseStringFunction {
                 .to_uppercase(),
         );
 
-        Ok(context.finish(string))
+        Ok(context.finish(string).await)
     }
 }
 
@@ -188,7 +188,7 @@ impl BassetActionFunction for MeshletFromMeshFunction {
 
         let meshlet = MeshletMesh::from_mesh(&mesh, action.vertex_position_quantization_factor())?;
 
-        Ok(context.finish(meshlet))
+        Ok(context.finish(meshlet).await)
     }
 }
 
@@ -250,7 +250,7 @@ impl BassetActionFunction for CompressImageFunction {
             uncompressed_size.y.next_power_of_two().max(4),
         );
 
-        let mut resized_asset = if uncompressed_size != compressed_size {
+        let resized_asset = if uncompressed_size != compressed_size {
             resize_image(uncompressed_asset, compressed_size)
         } else {
             uncompressed_asset
@@ -272,8 +272,8 @@ impl BassetActionFunction for CompressImageFunction {
             "bcn" => {
                 context
                     .finish_saved::<CompressedImageSaverCtt>(
-                        &mut resized_asset,
-                        &CompressedImageSaverCtt(CompressedImageSaverCttFormat::Bcn),
+                        resized_asset,
+                        CompressedImageSaverCtt(CompressedImageSaverCttFormat::Bcn),
                         &settings,
                     )
                     .await
@@ -282,8 +282,8 @@ impl BassetActionFunction for CompressImageFunction {
             "astc" => {
                 context
                     .finish_saved::<CompressedImageSaverCtt>(
-                        &mut resized_asset,
-                        &CompressedImageSaverCtt(CompressedImageSaverCttFormat::Astc {
+                        resized_asset,
+                        CompressedImageSaverCtt(CompressedImageSaverCttFormat::Astc {
                             // XXX TODO: Should be configurable? Maybe needs to go in the
                             // environment.
                             block_width: 4,
@@ -297,8 +297,8 @@ impl BassetActionFunction for CompressImageFunction {
             "universal" => {
                 context
                     .finish_saved::<CompressedImageSaverUniversal>(
-                        &mut resized_asset,
-                        &CompressedImageSaverUniversal,
+                        resized_asset,
+                        CompressedImageSaverUniversal,
                         &settings,
                     )
                     .await
@@ -306,12 +306,11 @@ impl BassetActionFunction for CompressImageFunction {
             unrecognized => {
                 // XXX TODO: This reports a misleading error if the format is
                 // recognized but the relevant feature is not enabled.
-                return Err(BevyError::from(format!(
+                Err(BevyError::from(format!(
                     "Unrecognized compressed texture format \"{unrecognized}\"."
-                )));
+                )))
             }
         }
-        .map_err(BevyError::from)
     }
 }
 
@@ -396,7 +395,7 @@ impl BassetActionFunction for ResizeImageFunction {
 
         let resized_image = resize_image(original_image, target_size);
 
-        Ok(context.finish(resized_image))
+        Ok(context.finish(resized_image).await)
     }
 }
 
@@ -549,7 +548,7 @@ impl BassetActionFunction for MeshFromHeightmapFunction {
         .with_inserted_indices(Indices::U32(indices))
         .with_computed_area_weighted_normals();
 
-        Ok(context.finish(mesh))
+        Ok(context.finish(mesh).await)
     }
 }
 
@@ -623,11 +622,13 @@ impl BassetActionFunction for ColorizeHeightmapFunction {
             }
         }
 
-        Ok(context.finish(Image::from_dynamic(
-            output.into(),
-            true,
-            RenderAssetUsages::default(),
-        )))
+        Ok(context
+            .finish(Image::from_dynamic(
+                output.into(),
+                true,
+                RenderAssetUsages::default(),
+            ))
+            .await)
     }
 }
 
@@ -711,7 +712,7 @@ impl BassetActionFunction for OptimizeStandardMaterialFunction {
         optimize_texture(&mut context, action, &mut material.occlusion_texture);
         optimize_texture(&mut context, action, &mut material.depth_map);
 
-        Ok(context.finish(material))
+        Ok(context.finish(material).await)
     }
 }
 
@@ -819,7 +820,7 @@ impl BassetActionFunction for OptimizeSceneFunction {
         let asset =
             DynamicWorld::from_world_with(&scene, &context.asset_server().type_registry().read());
 
-        Ok(context.finish(asset))
+        Ok(context.finish(asset).await)
     }
 }
 

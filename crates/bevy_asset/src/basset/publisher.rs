@@ -32,9 +32,10 @@ use std::{
 };
 use tracing::{debug, error};
 
-// XXX TODO: Document. Currently duplicates `LoaderDependency` - should pick one?
 // XXX TODO: Decide if we use `RootAssetRef` or `AssetRef`. The labels don't matter
-// for publishing, but it might be convenient for the user or help debugging?
+// for publishing, but it might be convenient for the user or to help debugging?
+// XXX TODO: If this continues to use `RootAssetRef` then it's identical to
+// `LoaderDependency`, so can remove?
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum PublishDependency {
     Load(RootAssetRef),

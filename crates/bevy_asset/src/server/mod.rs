@@ -632,7 +632,7 @@ impl AssetServer {
             )
             .await
         {
-            Ok((loaded_asset, _)) => {
+            Ok(loaded_asset) => {
                 let (final_handle, base_asset_id) = if let Some(label) = path.label_cow() {
                     match loaded_asset.label_to_asset_index.get(&label) {
                         Some(labeled_asset) => {
