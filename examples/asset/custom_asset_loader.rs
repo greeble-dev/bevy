@@ -38,7 +38,7 @@ impl AssetLoader for CustomAssetLoader {
     type Error = CustomAssetLoaderError;
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         _settings: &(),
         _load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
@@ -77,7 +77,7 @@ impl AssetLoader for BlobAssetLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         _settings: &(),
         _load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {

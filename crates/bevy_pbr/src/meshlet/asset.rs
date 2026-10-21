@@ -202,18 +202,18 @@ impl AssetLoader for MeshletMeshLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         _settings: &(),
         _load_context: &mut LoadContext<'_>,
     ) -> Result<MeshletMesh, MeshletMeshSaveOrLoadError> {
         // Load and check magic number
-        let magic = async_read_u64(reader).await?;
+        let magic = async_read_u64(&mut reader).await?;
         if magic != MESHLET_MESH_ASSET_MAGIC {
             return Err(MeshletMeshSaveOrLoadError::WrongFileType);
         }
 
         // Load and check asset version
-        let version = async_read_u64(reader).await?;
+        let version = async_read_u64(&mut reader).await?;
         if version != MESHLET_MESH_ASSET_VERSION {
             return Err(MeshletMeshSaveOrLoadError::WrongVersion { found: version });
         }
@@ -226,7 +226,7 @@ impl AssetLoader for MeshletMeshLoader {
         let bvh_depth = u32::from_le_bytes(bytes);
 
         // Load and decompress asset data
-        let reader = &mut FrameDecoder::new(AsyncReadSyncAdapter(reader));
+        let reader = &mut FrameDecoder::new(AsyncReadSyncAdapter(&mut reader));
         let vertex_positions = read_slice(reader)?;
         let vertex_normals = read_slice(reader)?;
         let vertex_uvs = read_slice(reader)?;

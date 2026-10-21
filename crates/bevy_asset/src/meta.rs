@@ -221,7 +221,7 @@ impl Process for () {
 
     async fn process(
         &self,
-        _context: &mut bevy_asset::processor::ProcessContext<'_>,
+        _context: bevy_asset::processor::ProcessContext<'_>,
         _settings: &Self::Settings,
         _writer: &mut bevy_asset::io::Writer,
     ) -> Result<(), bevy_asset::processor::ProcessError> {
@@ -244,7 +244,7 @@ impl AssetLoader for () {
     type Error = std::io::Error;
     async fn load(
         &self,
-        _reader: &mut dyn Reader,
+        _reader: Box<dyn Reader + '_>,
         _settings: &Self::Settings,
         _load_context: &mut crate::LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {

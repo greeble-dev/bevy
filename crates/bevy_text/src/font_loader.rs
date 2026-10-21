@@ -25,7 +25,7 @@ impl AssetLoader for FontLoader {
     type Error = FontLoaderError;
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         _settings: &(),
         _load_context: &mut LoadContext<'_>,
     ) -> Result<Font, Self::Error> {

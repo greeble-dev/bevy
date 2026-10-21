@@ -267,7 +267,7 @@ impl AssetLoader for ShaderLoader {
     type Error = ShaderLoaderError;
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         settings: &Self::Settings,
         load_context: &mut LoadContext<'_>,
     ) -> Result<Shader, Self::Error> {

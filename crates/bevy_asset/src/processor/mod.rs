@@ -1178,13 +1178,13 @@ impl AssetProcessor {
 
             let mut writer = processed_writer.write(path).await.map_err(writer_err)?;
             let mut processed_meta = {
-                let mut context = ProcessContext::new(
+                let context = ProcessContext::new(
                     self,
                     asset_path,
                     reader_for_process,
                     &mut new_processed_info,
                 );
-                let process = processor.process(&mut context, settings, &mut *writer);
+                let process = processor.process(context, settings, &mut *writer);
                 #[cfg(feature = "trace")]
                 let process = {
                     let span = info_span!(

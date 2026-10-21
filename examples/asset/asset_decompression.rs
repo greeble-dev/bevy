@@ -42,7 +42,7 @@ impl AssetLoader for GzAssetLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         _settings: &(),
         load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
@@ -72,11 +72,11 @@ impl AssetLoader for GzAssetLoader {
         // Now that we have decompressed the asset, let's pass it back to the
         // context to continue loading
 
-        let mut reader = VecReader::new(bytes_uncompressed);
+        let reader = VecReader::new(bytes_uncompressed);
 
         let uncompressed = load_context
             .load_builder()
-            .load_untyped_value_from_reader(contained_path, &mut reader)
+            .load_untyped_value_from_reader(contained_path, Box::new(reader))
             .await?;
 
         Ok(GzAsset { uncompressed })

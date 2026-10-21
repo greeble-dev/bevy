@@ -1,4 +1,4 @@
-use alloc::{borrow::Cow, string::String, vec, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, string::String, vec, vec::Vec};
 use bevy_ecs::{
     reflect::AppTypeRegistry,
     world::{FromWorld, World},
@@ -96,15 +96,17 @@ impl AssetLoader for RonLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        reader: Box<dyn Reader + '_>,
         _settings: &Self::Settings,
         load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
-        let mut buffer = vec![];
-        reader
-            .read_to_end(&mut buffer)
-            .await
-            .map_err(Into::<RonDeserializeError>::into)?;
+        // XXX TODO: Clean up and  restore error.
+        // let mut buffer = vec![];
+        // reader
+        //     .read_to_end(&mut buffer)
+        //     .await
+        //     .map_err(Into::<RonDeserializeError>::into)?;
+        let buffer = reader.read_to_vec().await;
         let registry = self.registry.read();
 
         // Create a subasset LoadContext, so that dependencies are tracked on the subasset, and not
@@ -231,7 +233,7 @@ impl<A: Asset + DeserializeOwned> AssetLoader for TypedRonLoader<A> {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         _settings: &Self::Settings,
         _load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {

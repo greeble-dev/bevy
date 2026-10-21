@@ -455,7 +455,7 @@ impl AssetLoader for FakeSceneLoader {
 
     async fn load(
         &self,
-        _reader: &mut dyn bevy_asset::io::Reader,
+        _reader: Box<dyn bevy_asset::io::Reader + '_>,
         _settings: &Self::Settings,
         load_context: &mut bevy_asset::LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {

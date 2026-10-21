@@ -39,7 +39,7 @@ pub trait AssetLoader: TypePath + Send + Sync + 'static {
     /// Asynchronously loads [`AssetLoader::Asset`] (and any other labeled assets) from the bytes provided by [`Reader`].
     fn load(
         &self,
-        reader: &mut dyn Reader,
+        reader: Box<dyn Reader + '_>,
         settings: &Self::Settings,
         load_context: &mut LoadContext,
     ) -> impl ConditionalSendFuture<Output = Result<Self::Asset, Self::Error>>;
@@ -56,7 +56,7 @@ pub trait ErasedAssetLoader: Send + Sync + 'static {
     /// Asynchronously loads the asset(s) from the bytes provided by [`Reader`].
     fn load<'a>(
         &'a self,
-        reader: &'a mut dyn Reader,
+        reader: Box<dyn Reader + 'a>,
         settings: &'a dyn Settings,
         load_context: LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>>;
@@ -84,7 +84,7 @@ where
     /// Processes the asset in an asynchronous closure.
     fn load<'a>(
         &'a self,
-        reader: &'a mut dyn Reader,
+        reader: Box<dyn Reader + 'a>,
         settings: &'a dyn Settings,
         mut load_context: LoadContext<'a>,
     ) -> BoxedFuture<'a, Result<ErasedLoadedAsset, BevyError>> {
@@ -683,7 +683,7 @@ impl<'a> LoadContext<'a> {
         path: AssetPath<'static>,
         settings: &dyn Settings,
         loader: &dyn ErasedAssetLoader,
-        reader: &mut dyn Reader,
+        reader: Box<dyn Reader + '_>,
         processed_info: Option<&ProcessedInfo>,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
         let loaded_asset = self

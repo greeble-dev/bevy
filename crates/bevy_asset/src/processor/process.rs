@@ -37,7 +37,7 @@ pub trait Process: TypePath + Send + Sync + Sized + 'static {
     /// final written processed asset is loadable using [`Process::OutputLoader`]. This load will use the returned [`AssetLoader::Settings`].
     fn process(
         &self,
-        context: &mut ProcessContext,
+        context: ProcessContext,
         settings: &Self::Settings,
         writer: &mut Writer,
     ) -> impl ConditionalSendFuture<
@@ -193,10 +193,11 @@ where
 
     async fn process(
         &self,
-        context: &mut ProcessContext<'_>,
+        context: ProcessContext<'_>,
         settings: &Self::Settings,
         writer: &mut Writer,
     ) -> Result<<Self::OutputLoader as AssetLoader>::Settings, ProcessError> {
+        let path = context.path.clone();
         let pre_transformed_asset = TransformedAsset::from_loaded(
             context
                 .load_source_asset::<Loader>(&settings.loader_settings)
@@ -214,12 +215,7 @@ where
 
         let output_settings = self
             .saver
-            .save(
-                writer,
-                saved_asset,
-                &settings.saver_settings,
-                context.path.clone(),
-            )
+            .save(writer, saved_asset, &settings.saver_settings, path)
             .await
             .map_err(|error| ProcessError::AssetSaveError(error.into()))?;
         Ok(output_settings)
@@ -232,7 +228,7 @@ pub trait ErasedProcessor: Send + Sync {
     /// Type-erased variant of [`Process::process`].
     fn process<'a>(
         &'a self,
-        context: &'a mut ProcessContext,
+        context: ProcessContext<'a>,
         settings: &'a dyn Settings,
         writer: &'a mut Writer,
     ) -> BoxedFuture<'a, Result<Box<dyn AssetMetaDyn>, ProcessError>>;
@@ -258,7 +254,7 @@ pub enum MetaTypePathKind {
 impl<P: Process> ErasedProcessor for P {
     fn process<'a>(
         &'a self,
-        context: &'a mut ProcessContext,
+        context: ProcessContext<'a>,
         settings: &'a dyn Settings,
         writer: &'a mut Writer,
     ) -> BoxedFuture<'a, Result<Box<dyn AssetMetaDyn>, ProcessError>> {
@@ -345,24 +341,25 @@ impl<'a> ProcessContext<'a> {
     /// register them as "process dependencies" because they are asset values required to process the
     /// current asset.
     pub async fn load_source_asset<L: AssetLoader>(
-        &mut self,
+        self,
         settings: &L::Settings,
     ) -> Result<LoadedAsset<L::Asset>, AssetLoadError> {
         let server = &self.processor.server;
         let loader_name = L::type_path();
         let loader = server.get_asset_loader_with_type_name(loader_name).await?;
+        let new_processed_info = self.new_processed_info;
         let loaded_asset = server
             .load_with_settings_loader_and_reader(
                 self.path,
                 settings,
                 &*loader,
-                &mut self.reader,
+                self.reader,
                 false,
                 true,
             )
             .await?;
         for (path, full_hash) in &loaded_asset.loader_dependencies {
-            self.new_processed_info
+            new_processed_info
                 .process_dependencies
                 .push(ProcessDependencyInfo {
                     full_hash: *full_hash,

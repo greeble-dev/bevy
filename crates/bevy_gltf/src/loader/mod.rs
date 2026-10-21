@@ -1269,12 +1269,14 @@ impl AssetLoader for GltfLoader {
     type Error = GltfError;
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        reader: Box<dyn Reader + '_>,
         settings: &GltfLoaderSettings,
         load_context: &mut LoadContext<'_>,
     ) -> Result<Gltf, Self::Error> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).await?;
+        // XXX TODO: Clean up and  restore error.
+        // let mut bytes = Vec::new();
+        // reader.read_to_end(&mut bytes).await?;
+        let bytes = reader.read_to_vec().await;
 
         Self::load_gltf(self, &bytes, load_context, settings).await
     }
@@ -2880,7 +2882,7 @@ mod test {
 
             async fn load(
                 &self,
-                _reader: &mut dyn bevy_asset::io::Reader,
+                _reader: Box<dyn bevy_asset::io::Reader + '_>,
                 _settings: &Self::Settings,
                 _load_context: &mut LoadContext<'_>,
             ) -> Result<Self::Asset, Self::Error> {

@@ -548,7 +548,7 @@ impl AssetServer {
 
         let path = path.into_owned();
         let path_clone = path.clone();
-        let (mut meta, loader, mut reader) = self
+        let (mut meta, loader, reader) = self
             .get_meta_loader_and_reader(&path_clone, input_handle_type_id)
             .await
             .inspect_err(|e| {
@@ -691,7 +691,7 @@ impl AssetServer {
                 &base_path,
                 meta.loader_settings().expect("meta is set to Load"),
                 &*loader,
-                &mut *reader,
+                reader,
                 true,
                 false,
             )
@@ -1483,7 +1483,7 @@ impl AssetServer {
         asset_path: &AssetPath<'_>,
         settings: &dyn Settings,
         loader: &dyn ErasedAssetLoader,
-        reader: &mut dyn Reader,
+        reader: Box<dyn Reader + '_>,
         load_dependencies: bool,
         populate_hashes: bool,
     ) -> Result<ErasedLoadedAsset, AssetLoadError> {

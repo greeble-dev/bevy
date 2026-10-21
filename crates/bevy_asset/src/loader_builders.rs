@@ -13,21 +13,6 @@ use core::any::{type_name, TypeId};
 use std::path::Path;
 use tracing::error;
 
-// Utility type for handling the sources of reader references
-enum ReaderRef<'a> {
-    Borrowed(&'a mut dyn Reader),
-    Boxed(Box<dyn Reader + 'a>),
-}
-
-impl ReaderRef<'_> {
-    pub fn as_mut(&mut self) -> &mut dyn Reader {
-        match self {
-            ReaderRef::Borrowed(r) => &mut **r,
-            ReaderRef::Boxed(b) => &mut **b,
-        }
-    }
-}
-
 /// A builder for loading nested assets inside a [`LoadContext`].
 pub struct NestedLoadBuilder<'ctx, 'builder> {
     load_context: &'builder mut LoadContext<'ctx>,
@@ -184,7 +169,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     pub async fn load_value_from_reader<'a, A: Asset>(
         self,
         path: impl Into<AssetPath<'a>>,
-        reader: &'builder mut dyn Reader,
+        reader: Box<dyn Reader>,
     ) -> Result<LoadedAsset<A>, LoadDirectError> {
         self.load_typed_value_internal(path.into().into_owned(), Some(reader))
             .await
@@ -199,7 +184,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
         self,
         type_id: TypeId,
         path: impl Into<AssetPath<'a>>,
-        reader: &'builder mut dyn Reader,
+        reader: Box<dyn Reader>,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
         self.load_value_internal(Some(type_id), &path.into().into_owned(), Some(reader))
             .await
@@ -215,7 +200,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     pub async fn load_untyped_value_from_reader<'a>(
         self,
         path: impl Into<AssetPath<'a>>,
-        reader: &'builder mut dyn Reader,
+        reader: Box<dyn Reader>,
     ) -> Result<ErasedLoadedAsset, LoadDirectError> {
         self.load_value_internal(None, &path.into().into_owned(), Some(reader))
             .await
@@ -267,7 +252,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
         self,
         type_id: Option<TypeId>,
         path: &AssetPath<'static>,
-        reader: Option<&'builder mut dyn Reader>,
+        reader: Option<Box<dyn Reader>>,
     ) -> Result<(Arc<dyn ErasedAssetLoader>, ErasedLoadedAsset), LoadDirectError> {
         if path.path() == Path::new("") {
             error!("Attempted to load an asset with an empty path \"{path}\"!");
@@ -281,7 +266,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
             .write_infos()
             .stats
             .started_load_tasks += 1;
-        let (mut meta, loader, mut reader) = if let Some(reader) = reader {
+        let (mut meta, loader, reader) = if let Some(reader) = reader {
             let loader = if let Some(type_id) = type_id {
                 self.load_context
                     .asset_server
@@ -302,7 +287,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                     })?
             };
             let meta = loader.default_meta();
-            (meta, loader, ReaderRef::Borrowed(reader))
+            (meta, loader, reader)
         } else {
             let (meta, loader, reader) = self
                 .load_context
@@ -313,7 +298,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                     dependency: path.clone(),
                     error: Box::new(error),
                 })?;
-            (meta, loader, ReaderRef::Boxed(reader))
+            (meta, loader, reader)
         };
 
         if let Some(meta_transform) = self.meta_transform {
@@ -326,7 +311,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
                 path.clone(),
                 meta.loader_settings().expect("meta corresponds to a load"),
                 &*loader,
-                reader.as_mut(),
+                reader,
                 meta.processed_info().as_ref(),
             )
             .await?;
@@ -338,7 +323,7 @@ impl<'ctx, 'builder> NestedLoadBuilder<'ctx, 'builder> {
     async fn load_typed_value_internal<A: Asset>(
         self,
         path: AssetPath<'static>,
-        reader: Option<&'builder mut dyn Reader>,
+        reader: Option<Box<dyn Reader>>,
     ) -> Result<LoadedAsset<A>, LoadDirectError> {
         self.load_value_internal(Some(TypeId::of::<A>()), &path, reader)
             .await

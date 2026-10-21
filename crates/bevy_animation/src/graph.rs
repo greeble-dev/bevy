@@ -817,12 +817,14 @@ impl AssetLoader for AnimationGraphAssetLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        reader: Box<dyn Reader + '_>,
         _: &Self::Settings,
         load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).await?;
+        // XXX TODO: Clean up and  restore error.
+        // let mut bytes = Vec::new();
+        // reader.read_to_end(&mut bytes).await?;
+        let bytes = reader.read_to_vec().await;
 
         // Deserialize a `SerializedAnimationGraph` directly, so that we can
         // get the list of the animation clips it refers to and load them.

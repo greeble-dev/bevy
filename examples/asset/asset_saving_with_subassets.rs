@@ -205,7 +205,7 @@ impl AssetLoader for ManyBoxesLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: std::boxed::Box<dyn Reader + '_>,
         _settings: &Self::Settings,
         load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {

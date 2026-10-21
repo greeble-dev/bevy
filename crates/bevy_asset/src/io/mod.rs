@@ -91,6 +91,9 @@ impl From<std::io::Error> for AssetReaderError {
 // a higher maximum necessary.
 pub const STACK_FUTURE_SIZE: usize = 10 * size_of::<&()>();
 
+// XXX TODO: Review. Compiler reported 136 bytes.
+pub const READ_INTO_VEC_STACK_FUTURE_SIZE: usize = 20 * size_of::<&()>();
+
 pub use stackfuture::StackFuture;
 
 /// A type returned from [`AssetReader::read`], which is used to read the contents of a file
@@ -142,7 +145,37 @@ pub trait Reader: AsyncRead + Unpin + Send + Sync {
     /// # };
     /// ```
     fn seekable(&mut self) -> Result<&mut dyn SeekableReader, ReaderNotSeekableError>;
+
+    /// XXX TODO
+    fn read_to_vec<'a>(
+        mut self: Box<Self>,
+    ) -> StackFuture<'a, Vec<u8>, READ_INTO_VEC_STACK_FUTURE_SIZE>
+    where
+        Self: 'a,
+    {
+        StackFuture::from(async move {
+            let mut result = Vec::new();
+            self.as_mut()
+                .read_to_end(&mut result)
+                .await
+                .expect("XXX TODO");
+            result
+        })
+        // XXX TODO: Attempting to bring down closure size, but it needs Self
+        // to be Sized for some reason?
+        // StackFuture::from(async move {
+        //     let mut result = Vec::new();
+        //     read_to_vec_internal(self.as_mut(), &mut result).await;
+        //     result
+        // })
+    }
 }
+
+// XXX TODO: Review if needed. Also check after restoring errors.
+// #[inline(never)]
+// async fn read_to_vec_internal(reader: &mut dyn Reader, vec: &mut Vec<u8>) {
+//     reader.read_to_end(vec).await.expect("XXX TODO");
+// }
 
 /// A [`Reader`] that also has [`AsyncSeek`] functionality.
 /// See [`Reader::seekable`] for details.
@@ -657,6 +690,13 @@ impl Reader for VecReader {
 
     fn seekable(&mut self) -> Result<&mut dyn SeekableReader, ReaderNotSeekableError> {
         Ok(self)
+    }
+
+    fn read_to_vec<'a>(self: Box<Self>) -> StackFuture<'a, Vec<u8>, READ_INTO_VEC_STACK_FUTURE_SIZE>
+    where
+        Self: 'a,
+    {
+        StackFuture::from(async move { self.bytes })
     }
 }
 

@@ -203,7 +203,7 @@ impl AssetLoader for ImageLoader {
     type Error = ImageLoaderError;
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         settings: &ImageLoaderSettings,
         load_context: &mut LoadContext<'_>,
     ) -> Result<Image, Self::Error> {

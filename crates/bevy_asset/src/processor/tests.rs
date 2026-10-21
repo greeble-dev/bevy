@@ -51,7 +51,7 @@ impl<T: TypePath + 'static> Process for MyProcessor<T> {
 
     async fn process(
         &self,
-        _context: &mut ProcessContext<'_>,
+        _context: ProcessContext<'_>,
         _settings: &Self::Settings,
         _writer: &mut crate::io::Writer,
     ) -> Result<(), ProcessError> {
@@ -689,7 +689,7 @@ impl AssetLoader for FakeGltfLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         _settings: &Self::Settings,
         _load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
@@ -726,7 +726,7 @@ impl AssetLoader for FakeBsnLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         _settings: &Self::Settings,
         load_context: &mut LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
@@ -918,7 +918,7 @@ fn asset_processor_loading_can_read_source_assets() {
 
         async fn load(
             &self,
-            reader: &mut dyn Reader,
+            mut reader: Box<dyn Reader + '_>,
             _settings: &Self::Settings,
             load_context: &mut LoadContext<'_>,
         ) -> Result<Self::Asset, Self::Error> {
@@ -1234,7 +1234,7 @@ fn nested_loads_of_processed_asset_reprocesses_on_reload() {
 
         async fn load(
             &self,
-            reader: &mut dyn Reader,
+            mut reader: Box<dyn Reader + '_>,
             _settings: &Self::Settings,
             load_context: &mut LoadContext<'_>,
         ) -> Result<Self::Asset, Self::Error> {

@@ -809,12 +809,14 @@ mod tests {
 
         async fn load(
             &self,
-            reader: &mut dyn Reader,
+            reader: Box<dyn Reader + '_>,
             _settings: &Self::Settings,
             load_context: &mut LoadContext<'_>,
         ) -> Result<Self::Asset, Self::Error> {
-            let mut bytes = Vec::new();
-            reader.read_to_end(&mut bytes).await?;
+            // XXX TODO: Clean up and  restore error.
+            // let mut bytes = Vec::new();
+            // Reader::read_to_end(&mut reader, &mut bytes).await?;
+            let _bytes = reader.read_to_vec().await;
             Ok(UntypedDependent {
                 dependency: load_context.load_builder().load_untyped("../a.cool.ron"),
             })
@@ -855,12 +857,14 @@ mod tests {
 
         async fn load(
             &self,
-            reader: &mut dyn Reader,
+            reader: Box<dyn Reader + '_>,
             _settings: &Self::Settings,
             load_context: &mut LoadContext<'_>,
         ) -> Result<Self::Asset, Self::Error> {
-            let mut bytes = Vec::new();
-            reader.read_to_end(&mut bytes).await?;
+            // XXX TODO: Clean up and  restore error.
+            // let mut bytes = Vec::new();
+            // Reader::read_to_end(&mut reader, &mut bytes).await?;
+            let bytes = reader.read_to_vec().await;
             let mut ron: CoolTextRon = ron::de::from_bytes(&bytes)?;
             let mut embedded = String::new();
             for dep in ron.embedded_dependencies {
@@ -2052,7 +2056,7 @@ mod tests {
 
             async fn load(
                 &self,
-                _: &mut dyn Reader,
+                _: Box<dyn Reader + '_>,
                 _: &Self::Settings,
                 load_context: &mut LoadContext<'_>,
             ) -> Result<Self::Asset, Self::Error> {
@@ -2427,7 +2431,7 @@ mod tests {
 
         async fn load(
             &self,
-            _reader: &mut dyn Reader,
+            _reader: Box<dyn Reader + '_>,
             _settings: &Self::Settings,
             _load_context: &mut LoadContext<'_>,
         ) -> Result<Self::Asset, Self::Error> {
@@ -2773,7 +2777,7 @@ mod tests {
 
         async fn load(
             &self,
-            _: &mut dyn Reader,
+            _: Box<dyn Reader + '_>,
             settings: &Self::Settings,
             _: &mut LoadContext<'_>,
         ) -> Result<Self::Asset, Self::Error> {
@@ -2857,7 +2861,7 @@ mod tests {
 
             async fn load(
                 &self,
-                _reader: &mut dyn Reader,
+                _reader: Box<dyn Reader + '_>,
                 _settings: &Self::Settings,
                 load_context: &mut LoadContext<'_>,
             ) -> Result<Self::Asset, Self::Error> {
@@ -2898,7 +2902,7 @@ mod tests {
 
         async fn load(
             &self,
-            _reader: &mut dyn Reader,
+            _reader: Box<dyn Reader + '_>,
             _settings: &Self::Settings,
             _load_context: &mut LoadContext<'_>,
         ) -> Result<Self::Asset, Self::Error> {
@@ -2977,7 +2981,7 @@ mod tests {
 
             async fn load(
                 &self,
-                reader: &mut dyn Reader,
+                mut reader: Box<dyn Reader + '_>,
                 _: &Self::Settings,
                 load_context: &mut LoadContext<'_>,
             ) -> Result<Self::Asset, Self::Error> {
@@ -3005,7 +3009,7 @@ mod tests {
 
             async fn load(
                 &self,
-                reader: &mut dyn Reader,
+                mut reader: Box<dyn Reader + '_>,
                 _: &Self::Settings,
                 load_context: &mut LoadContext<'_>,
             ) -> Result<Self::Asset, Self::Error> {
@@ -3130,7 +3134,7 @@ mod tests {
 
             async fn load(
                 &self,
-                _reader: &mut dyn Reader,
+                _reader: Box<dyn Reader + '_>,
                 _settings: &Self::Settings,
                 load_context: &mut LoadContext<'_>,
             ) -> Result<Self::Asset, Self::Error> {

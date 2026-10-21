@@ -83,7 +83,7 @@ impl AssetLoader for TextLoader {
     type Error = std::io::Error;
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         settings: &TextSettings,
         _load_context: &mut LoadContext<'_>,
     ) -> Result<Text, Self::Error> {
@@ -140,7 +140,7 @@ impl AssetLoader for CoolTextLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn Reader,
+        mut reader: Box<dyn Reader + '_>,
         _settings: &Self::Settings,
         load_context: &mut LoadContext<'_>,
     ) -> Result<CoolText, Self::Error> {
