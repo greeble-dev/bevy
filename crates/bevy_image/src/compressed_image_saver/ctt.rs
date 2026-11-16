@@ -14,7 +14,10 @@ use super::{
     ctt_helpers::{bevy_to_ctt_alpha_mode, choose_ctt_compressed_format, ctt_format},
     CompressedImageSaverError, CompressedImageSaverSettings,
 };
-use crate::{Image, ImageFormat, ImageFormatSetting, ImageLoader, ImageLoaderSettings};
+use crate::{
+    compressed_image_saver::ctt_helpers::astc_block, Image, ImageFormat, ImageFormatSetting,
+    ImageLoader, ImageLoaderSettings,
+};
 
 /// XXX TODO: Document.
 #[derive(Copy, Clone, Serialize, Deserialize)]
@@ -82,7 +85,7 @@ impl AssetSaver for CompressedImageSaverCtt {
             image.texture_descriptor.format,
             color_space,
             settings.is_normal_map,
-            self.0,
+            astc_block(self.0)?,
         )?;
 
         let is_cubemap = matches!(

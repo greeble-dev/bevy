@@ -117,10 +117,8 @@ pub fn choose_ctt_compressed_format(
     input: TextureFormat,
     color_space: ColorSpace,
     is_normal_map: bool,
-    ctt_format: CompressedImageSaverCttFormat,
+    astc_block: Option<(Format, Format)>,
 ) -> Result<TargetFormat, CompressedImageSaverError> {
-    let astc_block = astc_block(ctt_format)?;
-
     // Normal maps go to a two-channel format (X, Y) regardless of the input's channel count
     if is_normal_map {
         return Ok(match astc_block {
