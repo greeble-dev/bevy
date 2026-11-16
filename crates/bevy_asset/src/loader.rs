@@ -104,9 +104,10 @@ pub trait ErasedAssetLoader: Send + Sync + 'static {
     fn serialize_meta_from_serialized_settings(&self, settings: &[u8]) -> Vec<u8>;
 }
 
-pub(crate) struct ErasedUniAssetLoader<L: AssetLoader>(pub(crate) L);
-
-impl<L: AssetLoader> ErasedAssetLoader for ErasedUniAssetLoader<L> {
+impl<L> ErasedAssetLoader for L
+where
+    L: AssetLoader + Send + Sync,
+{
     /// Processes the asset in an asynchronous closure.
     fn load<'a>(
         &'a self,
@@ -118,7 +119,7 @@ impl<L: AssetLoader> ErasedAssetLoader for ErasedUniAssetLoader<L> {
             let settings = settings
                 .downcast_ref::<L::Settings>()
                 .expect("AssetLoader settings should match the loader type");
-            let asset = <L as AssetLoader>::load(&self.0, reader, settings, &mut load_context)
+            let asset = <L as AssetLoader>::load(self, reader, settings, &mut load_context)
                 .await
                 .map_err(Into::into)?;
             Ok(load_context.finish(asset).into())
@@ -126,7 +127,7 @@ impl<L: AssetLoader> ErasedAssetLoader for ErasedUniAssetLoader<L> {
     }
 
     fn extensions(&self) -> &[&str] {
-        <L as AssetLoader>::extensions(&self.0)
+        <L as AssetLoader>::extensions(self)
     }
 
     fn deserialize_meta(&self, meta: &[u8]) -> Result<Box<dyn AssetMetaDyn>, DeserializeMetaError> {

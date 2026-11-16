@@ -1,7 +1,7 @@
 use crate::{
     loader::{AssetLoader, ErasedAssetLoader},
     path::AssetPath,
-    ErasedPolyAssetLoader, ErasedUniAssetLoader, PolyAssetLoader,
+    ErasedPolyAssetLoader, PolyAssetLoader,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use async_broadcast::RecvError;
@@ -35,7 +35,7 @@ impl AssetLoaders {
         let loader_asset_type = TypeId::of::<L::Asset>();
         let loader_asset_type_name = core::any::type_name::<L::Asset>();
 
-        let loader = Arc::new(ErasedUniAssetLoader(loader));
+        let loader = Arc::new(loader);
 
         let (loader_index, is_new) =
             if let Some(index) = self.type_path_to_preregistered_loader.remove(type_path) {
@@ -47,7 +47,7 @@ impl AssetLoaders {
         if is_new {
             let existing_loaders_for_type_id = self.type_id_to_loaders.get(&loader_asset_type);
             let mut duplicate_extensions = Vec::new();
-            for extension in AssetLoader::extensions(&loader.0) {
+            for extension in AssetLoader::extensions(&*loader) {
                 let list = self
                     .extension_to_loaders
                     .entry((*extension).into())
