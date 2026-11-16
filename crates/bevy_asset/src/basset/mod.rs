@@ -140,6 +140,10 @@ impl<'a> RootAssetPath<'a> {
         self.path.deref()
     }
 
+    pub fn path_cow(&self) -> CowArc<'a, Path> {
+        self.path.clone()
+    }
+
     pub fn into_owned(self) -> RootAssetPath<'static> {
         RootAssetPath {
             source: self.source.into_owned(),
@@ -1681,7 +1685,7 @@ impl ActionSource for DevelopmentActionSource {
 
                         let mut asset_bytes = Vec::new();
                         reader
-                            .read(path.path())
+                            .read(path.path_cow())
                             .await
                             .expect("XXX TODO")
                             .read_to_end(&mut asset_bytes)
@@ -1691,7 +1695,7 @@ impl ActionSource for DevelopmentActionSource {
                         // XXX TODO: Should throw error if the error isn't `NotFound`?
                         // XXX TODO: Review if we actually want to support meta files - see also LoadPathFunction::apply.
                         let meta_bytes =
-                            if let Ok(mut meta_reader) = reader.read_meta(path.path()).await {
+                            if let Ok(mut meta_reader) = reader.read_meta(path.path_cow()).await {
                                 let mut meta_bytes = Vec::new();
                                 meta_reader
                                     .read_to_end(&mut meta_bytes)

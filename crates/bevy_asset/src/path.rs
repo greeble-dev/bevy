@@ -10,7 +10,6 @@ use alloc::{
     string::{String, ToString},
     sync::Arc,
 };
-use atomicow::CowArc;
 use bevy_reflect::{
     serde::{
         DeserializeWithRegistry, ReflectDeserializeWithRegistry, ReflectDeserializer,
@@ -30,6 +29,9 @@ use serde::{
 };
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+// Type-alias so that users don't need to add a dependency on atomicow just to name visible types.
+pub use atomicow::CowArc;
 
 /// Represents a path to an asset in a "virtual filesystem".
 ///
@@ -283,6 +285,12 @@ impl<'a> AssetPath<'a> {
     #[inline]
     pub fn path(&self) -> &Path {
         self.path.deref()
+    }
+
+    /// Gets the path to the asset in the "virtual filesystem".
+    #[inline]
+    pub fn path_cow(&self) -> CowArc<'a, Path> {
+        self.path.clone()
     }
 
     /// Gets the path to the asset in the "virtual filesystem" without a label (if a label is currently set).

@@ -114,12 +114,18 @@ impl Stream for EmptyPathStream {
 }
 
 impl AssetReader for PublishedAssetReader {
-    async fn read<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {
-        self.pack_file.path_asset(&self.source, path)
+    async fn read<'a>(
+        &'a self,
+        path: CowArc<'a, Path>,
+    ) -> Result<impl Reader + 'a, AssetReaderError> {
+        self.pack_file.path_asset(&self.source, &path)
     }
 
-    async fn read_meta<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {
-        self.pack_file.path_meta(&self.source, path)
+    async fn read_meta<'a>(
+        &'a self,
+        path: CowArc<'a, Path>,
+    ) -> Result<impl Reader + 'a, AssetReaderError> {
+        self.pack_file.path_meta(&self.source, &path)
     }
 
     async fn read_directory<'a>(

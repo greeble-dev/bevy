@@ -434,7 +434,7 @@ impl ContentCache {
             .sources
             .get(path.source())?
             .reader()
-            .read(path.path())
+            .read(path.path_cow())
             .await?;
 
         // XXX TODO: Don't read to end if possible, break into chunks.

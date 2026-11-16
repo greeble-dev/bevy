@@ -11,9 +11,7 @@ use ctt::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ctt_helpers::{
-        bevy_to_ctt_alpha_mode, choose_ctt_compressed_format, wgpu_to_ctt_texture_format,
-    },
+    ctt_helpers::{bevy_to_ctt_alpha_mode, choose_ctt_compressed_format, ctt_format},
     CompressedImageSaverError, CompressedImageSaverSettings,
 };
 use crate::{Image, ImageFormat, ImageFormatSetting, ImageLoader, ImageLoaderSettings};
@@ -79,7 +77,7 @@ impl AssetSaver for CompressedImageSaverCtt {
             ColorSpace::Linear
         };
 
-        let input_format = wgpu_to_ctt_texture_format(image.texture_descriptor.format)?;
+        let input_format = ctt_format(image.texture_descriptor.format)?;
         let output_format = choose_ctt_compressed_format(
             image.texture_descriptor.format,
             color_space,

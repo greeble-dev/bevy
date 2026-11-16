@@ -17,9 +17,8 @@ use crate::{
     path::AssetPath,
     Asset, AssetEvent, AssetHandleProvider, AssetId, AssetIndex, AssetLoadFailedEvent,
     AssetMetaCheck, AssetRef, Assets, DeserializeMetaError, ErasedAssetIndex, ErasedLoadedAsset,
-    Handle, LoadContext, LoadedUntypedAsset, PolyAssetLoader, ReadAssetBytesError,
-    UnapprovedPathMode, UntypedAssetId, UntypedAssetLoadFailedEvent, UntypedHandle,
-    VisitAssetDependencies,
+    Handle, LoadContext, LoadedUntypedAsset, PolyAssetLoader, ReadAssetError, UnapprovedPathMode,
+    UntypedAssetId, UntypedAssetLoadFailedEvent, UntypedHandle, VisitAssetDependencies,
 };
 use alloc::{borrow::ToOwned, boxed::Box, vec, vec::Vec};
 use alloc::{
@@ -1397,7 +1396,7 @@ impl AssetServer {
         let mut meta_reader;
 
         let (meta, loader) = if read_meta {
-            match asset_reader.read_meta(asset_path.path()).await {
+            match asset_reader.read_meta(asset_path.path_cow()).await {
                 Ok(new_meta_reader) => {
                     meta_reader = new_meta_reader;
                     let mut meta_bytes = vec![];
@@ -1465,7 +1464,7 @@ impl AssetServer {
             let meta = loader.default_meta();
             (meta, loader)
         };
-        let reader = asset_reader.read(asset_path.path()).await?;
+        let reader = asset_reader.read(asset_path.path_cow()).await?;
         Ok((meta, loader, reader))
     }
 
@@ -2343,7 +2342,7 @@ pub enum AssetLoadError {
     // XXX TODO: Another placeholder until I work out what to do with it. Note
     // that ReadAssetBytesError has a lot of overlap with AssetLoadError, so
     // maybe an `impl Into<AssetLoader> for ReadAssetBytesError` has potential.
-    ReadAssetBytesError(#[from] Arc<ReadAssetBytesError>),
+    ReadAssetBytesError(#[from] Arc<ReadAssetError>),
 }
 
 /// An error that can occur during asset loading.

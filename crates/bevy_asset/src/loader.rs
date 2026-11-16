@@ -14,6 +14,7 @@ use crate::{
 use alloc::{
     boxed::Box,
     string::{String, ToString},
+    vec,
     vec::Vec,
 };
 use atomicow::CowArc;
@@ -906,15 +907,35 @@ impl<'a> LoadContext<'a> {
         self.simple_asset_path.as_ref().unwrap()
     }
 
-    /// Reads the asset at the given path and returns its bytes
+    /// Reads the asset at the given path and returns its bytes.
+    #[deprecated = "Use `LoadContext::read_asset` instead."]
+    #[expect(deprecated, reason = "Deprecated error type for deprecated function")]
     pub async fn read_asset_bytes<'b, 'c>(
         &'b mut self,
         path: impl Into<AssetPath<'c>>,
     ) -> Result<Vec<u8>, ReadAssetBytesError> {
         let path = path.into();
+        let mut reader = self.read_asset(path.clone()).await?;
+        let mut bytes = vec![];
+        reader
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|source| ReadAssetBytesError::Io {
+                path: path.path().to_path_buf(),
+                source,
+            })?;
+        Ok(bytes)
+    }
+
+    /// Reads the asset at the given path and returns its reader.
+    pub async fn read_asset<'b>(
+        &'b mut self,
+        path: impl Into<AssetPath<'b>>,
+    ) -> Result<Box<dyn Reader + 'b>, ReadAssetError> {
+        let path = path.into();
         if path.path() == Path::new("") {
             error!("Attempted to load an asset with an empty path \"{path}\"!");
-            return Err(ReadAssetBytesError::EmptyPath(path.into_owned()));
+            return Err(ReadAssetError::EmptyPath(path.into_owned()));
         }
 
         let source = self.asset_server.get_source(path.source())?;
@@ -922,7 +943,7 @@ impl<'a> LoadContext<'a> {
             AssetServerMode::Unprocessed => source.reader(),
             AssetServerMode::Processed => source.processed_reader()?,
         };
-        let mut reader = asset_reader.read(path.path()).await?;
+        let reader = asset_reader.read(path.path_cow()).await?;
         let hash = if self.populate_hashes {
             // NOTE: ensure meta is read while the asset bytes reader is still active to ensure transactionality
             // See `ProcessorGatedReader` for more info
@@ -931,27 +952,18 @@ impl<'a> LoadContext<'a> {
                 .map_err(DeserializeMetaError::DeserializeMinimal)?;
             let processed_info = minimal
                 .processed_info
-                .ok_or(ReadAssetBytesError::MissingAssetHash)?;
+                .ok_or(ReadAssetError::MissingAssetHash)?;
             processed_info.full_hash
         } else {
             Default::default()
         };
-
-        let mut bytes = Vec::new();
-        reader
-            .read_to_end(&mut bytes)
-            .await
-            .map_err(|source| ReadAssetBytesError::Io {
-                path: path.path().to_path_buf(),
-                source,
-            })?;
 
         self.loader_dependencies.insert(
             LoaderDependency::File(RootAssetPath::without_label(path.clone_owned())),
             hash,
         );
 
-        Ok(bytes)
+        Ok(reader)
     }
 
     /// Returns a handle to an asset of type `A` with the label `label`. This [`LoadContext`] must produce an asset of the
@@ -1077,9 +1089,9 @@ impl<'a> LoadContext<'a> {
     }
 }
 
-/// An error produced when calling [`LoadContext::read_asset_bytes`]
+/// An error produced when calling [`LoadContext::read_asset`]
 #[derive(Error, Debug)]
-pub enum ReadAssetBytesError {
+pub enum ReadAssetError {
     #[error("Attempted to load an asset with an empty path \"{0}\"")]
     EmptyPath(AssetPath<'static>),
     #[error(transparent)]
@@ -1090,12 +1102,21 @@ pub enum ReadAssetBytesError {
     MissingAssetSourceError(#[from] MissingAssetSourceError),
     #[error(transparent)]
     MissingProcessedAssetReaderError(#[from] MissingProcessedAssetReaderError),
+    #[error("The LoadContext for this read_asset call requires hash metadata, but it was not provided. This is likely an internal implementation error.")]
+    MissingAssetHash,
+}
+
+/// An error produced when calling [`LoadContext::read_asset_bytes`]
+#[deprecated = "Use `ReadAssetError` instead."]
+#[derive(Error, Debug)]
+pub enum ReadAssetBytesError {
+    /// Error while trying to get the reader for the asset.
+    #[error(transparent)]
+    ReadAssetError(#[from] ReadAssetError),
     /// Encountered an I/O error while loading an asset.
     #[error("Encountered an io error while loading asset at `{}`: {source}", path.display())]
     Io {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("The LoadContext for this read_asset_bytes call requires hash metadata, but it was not provided. This is likely an internal implementation error.")]
-    MissingAssetHash,
 }
