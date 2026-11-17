@@ -4,10 +4,7 @@ use crate::{
         AssetReaderError, AssetWriterError, MissingAssetWriterError,
         MissingProcessedAssetReaderError, MissingProcessedAssetWriterError, Reader, Writer,
     },
-    meta::{
-        AssetAction, AssetMeta, AssetMetaDyn, ProcessDependencyInfo, ProcessedInfo, Settings,
-        SettingsDowncastRef,
-    },
+    meta::{AssetAction, AssetMeta, AssetMetaDyn, ProcessDependencyInfo, ProcessedInfo, Settings},
     processor::AssetProcessor,
     saver::{AssetSaver, SavedAsset},
     transformer::{AssetTransformer, IdentityAssetTransformer, TransformedAsset},
@@ -288,9 +285,9 @@ impl<P: Process> ErasedProcessor for P {
         writer: &'a mut Writer,
     ) -> BoxedFuture<'a, Result<Box<dyn AssetMetaDyn>, ProcessError>> {
         Box::pin(async move {
-            let settings = settings
+            let settings = (settings as &dyn core::any::Any)
                 .downcast_ref()
-                .map_err(|_| ProcessError::WrongMetaType)?;
+                .ok_or(ProcessError::WrongMetaType)?;
             let loader_settings = <P as Process>::process(self, context, settings, writer).await?;
             let output_meta: Box<dyn AssetMetaDyn> = Box::new(AssetMeta::<
                 <P::OutputLoader as AssetLoader>::Settings,

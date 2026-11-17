@@ -18,6 +18,7 @@ use bevy_reflect::{
     Reflect, ReflectDeserialize, ReflectFromReflect, ReflectSerialize, TypeRegistry,
 };
 use core::{
+    any::Any,
     fmt::{Debug, Display},
     hash::Hash,
     ops::Deref,
@@ -924,7 +925,7 @@ impl SerializeWithRegistry for AssetRef<'_> {
         // XXX TODO: Review. It does make the serialized data nicer, but means
         // we require serialization formats to support `deserialize_any`.
         // See https://serde.rs/impl-deserialize.html.
-        if let Some(action) = self.action.0.downcast_ref::<LoadPath>()
+        if let Some(action) = (&*self.action.0 as &dyn Any).downcast_ref::<LoadPath>()
             && let Some(minimal) = action.minimal()
         {
             let path = minimal.with_optional_label(self.label.clone());

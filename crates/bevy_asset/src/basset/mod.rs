@@ -49,14 +49,13 @@ use bevy_reflect::{
 };
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::{
-    any::{type_name, TypeId},
+    any::{type_name, Any, TypeId},
     fmt::{Debug, Display},
     hash::{Hash, Hasher},
     ops::Deref,
     panic::AssertUnwindSafe,
     result::Result,
 };
-use downcast_rs::{impl_downcast, Downcast};
 use futures_lite::FutureExt;
 use serde::{
     de::{DeserializeSeed, MapAccess, SeqAccess, Visitor},
@@ -280,8 +279,7 @@ impl RootAssetRef {
 
     // XXX TODO: See notes on `AssetRef::try_temporary_path_workaround`.
     pub fn try_temporary_path_workaround(&self) -> Option<AssetPath<'static>> {
-        self.action
-            .0
+        (&*self.action.0 as &dyn Any)
             .downcast_ref::<LoadPath>()
             .map(|load_path| AssetPath::from(load_path.path.clone()))
     }
@@ -305,7 +303,7 @@ impl SerializeWithRegistry for RootAssetRef {
         // XXX TODO: Review. It does make the serialized data nicer, but means
         // we require serialization formats to support `deserialize_any`.
         // See https://serde.rs/impl-deserialize.html.
-        if let Some(action) = self.action.0.downcast_ref::<LoadPath>()
+        if let Some(action) = (&*self.action.0 as &dyn Any).downcast_ref::<LoadPath>()
             && let Some(minimal) = action.minimal()
         {
             minimal.serialize(serializer)
@@ -579,13 +577,8 @@ impl ApplyContext<'_> {
         let path = path.into();
 
         // XXX TODO: Avoid clone? Is only needed for the error case.
-        match self
-            .erased_load_value(path.clone())
-            .await?
-            .value
-            .downcast::<T>()
-        {
-            Ok(result) => Ok(*result),
+        match self.erased_load_value(path.clone()).await?.downcast::<T>() {
+            Ok(result) => Ok(result.take()),
             // XXX TODO: Don't panic.
             Err(original) => panic!(
                 "Should have made type {}, actually made type {}. Path: {path:?}",
@@ -776,7 +769,7 @@ impl<I: Into<LoaderDependency>> FromIterator<I> for ActionDependencies {
 
 // XXX TODO: Review `Debug` bound.
 #[reflect_trait]
-pub trait BassetAction: Downcast + Send + Sync + 'static + Reflect + Debug {
+pub trait BassetAction: Any + Send + Sync + 'static + Reflect + Debug {
     // XXX TODO: Proper error type?
     // XXX TODO: Review where else we should be using this. Currently just used
     // to replace the various places that were checking for empty paths.
@@ -840,9 +833,6 @@ macro_rules! basset_action_version {
     };
 }
 
-// XXX TODO: Review this. Duplicated from `bevy_asset::meta::Settings`.
-impl_downcast!(BassetAction);
-
 // XXX TODO: Document? See bevy_reflect where it does `impl TypePath for dyn Enemy`.
 impl TypePath for dyn BassetAction {
     fn type_path() -> &'static str {
@@ -895,7 +885,7 @@ impl ErasedBassetAction {
     }
 
     fn downcast<'a, T: BassetAction>(&'a self) -> Option<&'a T> {
-        (*self.0).downcast_ref::<T>()
+        (&*self.0 as &dyn Any).downcast_ref::<T>()
     }
 }
 
@@ -1154,9 +1144,7 @@ where
         action: &'a RootAssetRef,
     ) -> BoxedFuture<'a, Result<BassetActionOutput, AssetLoadError>> {
         Box::pin(async move {
-            let typed_action = action
-                .action()
-                .0
+            let typed_action = (&*action.action().0 as &dyn Any)
                 .downcast_ref::<T::Action>()
                 .expect("XXX TODO");
 

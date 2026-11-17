@@ -6,8 +6,6 @@
 //! Asset metadata is generally stored as a `.meta` file next to the asset,
 //! but this may differ per asset storage backend.
 
-use core::any::{type_name, Any};
-
 use alloc::{
     boxed::Box,
     string::{String, ToString},
@@ -22,7 +20,7 @@ use crate::{
     processor::Process,
     Asset, AssetPath, DeserializeMetaError, VisitAssetDependencies,
 };
-use downcast_rs::{impl_downcast, Downcast};
+use core::any::{type_name, Any};
 use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
 
@@ -154,7 +152,7 @@ pub struct ProcessedInfoMinimal {
 
 /// A dynamic type-erased counterpart to [`AssetMeta`] that enables passing around and interacting with [`AssetMeta`] without knowing
 /// its type.
-pub trait AssetMetaDyn: Downcast + Send + Sync {
+pub trait AssetMetaDyn: Send + Sync {
     /// Returns a reference to the [`AssetLoader`] settings, if they exist.
     fn loader_settings(&self) -> Option<&dyn Settings>;
     /// Returns a mutable reference to the [`AssetLoader`] settings, if they exist.
@@ -212,8 +210,6 @@ where
     }
 }
 
-impl_downcast!(AssetMetaDyn);
-
 #[derive(Copy, Clone, Debug)]
 pub struct SettingsDowncastError {
     pub expected: &'static str,
@@ -226,7 +222,7 @@ pub struct SettingsDowncastError {
 // XXX TODO: Rename to `SettingsDowncast`?
 pub trait SettingsDowncastRef {
     // XXX TODO: Consider renaming to `settings_downcast_ref` so it can't be
-    // confused with `Any_downcast_ref`.
+    // confused with `Any::downcast_ref`.
     fn downcast_ref<T: Settings>(&self) -> Result<&T, SettingsDowncastError>;
 }
 

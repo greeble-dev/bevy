@@ -256,7 +256,7 @@ impl<A: Asset + Reflect + FromReflect> CreateTypeData<A> for ReflectAsset {
                 Box::new(value)
             },
             container_as_partial_reflect: |value| {
-                value
+                (value as &dyn Any)
                     .downcast_ref::<A>()
                     .map(|value| value as &dyn PartialReflect)
             },
