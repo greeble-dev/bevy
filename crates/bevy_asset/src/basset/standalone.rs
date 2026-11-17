@@ -136,8 +136,6 @@ pub(crate) async fn load_standalone_asset(
 
     let mut reader = SliceReader::new(&data.asset_bytes);
 
-    let populate_hashes = false;
-
     internal_load_with_settings_loader_and_reader(
         asset_server,
         path.clone(),
@@ -145,7 +143,6 @@ pub(crate) async fn load_standalone_asset(
         &*loader,
         &mut reader,
         dependency_loading,
-        populate_hashes,
     )
     .await
 }

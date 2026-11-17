@@ -226,6 +226,9 @@ impl<'a> ReadablePackFile {
         self.storage.read(location.asset)
     }
 
+    // XXX TODO: Review decision to look up actions by string - alternative is
+    // to deserialize to `BassetAction` when loading the pack file. Consider
+    // correctness (is string comparison safe?) and performance.
     pub(crate) fn action(&'a self, action: &str) -> Result<MetaAndAssetReader, AssetReaderError> {
         debug!("Read action: {action:?}");
 

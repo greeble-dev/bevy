@@ -6,8 +6,8 @@ use crate::{
         cache::{ActionCacheKey, MemoryAndFileCache},
         dependency_graph::DependencyGraph,
         publisher::{
-            write_pack_file, PublishDependency, PublishInput, ReadablePackFile, StagedAsset,
-            WritablePackFile,
+            write_pack_file, MetaAndAssetReader, PublishDependency, PublishInput, ReadablePackFile,
+            StagedAsset, WritablePackFile,
         },
         standalone::{
             load_standalone_asset, read_standalone_asset, save_standalone_asset,
@@ -743,6 +743,7 @@ fn load_dependencies(
     });
 }
 
+/// XXX TODO: Document.
 pub enum ActionDependencies {
     // XXX TODO: Performance review. Could return references but that might
     // be too restrictive.
@@ -2023,70 +2024,79 @@ impl ActionSource for PublishedActionSource {
             // Early out if we've got a load path action. They're guaranteed to
             // not be published - only the file they're loading and the loader
             // dependencies are published.
-            if let Some(load_path_action) =
+            //
+            // XXX TODO: Review decision to special case load path actions.
+            // If we support more actions in published mode then it could be
+            // made generic.
+            if let Some(from_load_path_action) =
                 try_load_path_action(action, asset_server, dependency_loading, &self.env).await?
             {
-                return Ok(load_path_action);
+                Ok(from_load_path_action)
+            } else if let Ok(readers) = self.pack_file.action(
+                // XXX TODO: Review if we should be treating these strings as
+                // reliable paths. Maybe want a distinct type for safety at least?
+                &action.to_string(),
+            ) {
+                load_from_pack_file(action, asset_server, dependency_loading, readers).await
+            } else {
+                Err(AssetReaderError::NotFound(action.to_string().into()).into())
             }
-
-            // XXX TODO: Review if we should be treating these strings as
-            // reliable paths. Maybe want a distinct type for safety at least?
-            let action_string = action.to_string();
-
-            // XXX TODO: The below duplicates a fair amount of `read_standalone_asset`.
-            // Refactor?
-
-            let Ok(mut readers) = self.pack_file.action(&action_string) else {
-                return Err(AssetReaderError::NotFound(action.to_string().into()).into());
-            };
-
-            let Some(mut meta_reader) = readers.meta else {
-                // XXX TODO: Review this. Maybe consider having separate storage
-                // for actions so it's clear that a meta is required. Also a
-                // possibility that we don't need the full meta for actions,
-                // just the loader name?
-                return Err(AssetLoadError::TodoError(Arc::new(
-                    "Actions require a meta. XXX TODO: Improve".into(),
-                )));
-            };
-
-            let mut meta_bytes = Vec::<u8>::new();
-            meta_reader
-                .read_to_end(&mut meta_bytes)
-                .await
-                .map_err(AssetReaderError::from)?;
-
-            let minimal_meta =
-                ron::de::from_bytes::<AssetMetaMinimal>(&meta_bytes).expect("XXX TODO");
-
-            let loader_name = match &minimal_meta.asset {
-                AssetActionMinimal::Load { loader } => loader.as_str(),
-                _ => todo!("XXX TODO"),
-            };
-
-            let loader = asset_server
-                .get_asset_loader_with_type_name(loader_name)
-                .await
-                .expect("XXX TODO");
-
-            let meta = loader.deserialize_meta(&meta_bytes).expect("XXX TODO");
-
-            let populate_hashes = false;
-
-            internal_load_with_settings_loader_and_reader(
-                asset_server,
-                action.clone(),
-                meta.loader_settings().expect("XXX TODO"),
-                &*loader,
-                &mut readers.asset,
-                dependency_loading,
-                populate_hashes,
-            )
-            .await
         })
     }
 }
 
+// XXX TODO: Where should this go? Don't like putting it in `ReadablePackFile`,
+// so maybe this standalone function is fine.
+async fn load_from_pack_file(
+    action: &RootAssetRef,
+    asset_server: &AssetServer,
+    dependency_loading: DependencyLoading,
+    mut readers: MetaAndAssetReader,
+) -> Result<ErasedLoadedAsset, AssetLoadError> {
+    // XXX TODO: Review this logic. Maybe consider having separate storage
+    // for actions so it's clear that a meta is required. Also a
+    // possibility that we don't need the full meta for actions,
+    // just the loader name?
+    let Some(mut meta_reader) = readers.meta else {
+        return Err(AssetLoadError::TodoError(Arc::new(
+            "Actions require a meta. XXX TODO: Improve".into(),
+        )));
+    };
+
+    let mut meta_bytes = Vec::<u8>::new();
+    meta_reader
+        .read_to_end(&mut meta_bytes)
+        .await
+        .map_err(AssetReaderError::from)?;
+
+    let minimal_meta = ron::de::from_bytes::<AssetMetaMinimal>(&meta_bytes).expect("XXX TODO");
+
+    let loader_name = match &minimal_meta.asset {
+        AssetActionMinimal::Load { loader } => loader.as_str(),
+        _ => todo!("XXX TODO"),
+    };
+
+    // XXX TODO: The code to find the loader is duplicated in
+    // `load_standalone_asset`. Refactor?
+    let loader = asset_server
+        .get_asset_loader_with_type_name(loader_name)
+        .await
+        .expect("XXX TODO");
+
+    let meta = loader.deserialize_meta(&meta_bytes).expect("XXX TODO");
+
+    internal_load_with_settings_loader_and_reader(
+        asset_server,
+        action.clone(),
+        meta.loader_settings().expect("XXX TODO"),
+        &*loader,
+        &mut readers.asset,
+        dependency_loading,
+    )
+    .await
+}
+
+// XXX TODO: Review where this is used and what could be refactored.
 pub(crate) async fn internal_load_with_settings_loader_and_reader(
     asset_server: &AssetServer,
     // XXX TODO: Maybe should be by ref?
@@ -2095,8 +2105,10 @@ pub(crate) async fn internal_load_with_settings_loader_and_reader(
     loader: &dyn ErasedAssetLoader,
     reader: &mut dyn Reader,
     dependency_loading: DependencyLoading,
-    populate_hashes: bool,
 ) -> Result<ErasedLoadedAsset, AssetLoadError> {
+    // XXX TODO: Review.
+    let populate_hashes = false;
+
     let load_context = LoadContext::new(
         asset_server,
         asset_path.clone(),
@@ -2256,7 +2268,6 @@ pub mod action {
                 &*loader,
                 &mut reader,
                 context.dependency_loading(),
-                false,
             )
             .await?;
 
